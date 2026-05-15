@@ -1,0 +1,27 @@
+# Large external dependencies
+ClearerVoice-Studio-main/
+checkpoints/
+mkvtoolnix/
+QuickCut/
+video/
+
+# Generated data and external tools
+anime-pipeline/data/
+anime-pipeline/tools/
+anime-pipeline/checkpoints/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Claude
+.claude/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

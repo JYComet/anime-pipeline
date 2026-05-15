@@ -1,0 +1,2055 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>动漫 Pipeline - 动漫资源下载与分割工具</title>
+<style>
+:root {
+  --bg: #1a1a2e;
+  --bg2: #16213e;
+  --bg3: #0f3460;
+  --accent: #e94560;
+  --accent2: #533483;
+  --text: #eaeaea;
+  --text2: #a0a0b0;
+  --border: #2a2a4a;
+  --success: #4ecca3;
+  --warning: #f0a500;
+  --danger: #e94560;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+header {
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  padding: 16px 24px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  position: sticky; top: 0; z-index: 100;
+}
+header h1 { font-size: 1.4em; }
+header h1 span { color: var(--accent); }
+nav { display: flex; gap: 4px; }
+nav button {
+  background: none; border: none; color: var(--text2);
+  padding: 8px 16px; cursor: pointer; border-radius: 6px;
+  font-size: 14px; transition: .2s;
+}
+nav button:hover { background: var(--bg3); color: var(--text); }
+nav button.active { background: var(--accent); color: #fff; }
+
+main { max-width: 1400px; margin: 0 auto; padding: 24px; }
+
+.tab { display: none; }
+.tab.active { display: block; }
+
+.search-bar { display: flex; gap: 8px; margin-bottom: 16px; }
+.search-bar input {
+  flex: 1; padding: 10px 16px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg2); color: var(--text);
+  font-size: 15px;
+}
+.search-bar input:focus { outline: none; border-color: var(--accent); }
+.search-bar button {
+  padding: 10px 20px; border-radius: 8px; border: none;
+  background: var(--accent); color: #fff; cursor: pointer; font-size: 15px;
+}
+.search-bar button:hover { opacity: 0.9; }
+.filters { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.filters select, .filters input {
+  padding: 6px 12px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--bg2); color: var(--text);
+  font-size: 13px; min-width: 120px;
+}
+
+.results-grid { display: grid; gap: 8px; }
+.result-card {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px 16px;
+  display: flex; gap: 12px; align-items: flex-start;
+}
+.result-card:hover { border-color: var(--accent2); }
+.result-info { flex: 1; min-width: 0; }
+.result-title {
+  font-size: 14px; line-height: 1.5; margin-bottom: 4px;
+  word-break: break-all;
+}
+.result-meta {
+  font-size: 12px; color: var(--text2);
+  display: flex; gap: 12px; flex-wrap: wrap;
+}
+.result-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.btn {
+  padding: 6px 14px; border: none; border-radius: 6px;
+  cursor: pointer; font-size: 13px; transition: .2s; white-space: nowrap;
+}
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-secondary { background: var(--bg3); color: var(--text); }
+.btn-success { background: var(--success); color: #000; }
+.btn:hover { opacity: 0.85; transform: translateY(-1px); }
+
+.job-card {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 16px; margin-bottom: 8px;
+}
+.job-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.job-title { font-size: 15px; font-weight: 600; }
+.job-status { font-size: 12px; padding: 3px 8px; border-radius: 12px; }
+.status-pending { background: var(--border); color: var(--text2); }
+.status-running { background: #0f3460; color: #4a9eff; }
+.status-completed { background: #1a3a2a; color: var(--success); }
+.status-failed { background: #3a1a1a; color: var(--danger); }
+.status-download_submitted { background: #0f3460; color: #4a9eff; }
+.status-queued { background: #3a2a0a; color: var(--warning); }
+.status-cancelled { background: #3a1a1a; color: var(--danger); }
+.status-cancelled { background: #3a3a1a; color: var(--warning); }
+
+.progress-bar {
+  height: 6px; background: var(--border); border-radius: 3px; margin: 8px 0; overflow: hidden;
+}
+.progress-fill { height: 100%; background: var(--accent); transition: .3s; border-radius: 3px; }
+.step-list { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.step-item {
+  font-size: 12px; padding: 4px 10px; border-radius: 4px;
+  background: var(--border); color: var(--text2);
+}
+.step-item.completed { background: #1a3a2a; color: var(--success); }
+.step-item.failed { background: #3a1a1a; color: var(--danger); }
+.step-item.running { background: #0f3460; color: #4a9eff; }
+
+/* Denoise step dots */
+.step-dot {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 50%;
+  font-size: 10px; font-weight: 700; flex-shrink: 0;
+  background: #2a2a3a; color: #666;
+  transition: all 0.3s;
+}
+.step-dot.legend-dot { width: 20px; height: 20px; font-size: 11px; }
+.step-dot.running { background: #0f3460; color: #4a9eff; }
+.step-dot.passed { background: #0a2e1a; color: #2ecc71; }
+.step-dot.discarded { background: #3a1010; color: #e74c3c; }
+.step-dot.error { background: #3a1010; color: #e74c3c; }
+
+.denoise-file-card {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 14px; margin-bottom: 6px;
+}
+.denoise-file-card.running { border-color: #4a9eff; }
+.denoise-file-card.completed { border-color: #2ecc71; }
+.denoise-file-card.discarded { border-color: #e74c3c; opacity: 0.75; }
+.denoise-file-card.error { border-color: #e74c3c; }
+
+.file-list { max-height: 400px; overflow-y: auto; }
+.file-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; border-bottom: 1px solid var(--border);
+}
+.file-item:hover { background: var(--bg2); }
+.file-item.playing { background: var(--accent2); border-left: 3px solid var(--accent); }
+.file-name { flex: 1; font-size: 14px; }
+.file-size { font-size: 12px; color: var(--text2); }
+.file-actions { display: flex; gap: 6px; }
+
+.results-section { margin-bottom: 24px; }
+.results-section h3 { font-size: 16px; margin-bottom: 8px; color: var(--accent); }
+.clip-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }
+
+.toast-container { position: fixed; top: 16px; right: 16px; z-index: 1000; display: flex; flex-direction: column; gap: 8px; }
+.toast {
+  padding: 12px 20px; border-radius: 8px; font-size: 14px;
+  animation: slideIn .3s ease; max-width: 400px;
+}
+.toast-info { background: var(--bg3); border: 1px solid #4a9eff; }
+.toast-success { background: #1a3a2a; border: 1px solid var(--success); }
+.toast-error { background: #3a1a1a; border: 1px solid var(--danger); }
+@keyframes slideIn { from { transform: translateX(100px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+.empty-state { text-align: center; padding: 60px 20px; color: var(--text2); }
+.empty-state p { margin: 8px 0; }
+
+.review-player { background: #000; }
+.review-player-wrap { position: relative; width: 100%; padding-top: 56.25%; background: #000; border-radius: 8px; overflow: hidden; }
+.review-controls { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.review-stats { font-size: 13px; color: var(--text2); margin-bottom: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>动漫 <span>Pipeline</span></h1>
+  <nav>
+    <button class="active" data-tab="search">搜索下载</button>
+    <button data-tab="local">本地文件</button>
+    <button data-tab="jobs">任务</button>
+    <button data-tab="review">审核</button>
+    <button data-tab="results">输出结果</button>
+    <button data-tab="denoise">降噪</button>
+  </nav>
+</header>
+
+<main>
+  <!-- 搜索下载 -->
+  <div id="tab-search" class="tab active">
+    <div class="search-bar">
+      <input id="search-input" placeholder="搜索动漫资源，例如：Yowayowa Sensei、咒术回战..." onkeydown="if(event.key==='Enter')doSearch()">
+      <button id="btn-search">搜索</button>
+    </div>
+    <div class="filters">
+      <select id="filter-provider">
+        <option value="">全部来源</option>
+        <option value="moe">萌番组</option>
+        <option value="dmhy">动漫花园</option>
+        <option value="ani">ANi</option>
+      </select>
+      <input id="filter-fansub" placeholder="字幕组（可输入）" list="fansub-datalist" autocomplete="off" style="width:180px;">
+      <datalist id="fansub-datalist"></datalist>
+      <select id="filter-type">
+        <option value="">全部类型</option>
+        <option value="动画">动画</option>
+        <option value="合集">合集</option>
+      </select>
+      <button id="btn-filter" class="btn btn-secondary">应用筛选</button>
+    </div>
+    <div id="search-results" class="results-grid">
+      <div class="empty-state"><p>输入关键词搜索动漫资源</p></div>
+    </div>
+    <div id="search-pagination"></div>
+  </div>
+
+  <!-- 本地文件 -->
+  <div id="tab-local" class="tab">
+    <h3 style="margin-bottom:12px;">本地视频文件</h3>
+    <div id="local-files" class="file-list">
+      <div class="empty-state"><p>加载中...</p></div>
+    </div>
+  </div>
+
+  <!-- 任务 -->
+  <div id="tab-jobs" class="tab">
+    <h3 style="margin-bottom:12px;">处理任务</h3>
+    <div style="display:flex;gap:4px;margin-bottom:12px;align-items:center;flex-wrap:wrap;">
+      <button id="jobs-subtab-running" class="btn btn-primary" style="font-size:13px;" onclick="switchJobsSubtab('running')">执行中</button>
+      <button id="jobs-subtab-completed" class="btn btn-secondary" style="font-size:13px;" onclick="switchJobsSubtab('completed')">已完成</button>
+      <button id="jobs-subtab-failed" class="btn btn-secondary" style="font-size:13px;" onclick="switchJobsSubtab('failed')">失败</button>
+      <button id="btn-clear-cancelled" class="btn btn-secondary" style="font-size:11px;padding:3px 8px;margin-left:12px;display:none;background:var(--warning);color:#000;" onclick="clearJobsByStatus('cancelled')">清除已取消</button>
+      <button id="btn-clear-completed" class="btn btn-secondary" style="font-size:11px;padding:3px 8px;display:none;background:var(--danger);color:#fff;" onclick="clearJobsByStatus('completed')">清除已完成</button>
+      <button id="btn-clear-failed" class="btn btn-secondary" style="font-size:11px;padding:3px 8px;display:none;background:var(--danger);color:#fff;" onclick="clearJobsByStatus('failed')">清除失败</button>
+    </div>
+    <div id="jobs-list">
+      <div class="empty-state"><p>暂无任务</p></div>
+    </div>
+  </div>
+
+  <!-- 审核 -->
+  <div id="tab-review" class="tab">
+    <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px;flex-wrap:wrap;">
+      <h3 style="margin:0;">片段审核</h3>
+      <select id="review-dir-select" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;">
+        <option value="">选择视频...</option>
+      </select>
+      <button class="btn btn-secondary" id="btn-load-review">加载</button>
+      <span id="review-stats" class="review-stats"></span>
+    </div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:300px;">
+        <div class="review-player-wrap">
+          <video id="review-player" class="review-player" controls
+            style="position:absolute;top:0;left:0;width:100%;height:100%;"
+            poster="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='180'><rect fill='%231a1a2e' width='320' height='180'/></svg>"></video>
+        </div>
+        <div class="review-controls" style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap;">
+          <button class="btn btn-secondary" id="btn-review-prev">◀ 上一条</button>
+          <button class="btn btn-success" id="btn-approve">保留 (P)</button>
+          <button class="btn btn-secondary" id="btn-skip">跳过 (S)</button>
+          <button class="btn btn-secondary" id="btn-review-next">下一条 ▶</button>
+          <button class="btn btn-secondary" id="btn-jump-pending" style="font-size:12px;">↑ 跳到待审核</button>
+          <span id="review-clip-name" style="font-size:13px;color:var(--text2);margin-left:8px;"></span>
+        </div>
+      </div>
+      <div style="flex:1;min-width:250px;max-height:400px;overflow-y:auto;" id="review-list"></div>
+    </div>
+  </div>
+
+  <!-- 降噪 -->
+  <div id="tab-denoise" class="tab">
+    <!-- Toolbar -->
+    <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+      <h3 style="margin:0;">音频降噪处理</h3>
+      <select id="denoise-video-select" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;" onchange="loadDenoiseSources()">
+        <option value="">选择视频...</option>
+      </select>
+      <span id="denoise-stats" style="font-size:12px;color:var(--text2);"></span>
+      <button id="btn-denoise-selected" class="btn btn-primary" style="font-size:12px;padding:5px 12px;display:none;" onclick="denoiseSelected()">降噪选中</button>
+      <button id="btn-denoise-select-all" class="btn btn-secondary" style="font-size:11px;padding:5px 10px;display:none;" onclick="selectAllSources()">全选</button>
+      <button id="btn-denoise-delete-src" class="btn btn-secondary" style="font-size:11px;padding:5px 10px;display:none;color:var(--danger);" onclick="deleteSelectedSources()">删除选中</button>
+      <button id="btn-denoise-all" class="btn btn-primary" style="font-size:12px;padding:5px 12px;display:none;" onclick="denoiseAll()">全部降噪</button>
+      <button id="btn-denoise-source-select" class="btn btn-secondary" style="font-size:11px;padding:4px 10px;display:none;" onclick="toggleSourceSelect()">选择</button>
+      <button id="btn-denoise-refresh" class="btn btn-secondary" style="font-size:11px;padding:4px 10px;display:none;" onclick="refreshDenoise()">刷新</button>
+    </div>
+
+    <!-- Step config panel (draggable + toggleable) -->
+    <div id="denoise-step-config" style="display:none;margin-bottom:12px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <span style="font-size:12px;font-weight:600;color:var(--text);">处理步骤 <span style="color:var(--text2);font-weight:400;">(拖拽排序 / 勾选启用)</span></span>
+        <button class="btn btn-secondary" style="font-size:10px;padding:3px 8px;" onclick="resetStepConfig()">恢复默认</button>
+      </div>
+      <div id="denoise-step-list" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;"></div>
+    </div>
+
+    <!-- Overall progress bar -->
+    <div id="denoise-progress" style="display:none;margin-bottom:12px;">
+      <div class="progress-bar"><div id="denoise-progress-fill" class="progress-fill" style="width:0%;background:var(--success);"></div></div>
+      <div id="denoise-progress-text" style="font-size:12px;color:var(--text2);margin-top:4px;"></div>
+    </div>
+
+    <!-- File processing list -->
+    <div id="denoise-file-list" style="max-height:50vh;overflow-y:auto;margin-bottom:16px;">
+      <div class="empty-state"><p>选择视频后显示待处理音频</p></div>
+    </div>
+
+    <!-- Results section -->
+    <div id="denoise-results-section" style="display:none;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <h4 id="denoise-results-title" style="margin:0;font-size:14px;color:var(--success);">降噪通过 (<span id="denoise-passed-count">0</span>)</h4>
+        <div style="display:flex;gap:6px;">
+          <button id="btn-denoise-result-select" class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="enterResultSelect()">选择</button>
+          <button id="btn-denoise-result-exit" class="btn btn-secondary" style="font-size:11px;padding:4px 10px;display:none;" onclick="exitResultSelect()">退出</button>
+          <button id="btn-denoise-result-selectall" class="btn btn-secondary" style="font-size:11px;padding:4px 10px;display:none;" onclick="selectAllDenoiseResults()">全选</button>
+          <button id="btn-denoise-result-delete" class="btn btn-primary" style="font-size:11px;padding:4px 10px;background:var(--danger);display:none;" onclick="deleteDenoiseResults()">删除选中</button>
+        </div>
+      </div>
+      <div id="denoise-result-list" class="file-list" style="max-height:300px;">
+        <div class="empty-state"><p>暂无通过筛选的音频</p></div>
+      </div>
+    </div>
+
+    <!-- Discarded section -->
+    <div id="denoise-discarded-section" style="display:none;margin-top:12px;">
+      <h4 style="margin:0 0 8px 0;font-size:14px;color:var(--danger);">已舍弃 (<span id="denoise-discarded-count">0</span>)</h4>
+      <div id="denoise-discarded-list" class="file-list" style="max-height:200px;"></div>
+    </div>
+
+    <!-- Denoise player bar -->
+    <div id="denoise-player-bar" style="display:none;position:sticky;bottom:0;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 16px;margin-top:12px;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <audio id="denoise-audio-player" controls style="flex:1;min-width:250px;"></audio>
+        <button class="btn btn-secondary" onclick="closeDenoisePlayer()" style="font-size:11px;padding:4px 8px;flex-shrink:0;">关闭</button>
+      </div>
+      <div id="denoise-playing-name" style="font-size:11px;color:var(--text2);margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+    </div>
+  </div>
+
+  <!-- 输出结果 -->
+  <div id="tab-results" class="tab">
+    <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px;flex-wrap:wrap;">
+      <h3 style="margin:0;">输出结果</h3>
+      <select id="results-video-select" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;" onchange="loadResultsForVideo()">
+        <option value="">选择视频...</option>
+      </select>
+      <span id="results-stats" style="font-size:12px;color:var(--text2);"></span>
+      <span id="results-progress" style="font-size:12px;color:#4ecca3;margin-left:4px;"></span>
+    </div>
+
+    <!-- Sub-tabs -->
+    <div style="display:flex;gap:4px;margin-bottom:12px;">
+      <button id="results-subtab-sub" class="btn btn-secondary" style="font-size:13px;" onclick="switchResultsSubtab('sub')">字幕</button>
+      <button id="results-subtab-audio" class="btn btn-primary" style="font-size:13px;" onclick="switchResultsSubtab('audio')">音频</button>
+    </div>
+
+    <!-- 字幕 sub-panel -->
+    <div id="results-panel-sub" style="display:none;">
+      <div id="subtitles-list" class="file-list" style="max-height:400px;">
+        <div class="empty-state"><p>选择视频后显示</p></div>
+      </div>
+    </div>
+
+    <!-- 音频 sub-panel -->
+    <div id="results-panel-audio" style="display:block;">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;margin-bottom:8px;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:6px;">
+        <div id="results-toolbar" style="display:none;flex-direction:column;gap:6px;">
+          <div style="display:flex;gap:6px;align-items:center;">
+            <span style="font-size:12px;color:var(--text2);" id="results-select-count">未选中</span>
+            <button class="btn btn-secondary" id="btn-select-all" style="font-size:11px;padding:4px 10px;">全选</button>
+            <button class="btn btn-secondary" id="btn-deselect-all" style="font-size:11px;padding:4px 10px;">取消</button>
+          </div>
+          <div style="display:flex;gap:6px;">
+            <button class="btn btn-primary" id="btn-delete-selected" style="font-size:11px;padding:4px 10px;background:var(--danger);">删除选中</button>
+            <button id="btn-exit-select" class="btn btn-secondary" style="font-size:12px;padding:4px 10px;" onclick="exitSelectMode()">退出选择</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <span id="results-audio-hint" style="font-size:12px;color:var(--text2);">点击文件名播放</span>
+          <button id="btn-enter-select" class="btn btn-secondary" style="font-size:12px;display:none;" onclick="enterSelectMode()">选择音频</button>
+        </div>
+      </div>
+      <div id="approved-list" class="file-list" style="max-height:450px;">
+        <div class="empty-state"><p>选择视频后显示</p></div>
+      </div>
+    </div>
+
+    <!-- Results player bar -->
+    <div id="results-player-bar" style="display:none;position:sticky;bottom:0;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 16px;margin-top:12px;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <audio id="results-audio-player" controls style="flex:1;min-width:250px;"></audio>
+        <button class="btn btn-secondary" onclick="closeResultsPlayer()" style="font-size:11px;padding:4px 8px;flex-shrink:0;">关闭</button>
+      </div>
+      <div id="results-playing-name" style="font-size:11px;color:var(--text2);margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+    </div>
+  </div>
+</main>
+
+<!-- player bars deployed inside respective tabs below -->
+
+<div id="detail-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:2000;overflow-y:auto;">
+  <div style="max-width:700px;margin:40px auto;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:24px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 style="margin:0;">资源详情</h3>
+      <button class="btn btn-secondary" onclick="closeDetailModal()" style="font-size:18px;padding:2px 10px;">&times;</button>
+    </div>
+    <div id="detail-content"></div>
+  </div>
+</div>
+
+<div id="toasts" class="toast-container"></div>
+
+<script>
+var API = '';
+var currentPage = 1;
+var jobPollInterval = null;
+
+window._searchResults = [];
+window._localVideos = [];
+window._reviewClips = [];
+window._reviewDir = '';
+window._reviewIndex = 0;
+
+// ============================================================
+// Event delegation
+// ============================================================
+document.addEventListener('click', function(e) {
+  // Handle data-play clicks (audio playback in results)
+  var playEl = e.target.closest('[data-play]');
+  if (playEl) {
+    var pp = playEl.getAttribute('data-play');
+    var pn = playEl.getAttribute('data-playname') || '';
+    if (pp) playResultAudio(pp, pn);
+    return;
+  }
+
+  var btn = e.target.closest('button');
+  if (!btn) return;
+
+  if (btn.hasAttribute('data-tab')) { switchTab(btn.getAttribute('data-tab')); return; }
+  if (btn.id === 'btn-search') { doSearch(); return; }
+  if (btn.id === 'btn-filter') { doSearch(); return; }
+  if (btn.id === 'btn-load-review') { loadReviewClips(); return; }
+  if (btn.id === 'btn-review-prev') { reviewPrev(); return; }
+  if (btn.id === 'btn-review-next') { reviewNext(); return; }
+  if (btn.id === 'btn-jump-pending') { jumpToFirstPending(); return; }
+  if (btn.id === 'btn-approve') { reviewAction('approve'); return; }
+  if (btn.id === 'btn-skip') { reviewAction('skip'); return; }
+
+  if (btn.classList.contains('btn-download')) {
+    var idx = parseInt(btn.getAttribute('data-idx'));
+    var r = window._searchResults[idx];
+    if (r) downloadAndProcess(r.magnet, r.title);
+    return;
+  }
+  if (btn.classList.contains('btn-copymagnet')) {
+    var idx = parseInt(btn.getAttribute('data-idx'));
+    var r = window._searchResults[idx];
+    if (r) copyMagnet(r.magnet);
+    return;
+  }
+  if (btn.classList.contains('btn-detail')) {
+    var idx = parseInt(btn.getAttribute('data-idx'));
+    var r = window._searchResults[idx];
+    if (r) showMagnetDetail(r);
+    return;
+  }
+  if (btn.classList.contains('btn-process-local')) {
+    processLocal(parseInt(btn.getAttribute('data-idx')));
+    return;
+  }
+  if (btn.classList.contains('btn-cancel-job')) {
+    cancelJob(btn.getAttribute('data-jobid'));
+    return;
+  }
+  if (btn.classList.contains('btn-filter-clips')) {
+    var jobId = btn.getAttribute('data-jobid');
+    var durInput = document.getElementById('min-dur-' + jobId);
+    filterClips(jobId, durInput ? parseFloat(durInput.value) || 2.0 : 2.0);
+    return;
+  }
+  if (btn.classList.contains('btn-review-jump')) {
+    var idx = parseInt(btn.getAttribute('data-idx'));
+    playReviewClip(idx);
+    return;
+  }
+  if (btn.classList.contains('btn-delete-job')) {
+    deleteJob(btn.getAttribute('data-jobid'));
+    return;
+  }
+});
+
+// ============================================================
+// Tab switching
+// ============================================================
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+  document.querySelectorAll('nav button').forEach(function(b) { b.classList.remove('active'); });
+  document.getElementById('tab-' + name).classList.add('active');
+  var navBtn = document.querySelector('nav button[data-tab="' + name + '"]');
+  if (navBtn) navBtn.classList.add('active');
+  if (name === 'local') loadLocalFiles();
+  if (name === 'jobs') { loadJobs(); startJobPolling(); } else stopJobPolling();
+  if (name === 'results') loadResults();
+  if (name === 'review') loadReviewDirs();
+  if (name === 'denoise') loadDenoiseDirs();
+}
+
+// ============================================================
+// Toast
+// ============================================================
+function toast(msg, type) {
+  type = type || 'info';
+  var c = document.getElementById('toasts');
+  var el = document.createElement('div');
+  el.className = 'toast toast-' + type;
+  el.textContent = msg;
+  c.appendChild(el);
+  setTimeout(function() { el.remove(); }, 4000);
+}
+
+// ============================================================
+// Helpers
+// ============================================================
+function escapeHtml(str) {
+  var div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function safeAttr(str) {
+  return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function statusText(s) {
+  var map = { pending: '等待中', running: '运行中', completed: '已完成', failed: '失败', skipped: '已跳过', cancelled: '已取消', queued: '排队中', download_submitted: '下载中' };
+  return map[s] || s;
+}
+
+function stepName(s) {
+  var map = { download: '下载', extract_subtitles: '提取字幕', split_video: '分割视频', filter_clips: '时长筛选', queued: '排队等待中' };
+  return map[s] || s;
+}
+
+// ============================================================
+// Search (with page cache)
+// ============================================================
+var _searchCache = {};       // { cacheKey: { pages: { pageNum: data }, maxPage: 0 } }
+var _searchCacheKey = '';    // current active cache key
+
+function _buildSearchParams(page) {
+  var p = new URLSearchParams({
+    query: document.getElementById('search-input').value,
+    page: page,
+    page_size: 20
+  });
+  var pv = document.getElementById('filter-provider').value;
+  var fv = document.getElementById('filter-fansub').value;
+  var tv = document.getElementById('filter-type').value;
+  if (pv) p.set('provider', pv);
+  if (fv) p.set('fansub', fv);
+  if (tv) p.set('resource_type', tv);
+  return p;
+}
+
+function _searchCacheKeyFromParams(params) {
+  // Build a cache key that ignores the page number
+  var p = new URLSearchParams(params.toString());
+  p.delete('page');
+  return p.toString();
+}
+
+async function doSearch(page) {
+  page = page || 1;
+  var params = _buildSearchParams(page);
+  var cacheKey = _searchCacheKeyFromParams(params);
+  var container = document.getElementById('search-results');
+
+  // Clear cache when search query changes
+  if (cacheKey !== _searchCacheKey) {
+    _searchCache = {};
+    _searchCacheKey = cacheKey;
+  }
+
+  // Init cache entry
+  if (!_searchCache[cacheKey]) {
+    _searchCache[cacheKey] = { pages: {}, maxPage: 0 };
+  }
+  var cache = _searchCache[cacheKey];
+
+  // Check cache
+  var data;
+  if (cache.pages[page]) {
+    data = cache.pages[page];
+  } else {
+    container.innerHTML = '<div class="empty-state"><p>搜索中...</p></div>';
+    try {
+      var resp = await fetch(API + '/api/search?' + params.toString());
+      if (!resp.ok) throw new Error(await resp.text());
+      data = await resp.json();
+      cache.pages[page] = data;
+      // Track max known page
+      if (data.complete && page > cache.maxPage) {
+        cache.maxPage = page;
+      }
+    } catch (err) {
+      container.innerHTML = '<div class="empty-state"><p>搜索失败: ' + escapeHtml(err.message) + '</p></div>';
+      return;
+    }
+  }
+
+  currentPage = page;
+  window._searchResults = data.resources;
+
+  if (!data.resources.length) {
+    container.innerHTML = '<div class="empty-state"><p>未找到相关资源</p></div>';
+    renderPagination(data, page);
+    return;
+  }
+
+  var html = '';
+  for (var i = 0; i < data.resources.length; i++) {
+    var r = data.resources[i];
+    html += '<div class="result-card">' +
+      '<div class="result-info">' +
+        '<div class="result-title">' + escapeHtml(r.title) + '</div>' +
+        '<div class="result-meta">' +
+          '<span>' + r.size_mb + ' MB</span>' +
+          '<span>' + escapeHtml(r.type || '?') + '</span>' +
+          '<span>' + escapeHtml(r.publisher || '') + '</span>' +
+          '<span>' + escapeHtml(r.fansub || '') + '</span>' +
+          '<span>' + (r.created_at || '').slice(0, 10) + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="result-actions">' +
+        '<button class="btn btn-primary btn-download" data-idx="' + i + '">下载并处理</button>' +
+        '<button class="btn btn-secondary btn-copymagnet" data-idx="' + i + '">复制磁力</button>' +
+        '<button class="btn btn-secondary btn-detail" data-idx="' + i + '" style="font-size:11px;">详情</button>' +
+      '</div>' +
+    '</div>';
+  }
+  container.innerHTML = html;
+  renderPagination(data, page);
+}
+
+function renderPagination(data, page) {
+  var pagDiv = document.getElementById('search-pagination');
+  pagDiv.innerHTML = '';
+  pagDiv.style.cssText = 'display:flex;gap:6px;margin-top:16px;justify-content:center;align-items:center;flex-wrap:wrap;';
+
+  var isFirst = page <= 1;
+  var isLast = data.complete;
+  var totalPages = data.complete ? page : '?';
+
+  // First page
+  var firstBtn = document.createElement('button');
+  firstBtn.className = 'btn btn-secondary';
+  firstBtn.textContent = '首页';
+  firstBtn.disabled = isFirst;
+  firstBtn.onclick = function() { doSearch(1); };
+  pagDiv.appendChild(firstBtn);
+
+  // Previous page
+  var prevBtn = document.createElement('button');
+  prevBtn.className = 'btn btn-secondary';
+  prevBtn.textContent = '← 上一页';
+  prevBtn.disabled = isFirst;
+  prevBtn.onclick = function() { doSearch(page - 1); };
+  pagDiv.appendChild(prevBtn);
+
+  // Page indicator: "第 X / Y 页" or "第 X 页" when total unknown
+  var pageLabel = document.createElement('span');
+  pageLabel.style.cssText = 'font-size:13px;color:var(--text2);margin:0 4px;';
+  pageLabel.textContent = '第';
+  pagDiv.appendChild(pageLabel);
+
+  var pageInput = document.createElement('input');
+  pageInput.type = 'number';
+  pageInput.min = '1';
+  pageInput.value = page;
+  pageInput.style.cssText = 'width:50px;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px;text-align:center;';
+  pageInput.onkeydown = function(e) {
+    if (e.key === 'Enter') {
+      var p1 = parseInt(pageInput.value);
+      if (p1 >= 1) doSearch(p1);
+    }
+  };
+  pagDiv.appendChild(pageInput);
+
+  var pageInfo = document.createElement('span');
+  pageInfo.style.cssText = 'font-size:13px;color:var(--text2);margin:0 4px;';
+  pageInfo.textContent = isLast ? ('/ ' + totalPages + ' 页') : '页';
+  pagDiv.appendChild(pageInfo);
+
+  // Go button
+  var goBtn = document.createElement('button');
+  goBtn.className = 'btn btn-primary';
+  goBtn.textContent = '跳转';
+  goBtn.style.cssText = 'padding:4px 10px;font-size:12px;';
+  goBtn.onclick = function() {
+    var p2 = parseInt(pageInput.value);
+    if (p2 >= 1) doSearch(p2);
+  };
+  pagDiv.appendChild(goBtn);
+
+  // Next page
+  var nextBtn = document.createElement('button');
+  nextBtn.className = 'btn btn-secondary';
+  nextBtn.textContent = '下一页 →';
+  nextBtn.disabled = isLast;
+  nextBtn.onclick = function() { doSearch(page + 1); };
+  pagDiv.appendChild(nextBtn);
+
+  // If total is known, show "共 X 页" hint
+  if (isLast) {
+    var totalHint = document.createElement('span');
+    totalHint.style.cssText = 'font-size:12px;color:var(--text2);margin-left:6px;';
+    totalHint.textContent = '共 ' + totalPages + ' 页';
+    pagDiv.appendChild(totalHint);
+  }
+}
+
+function copyMagnet(magnet) {
+  navigator.clipboard.writeText(magnet).then(
+    function() { toast('磁力链接已复制', 'success'); },
+    function() { toast('复制失败', 'error'); }
+  );
+}
+
+async function showMagnetDetail(r) {
+  var modal = document.getElementById('detail-modal');
+  var cont = document.getElementById('detail-content');
+  modal.style.display = 'block';
+  var info = '<div style="margin-bottom:12px;"><strong>标题:</strong> ' + escapeHtml(r.title) + '</div>';
+  info += '<div style="margin-bottom:12px;"><strong>大小:</strong> ' + r.size_mb + ' MB | <strong>类型:</strong> ' + escapeHtml(r.type || '?') + '</div>';
+  info += '<div style="margin-bottom:12px;"><strong>字幕组:</strong> ' + escapeHtml(r.fansub || '?') + ' | <strong>发布者:</strong> ' + escapeHtml(r.publisher || '?') + '</div>';
+  info += '<div style="margin-bottom:12px;"><strong>时间:</strong> ' + (r.created_at || '').slice(0, 10) + '</div>';
+  info += '<div style="margin-bottom:12px;word-break:break-all;"><strong>磁力链接:</strong><br><code style="font-size:11px;color:var(--text2);">' + escapeHtml(r.magnet) + '</code></div>';
+  info += '<div style="margin-top:16px;"><button class="btn btn-secondary btn-fetch-detail-files" style="font-size:12px;">获取文件列表</button></div>';
+  info += '<div id="detail-files"></div>';
+  cont.innerHTML = info;
+  // Store magnet for the fetch button
+  document.querySelector('.btn-fetch-detail-files').onclick = function() {
+    fetchDetailFiles(r.magnet);
+  };
+}
+
+async function fetchDetailFiles(magnet) {
+  var btn = document.getElementById('btn-fetch-files');
+  var div = document.getElementById('detail-files');
+  btn.disabled = true; btn.textContent = '获取中...';
+  div.innerHTML = '<p style="font-size:12px;color:var(--text2);">正在通过 DHT 网络获取种子文件列表...</p>';
+  try {
+    var resp = await fetch(API + '/api/magnet/files?magnet=' + encodeURIComponent(magnet));
+    var data = await resp.json();
+    if (data.files && data.files.length > 0) {
+      var html = '<div style="margin-top:12px;"><strong>文件列表 (' + data.files.length + '):</strong></div><div class="file-list" style="max-height:300px;margin-top:8px;">';
+      for (var i = 0; i < data.files.length; i++) {
+        var f = data.files[i];
+        html += '<div class="file-item"><span>' + escapeHtml(f.name) + '</span><span class="file-size">' + f.size_mb + ' MB</span></div>';
+      }
+      html += '</div>'; div.innerHTML = html;
+    } else { div.innerHTML = '<p style="font-size:12px;color:var(--warning);">未找到文件信息（种子可能无活跃节点）</p>'; }
+  } catch(e) { div.innerHTML = '<p style="font-size:12px;color:var(--danger);">获取失败: ' + escapeHtml(e.message) + '</p>'; }
+  finally { btn.textContent = '重新获取'; btn.disabled = false; }
+}
+
+function closeDetailModal() { document.getElementById('detail-modal').style.display = 'none'; }
+document.addEventListener('click', function(e) { if (e.target.id === 'detail-modal') closeDetailModal(); });
+
+async function downloadAndProcess(magnet, title) {
+  try {
+    // Copy magnet to clipboard
+    try {
+      await navigator.clipboard.writeText(magnet);
+      toast('磁力链接已复制到剪贴板', 'success');
+    } catch(e) {}
+
+    // Start download job (aria2c will try to download via P2P)
+    var url = API + '/api/jobs/process-download?magnet=' + encodeURIComponent(magnet) +
+              '&title=' + encodeURIComponent(title) + '&hw_accel=auto';
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    toast('已启动 qBittorrent 下载，完成后自动处理', 'success');
+    switchTab('jobs');
+  } catch (e) {
+    toast('操作失败: ' + e.message, 'error');
+  }
+}
+
+// ============================================================
+// Local files
+// ============================================================
+async function loadLocalFiles() {
+  var container = document.getElementById('local-files');
+  try {
+    var vResp = await fetch(API + '/api/local/videos');
+    var sResp = await fetch(API + '/api/local/subtitles');
+    var vData = await vResp.json();
+    var sData = await sResp.json();
+    window._localVideos = vData.videos;
+
+    if (!vData.videos.length) {
+      container.innerHTML = '<div class="empty-state"><p>video 文件夹中没有找到视频文件</p><p style="font-size:12px;color:var(--text2)">请将 MKV/MP4 文件放入 video/ 目录</p></div>';
+      return;
+    }
+
+    var subOptions = '';
+    for (var si = 0; si < sData.subtitles.length; si++) {
+      var s = sData.subtitles[si];
+      subOptions += '<option value="' + safeAttr(s.path) + '">' + escapeHtml(s.name) + ' (' + s.size_kb + ' KB)</option>';
+    }
+
+    var html = '';
+    for (var i = 0; i < vData.videos.length; i++) {
+      var v = vData.videos[i];
+      html += '<div class="file-item" style="flex-wrap:wrap;">' +
+        '<span style="font-size:18px;">🎬</span>' +
+        '<span class="file-name">' + escapeHtml(v.name) + ' <small style="color:var(--text2)">(' + v.source + ')</small></span>' +
+        '<span class="file-size">' + v.size_mb + ' MB</span>' +
+        '<span style="font-size:11px;color:var(--text2);min-width:100px;">' + (v.time_str || '') + '</span>' +
+        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+          '<select id="sub-select-' + i + '" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;">' +
+            '<option value="">自动提取字幕 (仅MKV)</option>' +
+            subOptions +
+          '</select>' +
+          '<button class="btn btn-primary btn-process-local" data-idx="' + i + '">提取字幕并分割</button>' +
+        '</div>' +
+      '</div>';
+    }
+    container.innerHTML = html;
+  } catch (e) {
+    container.innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
+  }
+}
+
+async function processLocal(idx) {
+  try {
+    var v = window._localVideos[idx];
+    var url = API + '/api/jobs/process-local?video_path=' + encodeURIComponent(v.path);
+    var select = document.getElementById('sub-select-' + idx);
+    if (select && select.value) {
+      url += '&subtitle_path=' + encodeURIComponent(select.value);
+    }
+    url += '&hw_accel=auto';
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    toast('任务已创建: ' + data.job_id, 'success');
+    switchTab('jobs');
+  } catch (e) {
+    toast('创建任务失败: ' + e.message, 'error');
+  }
+}
+
+// ============================================================
+// Filter clips
+// ============================================================
+async function filterClips(jobId, minDuration) {
+  try {
+    var url = API + '/api/jobs/' + jobId + '/filter?min_duration=' + minDuration;
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    if (data.deleted > 0) {
+      toast('已删除 ' + data.deleted + ' 个片段 (释放 ' + data.freed_mb + ' MB), 剩余 ' + data.remaining + ' 个', 'success');
+    } else {
+      toast(data.message || '没有需要删除的片段', 'info');
+    }
+    loadJobs();
+    loadResults();
+  } catch (e) {
+    toast('筛选失败: ' + e.message, 'error');
+  }
+}
+
+// ============================================================
+// Jobs
+// ============================================================
+var _jobsFilter = 'running';
+
+function switchJobsSubtab(filter) {
+  _jobsFilter = filter;
+  document.getElementById('jobs-subtab-running').className = 'btn ' + (filter === 'running' ? 'btn-primary' : 'btn-secondary');
+  document.getElementById('jobs-subtab-completed').className = 'btn ' + (filter === 'completed' ? 'btn-primary' : 'btn-secondary');
+  document.getElementById('jobs-subtab-failed').className = 'btn ' + (filter === 'failed' ? 'btn-primary' : 'btn-secondary');
+  document.getElementById('btn-clear-cancelled').style.display = filter === 'running' ? 'inline-block' : 'none';
+  document.getElementById('btn-clear-completed').style.display = filter === 'completed' ? 'inline-block' : 'none';
+  document.getElementById('btn-clear-failed').style.display = filter === 'failed' ? 'inline-block' : 'none';
+  loadJobs();
+}
+
+async function clearJobsByStatus(status) {
+  if (!confirm('确定清除所有' + (status === 'completed' ? '已完成' : '失败') + '的任务记录？此操作不可恢复。')) return;
+  try {
+    var resp = await fetch(API + '/api/jobs/clear?status=' + status, { method: 'DELETE' });
+    var data = await resp.json();
+    toast('已清除 ' + data.deleted + ' 条记录', 'success');
+    loadJobs();
+  } catch(e) { toast('清除失败: ' + e.message, 'error'); }
+}
+
+async function loadJobs() {
+  var container = document.getElementById('jobs-list');
+  try {
+    var resp = await fetch(API + '/api/jobs');
+    var data = await resp.json();
+    if (!data.jobs.length) {
+      container.innerHTML = '<div class="empty-state"><p>暂无任务</p></div>';
+      return;
+    }
+    var jobs = data.jobs.slice().reverse();
+
+    // Filter by status
+    if (_jobsFilter === 'running') {
+      jobs = jobs.filter(function(j) { return j.status === 'running' || j.status === 'pending' || j.status === 'cancelled'; });
+    } else if (_jobsFilter === 'completed') {
+      jobs = jobs.filter(function(j) { return j.status === 'completed'; });
+    } else if (_jobsFilter === 'failed') {
+      jobs = jobs.filter(function(j) { return j.status === 'failed'; });
+    }
+
+    if (!jobs.length) {
+      var labels = { running: '没有执行中的任务', completed: '没有已完成的任务', failed: '没有失败的任务' };
+      container.innerHTML = '<div class="empty-state"><p>' + (labels[_jobsFilter] || '暂无任务') + '</p></div>';
+      return;
+    }
+
+    var html = '';
+    for (var ji = 0; ji < jobs.length; ji++) {
+      var j = jobs[ji];
+      var progress = j.progress || 0;
+      var isRunning = j.status === 'running' || j.status === 'pending';
+      html += '<div class="job-card">' +
+        '<div class="job-header">' +
+          '<span class="job-title">' + escapeHtml(j.title || j.job_id) + '</span>' +
+          '<div style="display:flex;gap:8px;align-items:center;">' +
+            '<span class="job-status status-' + j.status + '">' + statusText(j.status) + '</span>' +
+            (j.status === 'completed' || j.status === 'failed' ? '<button class="btn btn-secondary btn-delete-job" data-jobid="' + j.job_id + '" style="font-size:10px;padding:2px 6px;background:var(--danger);color:#fff;margin-left:6px;">X</button>' : '') +
+            (j.status === 'running' || j.status === 'download_submitted' || j.status === 'queued' ? '<button class="btn btn-secondary btn-cancel-job" data-jobid="' + j.job_id + '" style="font-size:10px;padding:2px 8px;background:var(--warning);color:#000;margin-left:6px;">取消</button>' : '') +
+          '</div>' +
+        '</div>' +
+        '<div class="progress-bar"><div class="progress-fill" style="width:' + progress + '%"></div></div>' +
+        '<div style="font-size:12px;color:var(--text2);">' + progress.toFixed(0) + '% - ' + escapeHtml(stepName(j.current_step) || '等待中...') + '</div>';
+      if (j.steps && j.steps.length) {
+        html += '<div class="step-list">';
+        for (var si = 0; si < j.steps.length; si++) {
+          var s = j.steps[si];
+          html += '<span class="step-item ' + s.status + '">' + stepName(s.step) + ': ' + statusText(s.status) + (s.duration ? ' (' + s.duration.toFixed(1) + 's)' : '') + '</span>';
+        }
+        html += '</div>';
+      }
+      if (j.clip_count && j.status === 'completed') {
+        html += '<div style="margin-top:8px;font-size:13px;">已生成 ' + j.clip_count + ' 个片段</div>';
+        html += '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+          '<label style="font-size:12px;color:var(--text2);">最小时长:</label>' +
+          '<input id="min-dur-' + j.job_id + '" type="number" value="1.0" step="0.1" min="0" style="width:60px;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:12px;">' +
+          '<span style="font-size:12px;color:var(--text2);">秒</span>' +
+          '<button class="btn btn-secondary btn-filter-clips" data-jobid="' + j.job_id + '">删除过短片段</button>' +
+        '</div>';
+      } else if (j.clip_count && j.status !== 'completed') {
+        html += '<div style="margin-top:8px;font-size:13px;">已生成 ' + j.clip_count + ' 个片段</div>';
+      }
+      html += '</div>';
+    }
+    container.innerHTML = html;
+  } catch (e) {
+    container.innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
+  }
+}
+
+async function cancelJob(jobId) {
+  if (!confirm('确定取消此任务？正在处理的视频将停止。')) return;
+  try {
+    var resp = await fetch(API + '/api/jobs/' + jobId + '/cancel', { method: 'POST' });
+    if (resp.ok) { toast('已取消', 'info'); loadJobs(); }
+    else { toast('取消失败', 'error'); }
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteJob(jobId) {
+  if (!confirm('Delete this job?')) return;
+  try {
+    var resp = await fetch(API + '/api/jobs/' + jobId, { method: 'DELETE' });
+    if (resp.ok) { toast('Deleted', 'success'); loadJobs(); }
+    else { toast('Delete failed', 'error'); }
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+}
+
+function startJobPolling() { stopJobPolling(); jobPollInterval = setInterval(loadJobs, 3000); }
+function stopJobPolling() { if (jobPollInterval) { clearInterval(jobPollInterval); jobPollInterval = null; } }
+
+// ============================================================
+// Review
+// ============================================================
+async function loadReviewDirs() {
+  try {
+    var resp = await fetch(API + '/api/review/dirs');
+    var data = await resp.json();
+    var select = document.getElementById('review-dir-select');
+    select.innerHTML = '<option value="">选择视频...</option>';
+    for (var i = 0; i < data.dirs.length; i++) {
+      var d = data.dirs[i];
+      select.innerHTML += '<option value="' + safeAttr(d.path) + '">' + escapeHtml(d.name) + '</option>';
+    }
+    if (data.dirs.length > 0) {
+      select.value = data.dirs[data.dirs.length - 1].path;
+      loadReviewClips();
+    }
+  } catch(e) {}
+}
+
+async function loadReviewClips() {
+  var dir = document.getElementById('review-dir-select').value;
+  if (!dir) return;
+  try {
+    var resp = await fetch(API + '/api/review/clips?clip_dir=' + encodeURIComponent(dir));
+    var data = await resp.json();
+    window._reviewClips = data.clips;
+    window._reviewDir = data.clip_dir;
+    window._reviewIndex = data.pending_index >= 0 ? data.pending_index : 0;
+
+    updateReviewStats();
+    buildReviewList();
+    playReviewClip(window._reviewIndex, false);  // no auto-play on initial load
+  } catch(e) { toast('加载审核列表失败: ' + e.message, 'error'); }
+}
+
+function updateReviewStats() {
+  var clips = window._reviewClips || [];
+  var approved = 0, skipped = 0;
+  for (var i = 0; i < clips.length; i++) {
+    if (clips[i].status === 'approved') approved++;
+    else if (clips[i].status === 'skipped') skipped++;
+  }
+  document.getElementById('review-stats').textContent =
+    '共 ' + clips.length + ' 个 | 已保留 ' + approved + ' | 已跳过 ' + skipped + ' | 待审核 ' + (clips.length - approved - skipped);
+}
+
+function buildReviewList() {
+  var clips = window._reviewClips || [];
+  var html = '';
+  for (var i = 0; i < clips.length; i++) {
+    var c = clips[i];
+    var icon = c.status === 'approved' ? '✅' : (c.status === 'skipped' ? '⏭️' : '🎞️');
+    var activeClass = (i === window._reviewIndex) ? ' style="background:var(--bg3);"' : '';
+    html += '<div class="file-item"' + activeClass + ' data-review-idx="' + i + '">' +
+      '<span>' + icon + '</span>' +
+      '<span class="file-name" style="font-size:12px;">' + escapeHtml(c.name) + '</span>' +
+      '<span class="file-size">' + c.size_mb + ' MB</span>' +
+    '</div>';
+  }
+  document.getElementById('review-list').innerHTML = html;
+}
+
+function refreshReviewListHighlight() {
+  var items = document.querySelectorAll('#review-list .file-item[data-review-idx]');
+  for (var i = 0; i < items.length; i++) {
+    var idx = parseInt(items[i].getAttribute('data-review-idx'));
+    items[i].style.background = (idx === window._reviewIndex) ? 'var(--bg3)' : '';
+    var spans = items[i].querySelectorAll('span');
+    var clips = window._reviewClips;
+    if (clips && idx >= 0 && idx < clips.length && spans.length > 0) {
+      var c = clips[idx];
+      var icon = c.status === 'approved' ? '✅' : (c.status === 'skipped' ? '⏭️' : '🎞️');
+      spans[0].textContent = icon;
+    }
+  }
+}
+
+function playReviewClip(idx, autoPlay) {
+  if (autoPlay === undefined) autoPlay = true;
+  if (!window._reviewClips || window._reviewClips.length === 0) return;
+  if (idx < 0 || idx >= window._reviewClips.length) idx = 0;
+  window._reviewIndex = idx;
+  var c = window._reviewClips[idx];
+
+  // Only update video src — do NOT rebuild DOM
+  var player = document.getElementById('review-player');
+  var newSrc = API + '/api/review/stream?path=' + encodeURIComponent(c.path);
+  if (player.src !== newSrc) {
+    player.src = newSrc;
+    player.load();
+  }
+  if (autoPlay) { player.play().catch(function() {}); }
+  document.getElementById('review-clip-name').textContent = c.name;
+
+  // Lightweight highlight refresh — no innerHTML rebuild
+  refreshReviewListHighlight();
+}
+
+// Delegate clicks on the review list (avoids inline onclick rebuilds)
+document.getElementById('review-list').addEventListener('click', function(e) {
+  var item = e.target.closest('.file-item[data-review-idx]');
+  if (!item) return;
+  var idx = parseInt(item.getAttribute('data-review-idx'));
+  if (!isNaN(idx)) playReviewClip(idx);
+});
+
+async function reviewAction(action) {
+  if (!window._reviewDir || !window._reviewClips || window._reviewIndex < 0 || window._reviewIndex >= window._reviewClips.length) return;
+  var c = window._reviewClips[window._reviewIndex];
+  try {
+    var url = API + '/api/review/' + action + '?clip_dir=' + encodeURIComponent(window._reviewDir) + '&clip_name=' + encodeURIComponent(c.name);
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+
+    // Update clip status in-place — NO DOM rebuild
+    if (data.status === 'ok') {
+      c.status = action === 'approve' ? 'approved' : 'skipped';
+    }
+
+    updateReviewStats();
+    refreshReviewListHighlight();
+
+    // Move to next clip in list (not just pending ones)
+    var nextIdx = window._reviewIndex + 1;
+    if (nextIdx >= window._reviewClips.length) nextIdx = 0;
+    playReviewClip(nextIdx);
+  } catch(e) { toast('操作失败: ' + e.message, 'error'); }
+}
+
+function reviewPrev() {
+  if (!window._reviewClips || window._reviewClips.length === 0) return;
+  var prev = window._reviewIndex - 1;
+  if (prev < 0) prev = window._reviewClips.length - 1;
+  playReviewClip(prev);
+}
+
+function reviewNext() {
+  if (!window._reviewClips || window._reviewClips.length === 0) return;
+  var next = window._reviewIndex + 1;
+  if (next >= window._reviewClips.length) next = 0;
+  playReviewClip(next);
+}
+
+function jumpToFirstPending() {
+  if (!window._reviewClips || window._reviewClips.length === 0) return;
+  for (var i = 0; i < window._reviewClips.length; i++) {
+    if (window._reviewClips[i].status === 'pending') { playReviewClip(i); return; }
+  }
+  toast('所有音频已审核完毕', 'info');
+}
+
+// Keyboard shortcuts for review tab
+document.addEventListener('keydown', function(e) {
+  var reviewTab = document.getElementById('tab-review');
+  if (!reviewTab || !reviewTab.classList.contains('active')) return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+  if (!window._reviewClips || window._reviewClips.length === 0) return;
+
+  if (e.key === 'p' || e.key === 'P') { e.preventDefault(); reviewAction('approve'); }
+  if (e.key === 's' || e.key === 'S') { e.preventDefault(); reviewAction('skip'); }
+  if (e.key === 'ArrowRight') {
+    e.preventDefault();
+    var next = window._reviewIndex + 1;
+    if (next >= window._reviewClips.length) next = 0;
+    playReviewClip(next);
+  }
+  if (e.key === 'ArrowLeft') {
+    e.preventDefault();
+    var prev = window._reviewIndex - 1;
+    if (prev < 0) prev = window._reviewClips.length - 1;
+    playReviewClip(prev);
+  }
+});
+
+// ============================================================
+// Results
+// ============================================================
+var _resultsSelected = {};
+var _resultsSelectMode = false;
+var _resultsAllSubs = [];
+var _resultsAllAudio = [];
+
+function switchResultsSubtab(tab) {
+  var subBtn = document.getElementById('results-subtab-sub');
+  var audioBtn = document.getElementById('results-subtab-audio');
+  var subPanel = document.getElementById('results-panel-sub');
+  var audioPanel = document.getElementById('results-panel-audio');
+
+  subBtn.className = tab === 'sub' ? 'btn btn-primary' : 'btn btn-secondary';
+  audioBtn.className = tab === 'audio' ? 'btn btn-primary' : 'btn btn-secondary';
+  subPanel.style.display = tab === 'sub' ? 'block' : 'none';
+  audioPanel.style.display = tab === 'audio' ? 'block' : 'none';
+
+  if (tab === 'audio') renderApprovedAudio();
+}
+
+function enterSelectMode() {
+  _resultsSelectMode = true;
+  renderApprovedAudio();
+}
+
+function exitSelectMode() {
+  _resultsSelectMode = false;
+  _resultsSelected = {};
+  renderApprovedAudio();
+}
+
+function renderApprovedAudio() {
+  var aCont = document.getElementById('approved-list');
+  var toolbar = document.getElementById('results-toolbar');
+  var btnEnter = document.getElementById('btn-enter-select');
+  var btnExit = document.getElementById('btn-exit-select');
+  var data = _resultsAllAudio;
+
+  if (!data.length) {
+    aCont.innerHTML = '<div class="empty-state"><p>暂无审核通过的音频</p></div>';
+    toolbar.style.display = 'none';
+    btnEnter.style.display = 'none';
+    btnExit.style.display = 'none';
+    return;
+  }
+
+  var hint = document.getElementById('results-audio-hint');
+  if (_resultsSelectMode) {
+    toolbar.style.display = 'flex';
+    btnEnter.style.display = 'none';
+    btnExit.style.display = 'inline-block';
+    hint.style.display = 'none';
+  } else {
+    toolbar.style.display = 'none';
+    btnEnter.style.display = 'inline-block';
+    btnExit.style.display = 'none';
+    hint.style.display = 'inline';
+  }
+
+  var html = '';
+  for (var j = 0; j < data.length; j++) {
+    var a = data[j];
+    var durStr = a.duration_s > 0 ? formatDuration(a.duration_s) : '?';
+    var checked = _resultsSelected[a.path] ? ' checked' : '';
+
+    html += '<div class="file-item" data-path="' + safeAttr(a.path) + '" style="flex-wrap:wrap;">';
+    // Checkbox only visible in select mode
+    if (_resultsSelectMode) {
+      html += '<input type="checkbox" value="' + safeAttr(a.path) + '" style="flex-shrink:0;"' + checked + ' data-result-check="1">';
+    }
+    html += '<span style="font-size:14px;flex-shrink:0;cursor:pointer;" data-play="' + safeAttr(a.path) + '" data-playname="' + safeAttr(a.name) + '">🎵</span>' +
+      '<span class="file-name" style="cursor:pointer;font-size:13px;" data-play="' + safeAttr(a.path) + '" data-playname="' + safeAttr(a.name) + '">' + escapeHtml(a.name) + '</span>' +
+      '<span class="file-size">' + a.size_mb + ' MB | ' + durStr + (a.codec ? ' | ' + a.codec : '') + (a.sample_rate ? ' | ' + a.sample_rate + 'Hz' : '') + (a.bitrate ? ' | ' + a.bitrate : '') + '</span>' +
+    '</div>';
+  }
+  aCont.innerHTML = html;
+
+  // Wire checkbox changes + update count
+  if (_resultsSelectMode) {
+    var checks = aCont.querySelectorAll('input[data-result-check]');
+    var countEl = document.getElementById('results-select-count');
+    function updateCount() {
+      var n = Object.values(_resultsSelected).filter(function(v) { return v; }).length;
+      countEl.textContent = n > 0 ? '已选 ' + n + ' 个' : '未选中';
+    }
+    updateCount();
+    for (var i = 0; i < checks.length; i++) {
+      checks[i].onchange = function() {
+        _resultsSelected[this.value] = this.checked;
+        updateCount();
+      };
+    }
+  }
+
+  // Re-highlight playing item after list rebuild
+  if (_playingEl) {
+    var curPath = _playingEl.getAttribute('data-path');
+    _playingEl = null;
+    var items = aCont.querySelectorAll('.file-item');
+    for (var k = 0; k < items.length; k++) {
+      if (items[k].getAttribute('data-path') === curPath) {
+        items[k].classList.add('playing');
+        _playingEl = items[k];
+        break;
+      }
+    }
+  }
+}
+
+async function loadResults() {
+  try {
+    var resp = await fetch(API + '/api/results/videos');
+    var data = await resp.json();
+    var sel = document.getElementById('results-video-select');
+    var curVal = sel.value;
+    sel.innerHTML = '<option value="">选择视频...</option>';
+    for (var i = 0; i < data.videos.length; i++) {
+      var v = data.videos[i];
+      sel.innerHTML += '<option value="' + escapeHtml(v.name) + '" data-approved="' + v.approved + '" data-total="' + v.total_clips + '">' + escapeHtml(v.name) + '</option>';
+    }
+    if (curVal) {
+      for (var j = 0; j < sel.options.length; j++) {
+        if (sel.options[j].value === curVal) { sel.selectedIndex = j; break; }
+      }
+    }
+    if (data.videos.length > 0 && !curVal) { sel.selectedIndex = 1; loadResultsForVideo(); }
+    else if (curVal) loadResultsForVideo();
+  } catch(e) {}
+
+  document.getElementById('btn-select-all').onclick = function() {
+    var checks = document.querySelectorAll('#approved-list input[data-result-check]');
+    for (var i = 0; i < checks.length; i++) { checks[i].checked = true; _resultsSelected[checks[i].value] = true; }
+    document.getElementById('results-select-count').textContent = '已选 ' + checks.length + ' 个';
+  };
+  document.getElementById('btn-deselect-all').onclick = function() {
+    var checks = document.querySelectorAll('#approved-list input[data-result-check]');
+    for (var i = 0; i < checks.length; i++) { checks[i].checked = false; _resultsSelected = {}; }
+    document.getElementById('results-select-count').textContent = '未选中';
+  };
+  document.getElementById('btn-delete-selected').onclick = deleteSelected;
+}
+
+async function loadResultsForVideo() {
+  var sel = document.getElementById('results-video-select');
+  var name = sel.value;
+  _resultsSelected = {};
+  _resultsSelectMode = false;
+  _resultsAllSubs = [];
+  _resultsAllAudio = [];
+  if (!name) {
+    document.getElementById('subtitles-list').innerHTML = '<div class="empty-state"><p>选择视频后显示</p></div>';
+    document.getElementById('approved-list').innerHTML = '<div class="empty-state"><p>选择视频后显示</p></div>';
+    document.getElementById('btn-enter-select').style.display = 'none';
+    document.getElementById('btn-exit-select').style.display = 'none';
+    document.getElementById('results-toolbar').style.display = 'none';
+    document.getElementById('results-stats').textContent = '';
+    document.getElementById('results-progress').textContent = '';
+    return;
+  }
+  // Show progress from option data
+  var opt = sel.options[sel.selectedIndex];
+  var approved = opt.getAttribute('data-approved') || '0';
+  var total = opt.getAttribute('data-total') || '0';
+  document.getElementById('results-progress').textContent = '审核 ' + approved + '/' + total + ' 通过';
+
+  // Subtitles
+  try {
+    var sResp = await fetch(API + '/api/results/video/' + encodeURIComponent(name) + '/subtitles');
+    var sData = await sResp.json();
+    _resultsAllSubs = sData.subtitles;
+    var sCont = document.getElementById('subtitles-list');
+    if (!sData.subtitles.length) {
+      sCont.innerHTML = '<div class="empty-state"><p>未找到字幕</p></div>';
+    } else {
+      var sHtml = '';
+      for (var i = 0; i < sData.subtitles.length; i++) {
+        var s = sData.subtitles[i];
+        sHtml += '<div class="file-item"><span>📝</span><span class="file-name">' + escapeHtml(s.name) + '</span><span class="file-size">' + s.size_kb + ' KB</span></div>';
+      }
+      sCont.innerHTML = sHtml;
+    }
+  } catch(e) {}
+
+  // Approved audio
+  try {
+    var aResp = await fetch(API + '/api/results/video/' + encodeURIComponent(name) + '/approved');
+    var aData = await aResp.json();
+    _resultsAllAudio = aData.approved;
+    document.getElementById('results-stats').textContent = aData.count + ' 个通过音频';
+    if (!aData.approved.length) {
+      document.getElementById('results-player-bar').style.display = 'none';
+    }
+    // Render based on current sub-tab
+    var audioPanel = document.getElementById('results-panel-audio');
+    if (audioPanel.style.display !== 'none') {
+      renderApprovedAudio();
+    } else {
+      // Audio tab not active, just show the enter-select button
+      document.getElementById('btn-enter-select').style.display = aData.approved.length ? 'inline-block' : 'none';
+    }
+  } catch(e) {}
+}
+
+var _playingEl = null;
+
+function _getActivePlayerInfo() {
+  // Detect which tab is visible and return the right player/bar/name IDs
+  var resultsTab = document.getElementById('tab-results');
+  var denoiseTab = document.getElementById('tab-denoise');
+  if (denoiseTab && denoiseTab.classList.contains('active')) {
+    return { player: 'denoise-audio-player', bar: 'denoise-player-bar', name: 'denoise-playing-name' };
+  }
+  return { player: 'results-audio-player', bar: 'results-player-bar', name: 'results-playing-name' };
+}
+
+function playResultAudio(path, name) {
+  var info = _getActivePlayerInfo();
+  var player = document.getElementById(info.player);
+  var bar = document.getElementById(info.bar);
+  player.src = API + '/api/results/stream?path=' + encodeURIComponent(path);
+  player.load();
+  player.play().catch(function(){});
+  document.getElementById(info.name).textContent = name || path;
+  bar.style.display = 'block';
+
+  if (_playingEl) _playingEl.classList.remove('playing');
+  _playingEl = null;
+  var containers = ['#approved-list', '#denoise-file-list', '#denoise-result-list'];
+  for (var c = 0; c < containers.length; c++) {
+    var items = document.querySelectorAll(containers[c] + ' .file-item');
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].getAttribute('data-path') === path) {
+        items[i].classList.add('playing');
+        _playingEl = items[i];
+        return;
+      }
+    }
+  }
+}
+
+function closeResultsPlayer() {
+  var info = _getActivePlayerInfo();
+  var player = document.getElementById(info.player);
+  player.pause();
+  player.src = '';
+  document.getElementById(info.bar).style.display = 'none';
+  if (_playingEl) { _playingEl.classList.remove('playing'); _playingEl = null; }
+}
+
+function closeDenoisePlayer() { closeResultsPlayer(); }
+
+// ============================================================
+// Denoise
+// ============================================================
+var _denoiseSources = [];       // {name, path, size_mb, duration_s}
+var _denoiseResults = [];      // passed files {name, path, size_mb, duration_s}
+var _denoiseDiscarded = [];    // discarded files {name, path, reason}
+var _denoiseJobId = null;
+var _denoisePollTimer = null;
+var _denoiseSourceSelectMode = false;
+var _denoiseSourceSelected = {};
+var _denoiseResultSelectMode = false;
+var _denoiseResultSelected = {};
+
+// Default step order (all enabled)
+var STEP_DEFAULTS = [
+  {key: 'enhance', label: '语音增强', enabled: true},
+  {key: 'super_resolve', label: '超分辨率', enabled: true},
+  {key: 'reverb', label: '混响检测', enabled: true},
+  {key: 'silence', label: '静音过滤', enabled: true},
+  {key: 'vad', label: 'VAD', enabled: true},
+  {key: 'pad', label: '规范化', enabled: true},
+];
+var _denoiseSteps = JSON.parse(JSON.stringify(STEP_DEFAULTS)); // deep copy
+
+// Get active STEP_CONFIG for rendering (enabled steps only)
+function getActiveStepConfig() {
+  var config = [];
+  var num = 1;
+  for (var i = 0; i < _denoiseSteps.length; i++) {
+    if (_denoiseSteps[i].enabled) {
+      config.push({key: _denoiseSteps[i].key, label: _denoiseSteps[i].label, num: num});
+      num++;
+    }
+  }
+  return config;
+}
+
+// Get ordered list of enabled step keys (sent to API)
+function getEnabledStepKeys() {
+  var keys = [];
+  for (var i = 0; i < _denoiseSteps.length; i++) {
+    if (_denoiseSteps[i].enabled) keys.push(_denoiseSteps[i].key);
+  }
+  return keys;
+}
+
+function stepStatusForDisplay(steps, stepKey) {
+  for (var i = steps.length - 1; i >= 0; i--) {
+    if (steps[i].step === stepKey) return steps[i].status;
+  }
+  return 'pending';
+}
+
+function renderStepDots(steps) {
+  var config = getActiveStepConfig();
+  var html = '';
+  for (var i = 0; i < config.length; i++) {
+    var sc = config[i];
+    var status = stepStatusForDisplay(steps || [], sc.key);
+    html += '<span class="step-dot ' + status + '" title="' + sc.label + '">' + sc.num + '</span>';
+  }
+  return html;
+}
+
+// ============================================================
+// Step config panel (drag + toggle)
+// ============================================================
+function renderStepConfig() {
+  var cont = document.getElementById('denoise-step-list');
+  var html = '';
+  for (var i = 0; i < _denoiseSteps.length; i++) {
+    var s = _denoiseSteps[i];
+    var cls = s.enabled ? '' : 'step-disabled';
+    html += '<div class="step-config-item ' + cls + '" draggable="true" data-step-idx="' + i + '"';
+    html += ' style="display:flex;align-items:center;gap:4px;background:var(--bg3);border-radius:6px;padding:4px 8px;cursor:grab;transition:opacity 0.2s;';
+    if (!s.enabled) html += 'opacity:0.45;';
+    html += '">';
+    html += '<span style="cursor:grab;color:var(--text2);font-size:12px;" title="拖拽排序">⠿</span>';
+    html += '<input type="checkbox" ' + (s.enabled ? 'checked' : '') + ' data-step-toggle="' + s.key + '" style="cursor:pointer;">';
+    html += '<span style="font-size:11px;color:' + (s.enabled ? 'var(--text)' : 'var(--text2)') + ';white-space:nowrap;">' + s.label + '</span>';
+    html += '</div>';
+    if (i < _denoiseSteps.length - 1) {
+      html += '<span style="color:var(--text2);font-size:10px;">→</span>';
+    }
+  }
+  cont.innerHTML = html;
+
+  // Wire checkbox toggles
+  var toggles = cont.querySelectorAll('[data-step-toggle]');
+  for (var t = 0; t < toggles.length; t++) {
+    toggles[t].onchange = function() {
+      var key = this.getAttribute('data-step-toggle');
+      for (var s = 0; s < _denoiseSteps.length; s++) {
+        if (_denoiseSteps[s].key === key) {
+          _denoiseSteps[s].enabled = this.checked;
+          break;
+        }
+      }
+      renderStepConfig();
+      renderDenoiseFileList();
+    };
+  }
+
+  // Wire drag-and-drop
+  var items = cont.querySelectorAll('.step-config-item');
+  var dragIdx = -1;
+  for (var d = 0; d < items.length; d++) {
+    items[d].addEventListener('dragstart', function(e) {
+      dragIdx = parseInt(this.getAttribute('data-step-idx'));
+      this.style.opacity = '0.4';
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    items[d].addEventListener('dragend', function(e) {
+      this.style.opacity = '';
+      dragIdx = -1;
+      // Remove all drop-zone highlights
+      var all = cont.querySelectorAll('.step-config-item');
+      for (var a = 0; a < all.length; a++) all[a].style.borderLeft = '';
+    });
+    items[d].addEventListener('dragover', function(e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      this.style.borderLeft = '2px solid var(--accent)';
+    });
+    items[d].addEventListener('dragleave', function(e) {
+      this.style.borderLeft = '';
+    });
+    items[d].addEventListener('drop', function(e) {
+      e.preventDefault();
+      this.style.borderLeft = '';
+      var dropIdx = parseInt(this.getAttribute('data-step-idx'));
+      if (dragIdx >= 0 && dragIdx !== dropIdx) {
+        var moved = _denoiseSteps.splice(dragIdx, 1)[0];
+        _denoiseSteps.splice(dropIdx, 0, moved);
+        renderStepConfig();
+        renderDenoiseFileList();
+      }
+    });
+  }
+}
+
+function resetStepConfig() {
+  _denoiseSteps = JSON.parse(JSON.stringify(STEP_DEFAULTS));
+  renderStepConfig();
+  renderDenoiseFileList();
+}
+
+// ============================================================
+// Load sources
+// ============================================================
+async function loadDenoiseDirs() {
+  try {
+    var resp = await fetch(API + '/api/results/videos');
+    var data = await resp.json();
+    var sel = document.getElementById('denoise-video-select');
+    var curVal = sel.value;
+    sel.innerHTML = '<option value="">选择视频...</option>';
+    for (var i = 0; i < data.videos.length; i++) {
+      var v = data.videos[i];
+      sel.innerHTML += '<option value="' + escapeHtml(v.name) + '">' + escapeHtml(v.name) + ' (' + v.approved + ' 个音频)</option>';
+    }
+    if (curVal) {
+      for (var j = 0; j < sel.options.length; j++) {
+        if (sel.options[j].value === curVal) { sel.selectedIndex = j; break; }
+      }
+    }
+    if (data.videos.length > 0 && !curVal) { sel.selectedIndex = 1; loadDenoiseSources(); }
+    else if (curVal) loadDenoiseSources();
+  } catch(e) {}
+}
+
+async function loadDenoiseSources() {
+  var name = document.getElementById('denoise-video-select').value;
+  _denoiseSources = []; _denoiseResults = []; _denoiseDiscarded = [];
+  _denoiseSourceSelectMode = false; _denoiseSourceSelected = {};
+  _denoiseResultSelectMode = false; _denoiseResultSelected = {};
+  stopPolling();
+
+  if (!name) {
+    document.getElementById('denoise-file-list').innerHTML = '<div class="empty-state"><p>选择视频后显示待处理音频</p></div>';
+    document.getElementById('denoise-results-section').style.display = 'none';
+    document.getElementById('denoise-discarded-section').style.display = 'none';
+    hideDenoiseButtons();
+    return;
+  }
+
+  // Load approved sources
+  try {
+    var aResp = await fetch(API + '/api/results/video/' + encodeURIComponent(name) + '/approved');
+    var aData = await aResp.json();
+    _denoiseSources = aData.approved || [];
+  } catch(e) {}
+
+  // Load already-cleaned results
+  try {
+    var cResp = await fetch(API + '/api/results/video/' + encodeURIComponent(name) + '/cleaned');
+    var cData = await cResp.json();
+    _denoiseResults = cData.cleaned || [];
+  } catch(e) {}
+
+  // Filter out already-denoised sources
+  var cleanedNames = {};
+  for (var i = 0; i < _denoiseResults.length; i++) {
+    cleanedNames[_denoiseResults[i].name] = true;
+  }
+  _denoiseSources = _denoiseSources.filter(function(s) {
+    return !cleanedNames[s.name.replace('.wav', '_norm.wav')] && !cleanedNames[s.name];
+  });
+
+  renderDenoiseFileList();
+  renderDenoiseResults();
+  renderDenoiseDiscarded();
+  updateDenoiseStats();
+  showDenoiseButtons();
+}
+
+function hideDenoiseButtons() {
+  document.getElementById('btn-denoise-all').style.display = 'none';
+  document.getElementById('btn-denoise-selected').style.display = 'none';
+  document.getElementById('btn-denoise-select-all').style.display = 'none';
+  document.getElementById('btn-denoise-delete-src').style.display = 'none';
+  document.getElementById('btn-denoise-source-select').style.display = 'none';
+  document.getElementById('btn-denoise-refresh').style.display = 'none';
+  document.getElementById('denoise-step-config').style.display = 'none';
+}
+
+function showDenoiseButtons() {
+  document.getElementById('btn-denoise-all').style.display = 'inline-block';
+  document.getElementById('btn-denoise-source-select').style.display = 'inline-block';
+  document.getElementById('btn-denoise-refresh').style.display = 'inline-block';
+  document.getElementById('denoise-step-config').style.display = 'block';
+  renderStepConfig();
+}
+
+function refreshDenoise() {
+  loadDenoiseSources();
+  toast('列表已刷新', 'info');
+}
+
+function updateDenoiseStats() {
+  var pending = _denoiseSources.length;
+  var passed = _denoiseResults.length;
+  var enabled = getEnabledStepKeys().length;
+  var msg = pending + ' 个待降噪 | ' + enabled + ' 步';
+  if (passed > 0) msg += ' | ' + passed + ' 个已通过';
+  document.getElementById('denoise-stats').textContent = msg;
+}
+
+// ============================================================
+// Render file list with step indicators
+// ============================================================
+function renderDenoiseFileList() {
+  var cont = document.getElementById('denoise-file-list');
+  if (!_denoiseSources.length && !_denoiseJobId) {
+    cont.innerHTML = '<div class="empty-state"><p>暂无待处理音频</p></div>';
+    return;
+  }
+
+  var config = getActiveStepConfig();
+  var html = '';
+  for (var i = 0; i < _denoiseSources.length; i++) {
+    var a = _denoiseSources[i];
+    var durStr = a.duration_s > 0 ? formatDuration(a.duration_s) : '?';
+    var checked = _denoiseSourceSelected[a.path] ? ' checked' : '';
+
+    html += '<div class="denoise-file-card pending" data-denoise-path="' + safeAttr(a.path) + '">';
+    html += '<div style="display:flex;align-items:center;gap:10px;">';
+    if (_denoiseSourceSelectMode) {
+      html += '<input type="checkbox" value="' + safeAttr(a.path) + '" style="flex-shrink:0;"' + checked + ' data-src-check="1">';
+    }
+    html += '<span style="font-size:14px;cursor:pointer;" data-play="' + safeAttr(a.path) + '" data-playname="' + safeAttr(a.name) + '">🎵</span>';
+    html += '<span style="flex:1;font-size:12px;cursor:pointer;" data-play="' + safeAttr(a.path) + '" data-playname="' + safeAttr(a.name) + '">' + escapeHtml(a.name) + '</span>';
+    html += '<span style="font-size:11px;color:var(--text2);">' + durStr + ' | ' + a.size_mb + 'MB</span>';
+    html += '<span style="display:flex;gap:3px;" data-denoise-steps="' + safeAttr(a.path) + '">';
+    for (var s = 0; s < config.length; s++) {
+      html += '<span class="step-dot" title="' + config[s].label + '">' + config[s].num + '</span>';
+    }
+    html += '</span>';
+    html += '</div></div>';
+  }
+  cont.innerHTML = html;
+
+  if (_denoiseSourceSelectMode) {
+    var checks = cont.querySelectorAll('input[data-src-check]');
+    for (var k = 0; k < checks.length; k++) {
+      checks[k].onchange = function() {
+        _denoiseSourceSelected[this.value] = this.checked;
+        var n = Object.values(_denoiseSourceSelected).filter(function(v) { return v; }).length;
+        document.getElementById('btn-denoise-selected').textContent = '降噪选中 (' + n + ')';
+        document.getElementById('btn-denoise-selected').style.display = n > 0 ? 'inline-block' : 'none';
+      };
+    }
+  }
+}
+
+// ============================================================
+// Start/poll denoise job
+// ============================================================
+async function denoiseAll() {
+  if (!_denoiseSources.length) { toast('没有可降噪的音频', 'info'); return; }
+  var paths = _denoiseSources.map(function(s) { return s.path; });
+  startDenoiseJob(paths);
+}
+
+async function denoiseSelected() {
+  var selected = Object.keys(_denoiseSourceSelected).filter(function(k) { return _denoiseSourceSelected[k]; });
+  if (!selected.length) { toast('请先选择要降噪的音频', 'info'); return; }
+  startDenoiseJob(selected);
+}
+
+async function startDenoiseJob(paths) {
+  var enabledKeys = getEnabledStepKeys();
+  if (!enabledKeys.length) { toast('请至少启用一个处理步骤', 'error'); return; }
+
+  _denoiseSourceSelectMode = false; _denoiseSourceSelected = {};
+  document.getElementById('btn-denoise-selected').style.display = 'none';
+  document.getElementById('btn-denoise-select-all').style.display = 'none';
+  document.getElementById('btn-denoise-delete-src').style.display = 'none';
+
+  var videoName = document.getElementById('denoise-video-select').value;
+  try {
+    var resp = await fetch(API + '/api/denoise/batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ video_name: videoName, paths: paths, steps: enabledKeys })
+    });
+    var data = await resp.json();
+    if (data.status !== 'ok') { toast('启动失败', 'error'); return; }
+    _denoiseJobId = data.job_id;
+    startPolling();
+    document.getElementById('denoise-progress').style.display = 'block';
+    document.getElementById('btn-denoise-all').style.display = 'none';
+    document.getElementById('btn-denoise-source-select').style.display = 'none';
+    toast('降噪任务已启动 (' + enabledKeys.length + ' 步)，共 ' + data.file_count + ' 个文件', 'info');
+  } catch(e) { toast('启动失败: ' + e.message, 'error'); }
+}
+
+function startPolling() {
+  if (_denoisePollTimer) clearInterval(_denoisePollTimer);
+  _denoisePollTimer = setInterval(pollDenoiseJob, 1000);
+  pollDenoiseJob();
+}
+
+function stopPolling() {
+  if (_denoisePollTimer) { clearInterval(_denoisePollTimer); _denoisePollTimer = null; }
+  _denoiseJobId = null;
+}
+
+async function pollDenoiseJob() {
+  if (!_denoiseJobId) { stopPolling(); return; }
+  try {
+    var resp = await fetch(API + '/api/denoise/job/' + _denoiseJobId);
+    var job = await resp.json();
+    updateDenoiseUI(job);
+    if (job.status === 'completed') { stopPolling(); onDenoiseComplete(job); }
+  } catch(e) {}
+}
+
+function updateDenoiseUI(job) {
+  var fill = document.getElementById('denoise-progress-fill');
+  var text = document.getElementById('denoise-progress-text');
+  fill.style.width = Math.round(job.progress) + '%';
+  text.textContent = '处理中... ' + job.current_file + ' (' + Math.round(job.progress) + '%)';
+
+  for (var i = 0; i < job.files.length; i++) {
+    var f = job.files[i];
+    var stepsContainer = document.querySelector('[data-denoise-steps="' + safeAttr(f.input_path) + '"]');
+    if (!stepsContainer) continue;
+    var dotsHtml = renderStepDots(f.steps);
+    stepsContainer.innerHTML = dotsHtml;
+
+    var card = stepsContainer.closest('.denoise-file-card');
+    if (card) {
+      card.className = 'denoise-file-card ' + f.status;
+    }
+  }
+}
+
+function onDenoiseComplete(job) {
+  document.getElementById('denoise-progress').style.display = 'none';
+  document.getElementById('denoise-progress-fill').style.width = '0%';
+
+  _denoiseResults = [];
+  _denoiseDiscarded = [];
+  for (var i = 0; i < job.files.length; i++) {
+    var f = job.files[i];
+    if (f.status === 'completed' && f.output_path) {
+      _denoiseResults.push({
+        name: f.output_path.split('/').pop().split('\\').pop(),
+        path: f.output_path,
+        size_mb: '',
+        duration_s: 0,
+      });
+    } else if (f.status === 'discarded') {
+      var reason = '';
+      for (var s = 0; s < f.steps.length; s++) {
+        if (f.steps[s].status === 'discarded') { reason = f.steps[s].message; break; }
+      }
+      _denoiseDiscarded.push({ name: f.name, path: f.input_path, reason: reason });
+    }
+  }
+
+  _denoiseSources = [];
+  renderDenoiseFileList();
+  renderDenoiseResults();
+  renderDenoiseDiscarded();
+  updateDenoiseStats();
+  showDenoiseButtons();
+  toast('降噪完成！通过 ' + _denoiseResults.length + ' 个，舍弃 ' + _denoiseDiscarded.length + ' 个', 'success');
+}
+
+// ============================================================
+// Render results (passed)
+// ============================================================
+function renderDenoiseResults() {
+  var section = document.getElementById('denoise-results-section');
+  var cont = document.getElementById('denoise-result-list');
+  var title = document.getElementById('denoise-passed-count');
+  var btnSel = document.getElementById('btn-denoise-result-select');
+  var btnExit = document.getElementById('btn-denoise-result-exit');
+  var btnDel = document.getElementById('btn-denoise-result-delete');
+
+  if (!_denoiseResults.length) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+  title.textContent = _denoiseResults.length;
+
+  btnSel.style.display = _denoiseResultSelectMode ? 'none' : 'inline-block';
+  btnExit.style.display = _denoiseResultSelectMode ? 'inline-block' : 'none';
+  document.getElementById('btn-denoise-result-selectall').style.display = _denoiseResultSelectMode ? 'inline-block' : 'none';
+  btnDel.style.display = _denoiseResultSelectMode ? 'inline-block' : 'none';
+
+  var html = '';
+  for (var i = 0; i < _denoiseResults.length; i++) {
+    var a = _denoiseResults[i];
+    var durStr = a.duration_s > 0 ? formatDuration(a.duration_s) : '?';
+    var sizeStr = a.size_mb ? a.size_mb + 'MB' : '';
+    var checked = _denoiseResultSelected[a.path] ? ' checked' : '';
+
+    html += '<div class="file-item" data-path="' + safeAttr(a.path) + '" style="background:#1a2a1a;">';
+    if (_denoiseResultSelectMode) {
+      html += '<input type="checkbox" value="' + safeAttr(a.path) + '" style="flex-shrink:0;"' + checked + ' data-result-check="1">';
+    }
+    html += '<span style="font-size:14px;cursor:pointer;" data-play="' + safeAttr(a.path) + '" data-playname="' + safeAttr(a.name) + '">🎵</span>';
+    html += '<span class="file-name" style="font-size:12px;cursor:pointer;color:var(--success);" data-play="' + safeAttr(a.path) + '" data-playname="' + safeAttr(a.name) + '">' + escapeHtml(a.name) + '</span>';
+    html += '<span class="file-size">' + (durStr + (sizeStr ? ' | ' + sizeStr : '')) + '</span>';
+    html += '</div>';
+  }
+  cont.innerHTML = html;
+
+  if (_denoiseResultSelectMode) {
+    var checks = cont.querySelectorAll('input[data-result-check]');
+    for (var k = 0; k < checks.length; k++) {
+      checks[k].onchange = function() {
+        _denoiseResultSelected[this.value] = this.checked;
+      };
+    }
+  }
+}
+
+// ============================================================
+// Render discarded
+// ============================================================
+function renderDenoiseDiscarded() {
+  var section = document.getElementById('denoise-discarded-section');
+  var cont = document.getElementById('denoise-discarded-list');
+  var count = document.getElementById('denoise-discarded-count');
+
+  if (!_denoiseDiscarded.length) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+  count.textContent = _denoiseDiscarded.length;
+
+  var html = '';
+  for (var i = 0; i < _denoiseDiscarded.length; i++) {
+    var d = _denoiseDiscarded[i];
+    html += '<div class="file-item" style="opacity:0.7;">';
+    html += '<span style="font-size:14px;">🗑️</span>';
+    html += '<span class="file-name" style="font-size:12px;color:var(--danger);">' + escapeHtml(d.name) + '</span>';
+    html += '<span style="font-size:11px;color:var(--text2);">' + escapeHtml(d.reason || '已舍弃') + '</span>';
+    html += '</div>';
+  }
+  cont.innerHTML = html;
+}
+
+// ============================================================
+// Selection toggles
+// ============================================================
+function toggleSourceSelect() {
+  _denoiseSourceSelectMode = !_denoiseSourceSelectMode;
+  if (!_denoiseSourceSelectMode) {
+    _denoiseSourceSelected = {};
+    document.getElementById('btn-denoise-selected').style.display = 'none';
+    document.getElementById('btn-denoise-select-all').style.display = 'none';
+    document.getElementById('btn-denoise-delete-src').style.display = 'none';
+  }
+  document.getElementById('btn-denoise-source-select').textContent = _denoiseSourceSelectMode ? '退出选择' : '选择';
+  if (_denoiseSourceSelectMode) {
+    document.getElementById('btn-denoise-selected').style.display = 'inline-block';
+    document.getElementById('btn-denoise-selected').textContent = '降噪选中';
+    document.getElementById('btn-denoise-select-all').style.display = 'inline-block';
+    document.getElementById('btn-denoise-delete-src').style.display = 'inline-block';
+  }
+  renderDenoiseFileList();
+}
+
+function selectAllSources() {
+  for (var i = 0; i < _denoiseSources.length; i++) {
+    _denoiseSourceSelected[_denoiseSources[i].path] = true;
+  }
+  var n = Object.values(_denoiseSourceSelected).filter(function(v) { return v; }).length;
+  document.getElementById('btn-denoise-selected').textContent = '降噪选中 (' + n + ')';
+  renderDenoiseFileList();
+}
+
+async function deleteSelectedSources() {
+  var paths = Object.keys(_denoiseSourceSelected).filter(function(k) { return _denoiseSourceSelected[k]; });
+  if (!paths.length) { toast('请先选择要删除的音频', 'info'); return; }
+  if (!confirm('确定删除 ' + paths.length + ' 个未处理音频？此操作不可恢复。')) return;
+  try {
+    var resp = await fetch(API + '/api/results/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: paths })
+    });
+    var data = await resp.json();
+    toast('已删除 ' + data.deleted + ' 个文件', 'success');
+    _denoiseSourceSelected = {};
+    loadDenoiseSources();
+  } catch(e) { toast('删除失败: ' + e.message, 'error'); }
+}
+
+function enterResultSelect() {
+  _denoiseResultSelectMode = true;
+  _denoiseResultSelected = {};
+  renderDenoiseResults();
+}
+
+function exitResultSelect() {
+  _denoiseResultSelectMode = false;
+  _denoiseResultSelected = {};
+  renderDenoiseResults();
+}
+
+function selectAllDenoiseResults() {
+  for (var i = 0; i < _denoiseResults.length; i++) {
+    _denoiseResultSelected[_denoiseResults[i].path] = true;
+  }
+  renderDenoiseResults();
+}
+
+async function deleteDenoiseResults() {
+  var paths = Object.keys(_denoiseResultSelected).filter(function(k) { return _denoiseResultSelected[k]; });
+  if (!paths.length) { toast('请先选择要删除的音频', 'info'); return; }
+  if (!confirm('确定删除 ' + paths.length + ' 个降噪音频？')) return;
+  try {
+    var resp = await fetch(API + '/api/results/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: paths })
+    });
+    var data = await resp.json();
+    toast('已删除 ' + data.deleted + ' 个文件', 'success');
+    exitResultSelect();
+    loadDenoiseSources();
+  } catch(e) { toast('删除失败: ' + e.message, 'error'); }
+}
+
+function formatDuration(sec) {
+  var m = Math.floor(sec / 60);
+  var s = Math.floor(sec % 60);
+  return m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+async function deleteSelected() {
+  var paths = Object.keys(_resultsSelected).filter(function(k) { return _resultsSelected[k]; });
+  if (!paths.length) { toast('请先选择要删除的音频', 'info'); return; }
+  if (!confirm('确定删除 ' + paths.length + ' 个音频文件？此操作不可恢复。')) return;
+
+  try {
+    var resp = await fetch(API + '/api/results/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: paths })
+    });
+    var data = await resp.json();
+    toast('已删除 ' + data.deleted + ' 个文件', 'success');
+    if (data.failed && data.failed.length) toast('失败 ' + data.failed.length + ' 个', 'error');
+    exitSelectMode();
+    loadResultsForVideo();
+  } catch(e) {
+    toast('删除失败: ' + e.message, 'error');
+  }
+}
+
+// ============================================================
+// Init
+// ============================================================
+loadLocalFiles();
+fetchFansubTeams();
+
+async function fetchFansubTeams() {
+  try {
+    var resp = await fetch(API + '/api/teams');
+    var data = await resp.json();
+    var list = document.getElementById('fansub-datalist');
+    list.innerHTML = '';
+    if (data.teams && data.teams.length) {
+      for (var i = 0; i < data.teams.length; i++) {
+        var name = data.teams[i].name || '';
+        if (name) list.innerHTML += '<option value="' + escapeHtml(name) + '">';
+      }
+    }
+  } catch(e) {}
+}
+
+// Auto-remove highlight when audio finishes
+document.getElementById('results-audio-player').addEventListener('ended', function() {
+  if (_playingEl) { _playingEl.classList.remove('playing'); _playingEl = null; }
+});
+</script>
+</body>
+</html>
