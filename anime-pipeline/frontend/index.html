@@ -1653,9 +1653,7 @@ async function detectBgmClips() {
         var job = await r2.json();
         if (job.status === 'completed') {
           clearInterval(pollTimer);
-          btn.disabled = false;
-          btn.textContent = '检测BGM/混响';
-          // Extract results from step data
+          // Extract results
           var results = [];
           if (job.steps && job.steps.length) {
             var stepData = job.steps[job.steps.length - 1].data;
@@ -1667,8 +1665,24 @@ async function detectBgmClips() {
           if (results.length === 0) {
             toast('未检测到BGM/混响片段', 'success');
           } else {
-            toast('检测到 ' + results.length + ' 个BGM/混响片段', 'info');
+            // Auto-delete all detected BGM/reverb clips
+            var toDelete = [];
+            for (var i = 0; i < results.length; i++) { toDelete.push(results[i].path); }
+            try {
+              var dr = await fetch(API + '/api/results/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paths: toDelete }),
+              });
+              var dd = await dr.json();
+              toast('已自动删除 ' + dd.deleted + ' 个BGM/混响片段', 'success');
+              _bgmResults = [];
+              renderBgmResults();
+              loadReviewClips();
+            } catch(e2) { toast('自动删除失败: ' + e2.message, 'error'); }
           }
+          btn.disabled = false;
+          btn.textContent = '检测BGM/混响';
         } else if (job.status === 'failed') {
           clearInterval(pollTimer);
           btn.disabled = false;
@@ -1812,8 +1826,6 @@ async function detectMaleClips() {
         var job = await r2.json();
         if (job.status === 'completed') {
           clearInterval(pollTimer);
-          btn.disabled = false;
-          btn.textContent = '检测男声';
           var results = [];
           if (job.steps && job.steps.length) {
             var sd = job.steps[job.steps.length - 1].data;
@@ -1822,7 +1834,27 @@ async function detectMaleClips() {
           _maleResults = results;
           _maleSelected = {};
           renderMaleResults();
-          toast('检测到 ' + results.length + ' 个男声片段', 'info');
+          if (results.length === 0) {
+            toast('未检测到男声片段', 'success');
+          } else {
+            // Auto-delete all male voice clips
+            var toDelete = [];
+            for (var i = 0; i < results.length; i++) { toDelete.push(results[i].path); }
+            try {
+              var dr = await fetch(API + '/api/results/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paths: toDelete }),
+              });
+              var dd = await dr.json();
+              toast('已自动删除 ' + dd.deleted + ' 个男声片段', 'success');
+              _maleResults = [];
+              renderMaleResults();
+              loadReviewClips();
+            } catch(e2) { toast('自动删除失败: ' + e2.message, 'error'); }
+          }
+          btn.disabled = false;
+          btn.textContent = '检测男声';
         } else if (job.status === 'failed') {
           clearInterval(pollTimer);
           btn.disabled = false;
