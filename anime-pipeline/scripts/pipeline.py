@@ -192,8 +192,13 @@ class Pipeline:
         title: str = "",
         hw_accel: str = "auto",
         on_step: Optional[Callable] = None,
+        download_method: str = "aria2c",
     ) -> PipelineJob:
         """Run the complete pipeline: download (if magnet) -> extract subs -> split.
+
+        Args:
+            download_method: One of 'aria2c', 'qbittorrent', 'bitcomet'.
+                             aria2c = headless daemon, others = GUI apps.
 
         If mkv_path is provided, skip the download step and use the local file directly.
         """
@@ -203,55 +208,79 @@ class Pipeline:
 
         steps = []
 
-        # --- Step 1: Submit to aria2c daemon (non-blocking) ---
+        # --- Step 1: Submit to download backend (non-blocking) ---
         if magnet and not mkv_path:
             job.current_step = "download"
             job.progress = 5
             t0 = time.time()
+
+            method = download_method.lower()
+            backend_label = download_method
             try:
-                from aria2_rpc import add_magnet, tell_status
+                if method == "qbittorrent":
+                    from qbittorrent_client import add_magnet as _add_mag
+                    _add_mag(magnet, save_path=DOWNLOAD_DIR)
+                    steps.append(StepResult(
+                        step="download",
+                        status=StepStatus.COMPLETED,
+                        message=f"已提交到 qBittorrent 下载\n下载完成后将自动检测并触发处理。",
+                        data={"method": "qbittorrent"},
+                        duration_seconds=time.time() - t0,
+                    ))
+                elif method == "bitcomet":
+                    from bitcomet_client import add_magnet as _add_mag
+                    _add_mag(magnet, save_path=DOWNLOAD_DIR)
+                    steps.append(StepResult(
+                        step="download",
+                        status=StepStatus.COMPLETED,
+                        message=f"已提交到 BitComet 下载\n下载完成后将自动检测并触发处理。",
+                        data={"method": "bitcomet"},
+                        duration_seconds=time.time() - t0,
+                    ))
+                else:
+                    # Default: aria2c
+                    from aria2_rpc import add_magnet, tell_status
 
-                gid = add_magnet(magnet)
-                job.gid = gid
-                status = tell_status(gid)
-                name = status.get("bittorrent", {}).get("info", {}).get("name", "")
-                total_mb = int(status.get("totalLength", 0)) / 1024 / 1024
+                    gid = add_magnet(magnet)
+                    job.gid = gid
+                    status = tell_status(gid)
+                    name = status.get("bittorrent", {}).get("info", {}).get("name", "")
+                    total_mb = int(status.get("totalLength", 0)) / 1024 / 1024
 
+                    steps.append(StepResult(
+                        step="download",
+                        status=StepStatus.COMPLETED,
+                        message=(
+                            f"已提交到 aria2c 后台下载"
+                            + (f" ({name[:40]})" if name else "")
+                            + (f" | 大小: {total_mb:.0f}MB" if total_mb > 0 else "")
+                            + "\n下载完成后文件监控器会自动检测并触发处理。"
+                        ),
+                        data={"gid": gid, "name": name, "method": "aria2c"},
+                        duration_seconds=time.time() - t0,
+                    ))
                 job.progress = 10
-                steps.append(StepResult(
-                    step="download",
-                    status=StepStatus.COMPLETED,
-                    message=(
-                        f"已提交到 aria2c 后台下载"
-                        + (f" ({name[:40]})" if name else "")
-                        + (f" | 大小: {total_mb:.0f}MB" if total_mb > 0 else "")
-                        + "\n下载完成后文件监控器会自动检测并触发处理。"
-                    ),
-                    data={"gid": gid, "name": name},
-                    duration_seconds=time.time() - t0,
-                ))
             except RuntimeError as e:
                 msg = str(e)
-                # Handle duplicate: link to existing download
                 if "already registered" in msg.lower() or "duplicate" in msg.lower():
                     steps.append(StepResult(
                         step="download",
                         status=StepStatus.COMPLETED,
-                        message=f"该资源已在 aria2c 下载队列中，无需重复添加。\n下载完成后将自动处理。",
+                        message=f"该资源已在下载队列中，无需重复添加。\n下载完成后将自动处理。",
                         duration_seconds=time.time() - t0,
                     ))
                 else:
                     steps.append(StepResult(
                         step="download",
                         status=StepStatus.FAILED,
-                        message=f"aria2 添加失败: {msg}",
+                        message=f"{backend_label} 添加失败: {msg}",
                         duration_seconds=time.time() - t0,
                     ))
             except Exception as e:
                 steps.append(StepResult(
                     step="download",
                     status=StepStatus.FAILED,
-                    message=f"aria2 异常: {e}",
+                    message=f"{backend_label} 异常: {e}",
                     duration_seconds=time.time() - t0,
                 ))
             job.steps = steps

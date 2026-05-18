@@ -41,6 +41,9 @@ ARIA2C = _ARIA2C_LOCAL if os.path.exists(_ARIA2C_LOCAL) else "aria2c"
 # qBittorrent — primary download backend
 QBITTORRENT_EXE = r"C:\Program Files\qBittorrent\qbittorrent.exe"
 
+# BitComet — alternative download backend
+BITCOMET_EXE = r"C:\Program Files\BitComet\BitComet.exe"
+
 # --- Video splitting ---
 # Hardware acceleration: auto-detect, or force one of: nvenc, amf, qsv, none
 HW_ACCEL = "auto"

@@ -426,11 +426,11 @@ def start_process_download(
     magnet: str = Query(..., description="Magnet link to download and process"),
     title: str = Query("", description="Anime title"),
     hw_accel: str = Query("auto"),
+    method: str = Query("aria2c", description="Download method: aria2c, qbittorrent, bitcomet"),
 ):
-    """Download via aria2c, fall back to file watcher if P2P fails.
+    """Download via selected method, fall back to file watcher if P2P fails.
 
-    Also returns magnet for manual download. The file watcher monitors
-    video/ and downloads/ for new MKV files regardless.
+    The file watcher monitors video/ and downloads/ for new MKV files regardless.
     """
     job_id = uuid.uuid4().hex[:12]
 
@@ -441,6 +441,7 @@ def start_process_download(
                 magnet=magnet,
                 title=title,
                 hw_accel=hw_accel,
+                download_method=method,
             )
         except Exception:
             pass
@@ -449,18 +450,48 @@ def start_process_download(
 
     from file_watcher import is_watching
 
+    method_labels = {"aria2c": "aria2c", "qbittorrent": "qBittorrent", "bitcomet": "BitComet"}
+    label = method_labels.get(method.lower(), method)
+
     return {
         "job_id": job_id,
         "title": title or magnet[:60],
         "status": "started",
         "magnet": magnet,
+        "method": method,
         "watching": is_watching(),
         "message": (
-            "下载任务已启动。如果 P2P 下载失败（无可用节点），"
-            "可使用磁力链接通过 qBittorrent / 迅雷等工具下载，"
+            f"已提交到 {label} 下载。如果 P2P 下载失败（无可用节点），"
+            "可使用磁力链接通过其他下载工具下载，"
             "将 MKV 放入 video/ 目录后系统会自动检测并处理。"
         ),
     }
+
+
+@app.get("/api/backend/status")
+def get_backend_status():
+    """Check which download backends are available."""
+    status = {
+        "aria2c": False,
+        "qbittorrent": False,
+        "bitcomet": False,
+    }
+    try:
+        from aria2_rpc import ensure_running
+        status["aria2c"] = ensure_running()
+    except Exception:
+        pass
+    try:
+        from qbittorrent_client import ensure_running
+        status["qbittorrent"] = ensure_running()
+    except Exception:
+        pass
+    try:
+        from bitcomet_client import ensure_running
+        status["bitcomet"] = ensure_running()
+    except Exception:
+        pass
+    return status
 
 
 @app.post("/api/jobs/{job_id}/filter")
@@ -1052,6 +1083,99 @@ def detect_bgm_clips(
             status=StepStatus.COMPLETED,
             message=f"检测完成: {len(mp4_files)} 个片段中 {len(results)} 个含有BGM/混响",
             data={"results": results},
+        )]
+        pipeline._save_jobs()
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    return {"status": "started", "job_id": job_id}
+
+
+@app.post("/api/review/detect-male")
+def detect_male_voices(
+    clip_dir: str = Query(..., description="Path to clip directory"),
+):
+    """Analyze all clips for male voices using pitch detection. Runs in background.
+
+    Uses ffmpeg pipe + ThreadPoolExecutor for ~4x speedup over sequential temp files.
+    """
+    if not os.path.exists(clip_dir):
+        raise HTTPException(status_code=404, detail="Clip directory not found")
+
+    job_id = uuid.uuid4().hex[:12]
+
+    def _run():
+        import numpy as np
+        from audio_pipeline import analyze_clip_gender
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def _extract_audio_pipe(video_path: str):
+            """Extract first 30s of audio as float32 numpy array via ffmpeg pipe."""
+            proc = subprocess.Popen(
+                [FFMPEG, "-y", "-i", video_path, "-vn", "-acodec", "pcm_s16le",
+                 "-ar", "16000", "-ac", "1", "-t", "30", "-f", "wav", "pipe:1"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            )
+            raw = proc.stdout.read()
+            proc.wait(timeout=10)
+            if len(raw) < 44:
+                return None
+            audio = np.frombuffer(raw[44:], dtype=np.int16).astype(np.float32) / 32768.0
+            return audio
+
+        mp4_files = sorted([f for f in os.listdir(clip_dir) if f.endswith(".mp4")])
+        total = len(mp4_files)
+        male_results = []
+
+        job = pipeline.create_job(job_id, title="男声检测: " + os.path.basename(clip_dir))
+        job.status = "running"
+        job.current_step = "analyzing"
+        job.progress = 0
+
+        # Build work list: (index, name, path)
+        work = [(i, f, os.path.join(clip_dir, f)) for i, f in enumerate(mp4_files)]
+
+        completed = 0
+
+        def _process_one(item):
+            idx, name, path = item
+            try:
+                audio = _extract_audio_pipe(path)
+                if audio is not None and len(audio) > 0:
+                    analysis = analyze_clip_gender(audio_array=audio)
+                    if analysis["is_male"]:
+                        return {
+                            "name": name,
+                            "path": path,
+                            "size_mb": round(os.path.getsize(path) / 1024 / 1024, 1),
+                            **analysis,
+                        }
+            except Exception as e:
+                print(f"[detect-male] Error on {name}: {e}")
+            return None
+
+        # Process in parallel (4 workers — I/O bound, not CPU bound)
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {executor.submit(_process_one, w): w for w in work}
+            for future in as_completed(futures):
+                completed += 1
+                job.progress = (completed / total) * 100
+                r = future.result()
+                if r is not None:
+                    male_results.append(r)
+
+        # Sort by original index order
+        male_results.sort(key=lambda x: x["name"])
+
+        job.status = "completed"
+        job.progress = 100
+        job.current_step = "done"
+        from pipeline import StepResult, StepStatus
+        job.steps = [StepResult(
+            step="detect_male",
+            status=StepStatus.COMPLETED,
+            message=f"检测完成: {total} 个片段中 {len(male_results)} 个含有男声",
+            data={"results": male_results},
         )]
         pipeline._save_jobs()
 

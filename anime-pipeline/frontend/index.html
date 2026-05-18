@@ -373,6 +373,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
           <button class="btn btn-secondary" id="btn-clear-short" style="font-size:11px;padding:4px 10px;background:var(--danger);color:#fff;">删除</button>
           <span style="font-size:12px;color:var(--text2);margin-left:8px;">|</span>
           <button class="btn btn-secondary" id="btn-detect-bgm" style="font-size:11px;padding:4px 10px;background:var(--warning);color:#000;">检测BGM/混响</button>
+          <button class="btn btn-secondary" id="btn-detect-male" style="font-size:11px;padding:4px 10px;background:#4a9eff;color:#fff;">检测男声</button>
           <span id="review-clip-name" style="font-size:13px;color:var(--text2);margin-left:8px;"></span>
         </div>
       </div>
@@ -384,12 +385,24 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
         <h4 style="margin:0;color:var(--warning);">BGM/混响检测结果 <span id="bgm-count" style="font-size:12px;"></span></h4>
         <div style="display:flex;gap:6px;">
-          <button class="btn btn-secondary" id="btn-bgm-select-all" style="font-size:11px;padding:4px 10px;" onclick="toggleBgmSelectAll()">全选</button>
-          <button class="btn btn-primary" id="btn-bgm-delete-selected" style="font-size:11px;padding:4px 10px;background:var(--danger);"
-            onclick="deleteBgmSelected()">删除选中</button>
+          <button class="btn btn-primary" id="btn-bgm-delete-all" style="font-size:11px;padding:4px 10px;background:var(--danger);"
+            onclick="deleteAllBgm()">全部删除BGM/混响片段</button>
         </div>
       </div>
       <div id="bgm-results-list" class="file-list" style="max-height:300px;"></div>
+    </div>
+
+    <!-- Male voice detection results -->
+    <div id="male-results-panel" style="display:none;margin-top:16px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <h4 style="margin:0;color:#4a9eff;">男声检测结果 <span id="male-count" style="font-size:12px;"></span></h4>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-secondary" id="btn-male-select-all" style="font-size:11px;padding:4px 10px;" onclick="toggleMaleSelectAll()">全选</button>
+          <button class="btn btn-primary" id="btn-male-delete-selected" style="font-size:11px;padding:4px 10px;background:var(--danger);"
+            onclick="deleteMaleSelected()">全部删除男声片段</button>
+        </div>
+      </div>
+      <div id="male-results-list" class="file-list" style="max-height:300px;"></div>
     </div>
   </div>
 
@@ -821,13 +834,21 @@ document.addEventListener('click', function(e) {
   if (btn.id === 'btn-jump-pending') { jumpToFirstPending(); return; }
   if (btn.id === 'btn-clear-short') { clearShortClips(); return; }
   if (btn.id === 'btn-detect-bgm') { detectBgmClips(); return; }
+  if (btn.id === 'btn-detect-male') { detectMaleClips(); return; }
   if (btn.id === 'btn-approve') { reviewAction('approve'); return; }
   if (btn.id === 'btn-skip') { reviewAction('skip'); return; }
 
   if (btn.classList.contains('btn-download')) {
     var idx = parseInt(btn.getAttribute('data-idx'));
     var r = window._searchResults[idx];
-    if (r) downloadAndProcess(r.magnet, r.title);
+    var method = btn.getAttribute('data-method') || 'aria2c';
+    if (r) downloadAndProcess(r.magnet, r.title, method);
+    return;
+  }
+  if (btn.classList.contains('btn-download-bitcomet')) {
+    var idx = parseInt(btn.getAttribute('data-idx'));
+    var r = window._searchResults[idx];
+    if (r) downloadAndProcess(r.magnet, r.title, 'bitcomet');
     return;
   }
   if (btn.classList.contains('btn-copymagnet')) {
@@ -1013,7 +1034,8 @@ async function doSearch(page) {
         '</div>' +
       '</div>' +
       '<div class="result-actions">' +
-        '<button class="btn btn-primary btn-download" data-idx="' + i + '">下载并处理</button>' +
+        '<button class="btn btn-primary btn-download" data-idx="' + i + '" data-method="aria2c">下载(aria2)</button>' +
+        '<button class="btn btn-primary btn-download-bitcomet" data-idx="' + i + '" style="background:#5b8def;">下载(BitComet)</button>' +
         '<button class="btn btn-secondary btn-copymagnet" data-idx="' + i + '">复制磁力</button>' +
         '<button class="btn btn-secondary btn-detail" data-idx="' + i + '" style="font-size:11px;">详情</button>' +
       '</div>' +
@@ -1148,7 +1170,8 @@ async function fetchDetailFiles(magnet) {
 function closeDetailModal() { document.getElementById('detail-modal').style.display = 'none'; }
 document.addEventListener('click', function(e) { if (e.target.id === 'detail-modal') closeDetailModal(); });
 
-async function downloadAndProcess(magnet, title) {
+async function downloadAndProcess(magnet, title, method) {
+  method = method || 'aria2c';
   try {
     // Copy magnet to clipboard
     try {
@@ -1156,12 +1179,15 @@ async function downloadAndProcess(magnet, title) {
       toast('磁力链接已复制到剪贴板', 'success');
     } catch(e) {}
 
-    // Start download job (aria2c will try to download via P2P)
+    // Start download job
     var url = API + '/api/jobs/process-download?magnet=' + encodeURIComponent(magnet) +
-              '&title=' + encodeURIComponent(title) + '&hw_accel=auto';
+              '&title=' + encodeURIComponent(title) + '&hw_accel=auto' +
+              '&method=' + method;
     var resp = await fetch(url, { method: 'POST' });
     var data = await resp.json();
-    toast('已启动 qBittorrent 下载，完成后自动处理', 'success');
+    var labels = {aria2c: 'aria2c', qbittorrent: 'qBittorrent', bitcomet: 'BitComet'};
+    var label = labels[method] || method;
+    toast('已提交到 ' + label + ' 下载，完成后自动处理', 'success');
     switchTab('jobs');
   } catch (e) {
     toast('操作失败: ' + e.message, 'error');
@@ -1416,11 +1442,22 @@ async function loadReviewDirs() {
     var resp = await fetch(API + '/api/review/dirs');
     var data = await resp.json();
     var select = document.getElementById('review-dir-select');
+    var curVal = select.value;
     select.innerHTML = '<option value="">选择视频...</option>';
     for (var i = 0; i < data.dirs.length; i++) {
       var d = data.dirs[i];
       select.innerHTML += '<option value="' + safeAttr(d.path) + '">' + escapeHtml(d.name) + '</option>';
     }
+    // Restore previous selection if it still exists
+    if (curVal) {
+      select.value = curVal;
+      // verify it was actually set (option might have been removed)
+      if (select.value === curVal) {
+        loadReviewClips();
+        return;
+      }
+    }
+    // Auto-select newest on first load
     if (data.dirs.length > 0) {
       select.value = data.dirs[data.dirs.length - 1].path;
       loadReviewClips();
@@ -1669,60 +1706,71 @@ function renderBgmResults() {
     else if (r.has_bgm) badge = '<span style="background:var(--warning);color:#000;font-size:10px;padding:1px 5px;border-radius:3px;">BGM</span>';
     else if (r.has_reverb) badge = '<span style="background:#f0a500;color:#000;font-size:10px;padding:1px 5px;border-radius:3px;">混响</span>';
 
-    html += '<div class="file-item" style="cursor:pointer;" onclick="toggleBgmSelect(\'' +
-      escapeHtml(r.name).replace(/'/g, "\\'") + '\')">' +
-      '<input type="checkbox"' + checked + ' style="pointer-events:none;" onclick="event.stopPropagation();">' +
+    var escapedPath = encodeURIComponent(r.path);
+    var escapedName = escapeHtml(r.name).replace(/'/g, "\\'");
+    var safePath = r.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    var safeName = escapeHtml(r.name);
+
+    html += '<div class="file-item" style="cursor:pointer;" ' +
+      'onclick="playBgmClip(\'' + safePath + '\',\'' + safeName + '\')">' +
+      '<input type="checkbox"' + checked + ' style="pointer-events:auto;" ' +
+        'onclick="event.stopPropagation();toggleBgmCheckbox(\'' + escapedName + '\', this.checked)">' +
       badge +
       '<span class="file-name" style="font-size:12px;margin-left:6px;" title="' + escapeHtml(r.details) + '">' +
-        escapeHtml(r.name) + '</span>' +
+        safeName + '</span>' +
       '<span class="file-size">' + r.size_mb + ' MB</span>' +
       '<span style="font-size:10px;color:var(--text2);">静音' + Math.round(r.silence_ratio * 100) + '% 评分' + r.bgm_score + '</span>' +
-      '<a class="btn btn-secondary" style="font-size:10px;padding:3px 6px;text-decoration:none;margin-left:6px;" ' +
-        'href="' + API + '/api/review/stream?path=' + encodeURIComponent(r.path) + '" target="_blank" ' +
-        'onclick="event.stopPropagation();">试听</a>' +
+      '<a href="' + API + '/api/review/stream?path=' + encodeURIComponent(r.path) + '" target="_blank" ' +
+        'style="font-size:10px;color:var(--text2);text-decoration:none;margin-left:6px;" ' +
+        'onclick="event.stopPropagation();" title="新窗口打开">↗</a>' +
       '</div>';
   }
   list.innerHTML = html;
 }
 
-function toggleBgmSelect(name) {
-  if (_bgmSelected[name]) {
-    delete _bgmSelected[name];
-  } else {
-    _bgmSelected[name] = true;
-  }
-  // Refresh checkbox state without rebuilding
-  var items = document.querySelectorAll('#bgm-results-list .file-item');
-  for (var i = 0; i < items.length; i++) {
-    var cb = items[i].querySelector('input[type=checkbox]');
-    if (!cb) continue;
-    var onclick = items[i].getAttribute('onclick') || '';
-    if (onclick.indexOf(name.replace(/'/g, "\\'")) >= 0) {
-      cb.checked = !!_bgmSelected[name];
-      break;
+function playBgmClip(path, name) {
+  var player = document.getElementById('review-player');
+  var newSrc = API + '/api/review/stream?path=' + encodeURIComponent(path);
+  player.src = newSrc;
+  player.load();
+  player.play().catch(function() {});
+  document.getElementById('review-clip-name').textContent = '[BGM检测] ' + name;
+}
+
+function toggleBgmCheckbox(escapedName, checked) {
+  // Find the actual name from _bgmResults
+  for (var i = 0; i < _bgmResults.length; i++) {
+    if (escapeHtml(_bgmResults[i].name) === escapedName) {
+      if (checked) {
+        _bgmSelected[_bgmResults[i].name] = true;
+      } else {
+        delete _bgmSelected[_bgmResults[i].name];
+      }
+      return;
     }
   }
 }
 
 function toggleBgmSelectAll() {
   var allSelected = Object.keys(_bgmSelected).length === _bgmResults.length;
+  var checkboxes = document.querySelectorAll('#bgm-results-list input[type=checkbox]');
   if (allSelected) {
     _bgmSelected = {};
+    for (var i = 0; i < checkboxes.length; i++) { checkboxes[i].checked = false; }
   } else {
     for (var i = 0; i < _bgmResults.length; i++) {
       _bgmSelected[_bgmResults[i].name] = true;
     }
+    for (var i = 0; i < checkboxes.length; i++) { checkboxes[i].checked = true; }
   }
-  renderBgmResults();
 }
 
-async function deleteBgmSelected() {
+async function deleteAllBgm() {
+  if (!_bgmResults.length) return;
+  if (!confirm('确定要删除全部 ' + _bgmResults.length + ' 个BGM/混响片段吗？\n此操作不可撤销。')) return;
+
   var toDelete = [];
-  for (var i = 0; i < _bgmResults.length; i++) {
-    if (_bgmSelected[_bgmResults[i].name]) toDelete.push(_bgmResults[i].path);
-  }
-  if (!toDelete.length) { toast('请先选择要删除的片段', 'info'); return; }
-  if (!confirm('确定要删除选中的 ' + toDelete.length + ' 个片段吗？\n此操作不可撤销。')) return;
+  for (var i = 0; i < _bgmResults.length; i++) { toDelete.push(_bgmResults[i].path); }
 
   try {
     var resp = await fetch(API + '/api/results/delete', {
@@ -1731,18 +1779,150 @@ async function deleteBgmSelected() {
       body: JSON.stringify({ paths: toDelete }),
     });
     var data = await resp.json();
-    toast('已删除 ' + data.deleted + ' 个片段', 'success');
-
-    // Remove deleted from results and refresh
-    var deletedPaths = {};
-    for (var i = 0; i < toDelete.length; i++) deletedPaths[toDelete[i]] = true;
-    var remaining = [];
-    for (var i = 0; i < _bgmResults.length; i++) {
-      if (!deletedPaths[_bgmResults[i].path]) remaining.push(_bgmResults[i]);
-    }
-    _bgmResults = remaining;
+    toast('已删除 ' + data.deleted + ' 个BGM/混响片段', 'success');
+    _bgmResults = [];
     _bgmSelected = {};
     renderBgmResults();
+    loadReviewClips();
+  } catch(e) { toast('删除失败: ' + e.message, 'error'); }
+}
+
+// ============================================================
+// Male voice detection
+// ============================================================
+var _maleResults = [];
+var _maleSelected = {};
+
+async function detectMaleClips() {
+  if (!window._reviewDir) { toast('请先加载审核目录', 'error'); return; }
+  var btn = document.getElementById('btn-detect-male');
+  btn.disabled = true;
+  btn.textContent = '检测中...';
+  toast('正在分析音高特征，请稍候...', 'info');
+
+  try {
+    var url = API + '/api/review/detect-male?clip_dir=' + encodeURIComponent(window._reviewDir);
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    if (data.status !== 'started') { throw new Error('启动失败'); }
+
+    var pollTimer = setInterval(async function() {
+      try {
+        var r2 = await fetch(API + '/api/jobs/' + data.job_id);
+        var job = await r2.json();
+        if (job.status === 'completed') {
+          clearInterval(pollTimer);
+          btn.disabled = false;
+          btn.textContent = '检测男声';
+          var results = [];
+          if (job.steps && job.steps.length) {
+            var sd = job.steps[job.steps.length - 1].data;
+            if (sd && sd.results) results = sd.results;
+          }
+          _maleResults = results;
+          _maleSelected = {};
+          renderMaleResults();
+          toast('检测到 ' + results.length + ' 个男声片段', 'info');
+        } else if (job.status === 'failed') {
+          clearInterval(pollTimer);
+          btn.disabled = false;
+          btn.textContent = '检测男声';
+          toast('检测失败', 'error');
+        }
+      } catch(e) { clearInterval(pollTimer); btn.disabled = false; btn.textContent = '检测男声'; }
+    }, 1500);
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = '检测男声';
+    toast('启动失败: ' + e.message, 'error');
+  }
+}
+
+function renderMaleResults() {
+  var panel = document.getElementById('male-results-panel');
+  var list = document.getElementById('male-results-list');
+  var countEl = document.getElementById('male-count');
+
+  if (!_maleResults.length) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  panel.style.display = 'block';
+  countEl.textContent = '(' + _maleResults.length + ' 个)';
+
+  var html = '';
+  for (var i = 0; i < _maleResults.length; i++) {
+    var r = _maleResults[i];
+    var checked = _maleSelected[r.name] ? ' checked' : '';
+    var safePath = r.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    var safeName = escapeHtml(r.name);
+    var escapedName = safeName.replace(/'/g, "\\'");
+
+    html += '<div class="file-item" style="cursor:pointer;" ' +
+      'onclick="playMaleClip(\'' + safePath + '\',\'' + safeName + '\')">' +
+      '<input type="checkbox"' + checked + ' style="pointer-events:auto;" ' +
+        'onclick="event.stopPropagation();toggleMaleCheckbox(\'' + escapedName + '\', this.checked)">' +
+      '<span style="background:#4a9eff;color:#fff;font-size:10px;padding:1px 5px;border-radius:3px;">男</span>' +
+      '<span class="file-name" style="font-size:12px;margin-left:6px;" title="中值' + r.median_pitch + 'Hz">' +
+        safeName + '</span>' +
+      '<span class="file-size">' + r.size_mb + ' MB</span>' +
+      '<span style="font-size:10px;color:var(--text2);">' + r.median_pitch + 'Hz</span>' +
+      '<a href="' + API + '/api/review/stream?path=' + encodeURIComponent(r.path) + '" target="_blank" ' +
+        'style="font-size:10px;color:var(--text2);text-decoration:none;margin-left:6px;" ' +
+        'onclick="event.stopPropagation();" title="新窗口打开">↗</a>' +
+      '</div>';
+  }
+  list.innerHTML = html;
+}
+
+function playMaleClip(path, name) {
+  var player = document.getElementById('review-player');
+  player.src = API + '/api/review/stream?path=' + encodeURIComponent(path);
+  player.load();
+  player.play().catch(function() {});
+  document.getElementById('review-clip-name').textContent = '[男声] ' + name;
+}
+
+function toggleMaleCheckbox(escapedName, checked) {
+  for (var i = 0; i < _maleResults.length; i++) {
+    if (escapeHtml(_maleResults[i].name) === escapedName) {
+      if (checked) { _maleSelected[_maleResults[i].name] = true; }
+      else { delete _maleSelected[_maleResults[i].name]; }
+      return;
+    }
+  }
+}
+
+function toggleMaleSelectAll() {
+  var allSelected = Object.keys(_maleSelected).length === _maleResults.length;
+  var checkboxes = document.querySelectorAll('#male-results-list input[type=checkbox]');
+  if (allSelected) {
+    _maleSelected = {};
+    for (var i = 0; i < checkboxes.length; i++) { checkboxes[i].checked = false; }
+  } else {
+    for (var i = 0; i < _maleResults.length; i++) { _maleSelected[_maleResults[i].name] = true; }
+    for (var i = 0; i < checkboxes.length; i++) { checkboxes[i].checked = true; }
+  }
+}
+
+async function deleteMaleSelected() {
+  if (!confirm('确定要删除所有检测到的 ' + _maleResults.length + ' 个男声片段吗？\n此操作不可撤销。')) return;
+
+  var toDelete = [];
+  for (var i = 0; i < _maleResults.length; i++) { toDelete.push(_maleResults[i].path); }
+
+  try {
+    var resp = await fetch(API + '/api/results/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: toDelete }),
+    });
+    var data = await resp.json();
+    toast('已删除 ' + data.deleted + ' 个男声片段', 'success');
+    _maleResults = [];
+    _maleSelected = {};
+    renderMaleResults();
     loadReviewClips();
   } catch(e) { toast('删除失败: ' + e.message, 'error'); }
 }

@@ -294,7 +294,7 @@ def analyze_clip_bgm(audio_path: str) -> dict:
         reasons.append("长片段持续音频")
 
     result["bgm_score"] = score
-    result["has_bgm"] = score >= 4
+    result["has_bgm"] = score >= 5
 
     if reasons:
         result["details"] = "; ".join(reasons)
@@ -309,6 +309,96 @@ def analyze_clip_bgm(audio_path: str) -> dict:
 # ============================================================
 # Step 3: VAD (Voice Activity Detection)
 # ============================================================
+# ============================================================
+# Gender detection (male voice)
+# ============================================================
+MALE_PITCH_THRESHOLD = 165.0  # Hz — median F0 below this = likely male
+MIN_VOICED_RATIO = 0.15       # must have at least this fraction of voiced frames
+
+
+def analyze_clip_gender(audio_path: str = "", audio_array=None, sr: int = SR) -> dict:
+    """Detect whether an audio clip contains a male voice.
+
+    Uses YIN pitch (F0) estimation. Male voices typically have
+    a median F0 below 165 Hz; female voices are above.
+
+    Accepts either a file path or a numpy audio array.
+    When audio_array is provided, audio_path is ignored.
+
+    Returns a dict with:
+        is_male: bool
+        median_pitch: float — median F0 in Hz (0 if no voiced frames)
+        voiced_ratio: float — fraction of frames with reliable pitch
+        confidence: float — always 0.0 (YIN)
+        details: str
+    """
+    result = {
+        "is_male": False,
+        "median_pitch": 0.0,
+        "voiced_ratio": 0.0,
+        "confidence": 0.0,
+        "details": "",
+    }
+
+    if audio_array is not None:
+        y = audio_array.astype(np.float32)
+        sr_val = sr
+    elif audio_path:
+        try:
+            y, sr_val = librosa.load(audio_path, sr=SR, mono=True)
+        except Exception:
+            result["details"] = "failed to load audio"
+            return result
+    else:
+        result["details"] = "no input"
+        return result
+
+    if len(y) < sr_val * 0.3:
+        result["details"] = "too short"
+        return result
+
+    # Limit to first 30s for speed
+    if len(y) > sr_val * 30:
+        y = y[:int(sr_val * 30)]
+
+    # YIN pitch tracking (fast)
+    try:
+        f0 = librosa.yin(
+            y, fmin=50.0, fmax=600.0, sr=sr_val,
+            frame_length=FRAME_LEN, hop_length=HOP_LEN,
+        )
+    except Exception:
+        result["details"] = "pitch estimation failed"
+        return result
+
+    if f0 is None or len(f0) == 0:
+        result["details"] = "no pitch data"
+        return result
+
+    # Filter voiced frames (YIN returns NaN for unvoiced)
+    voiced_mask = ~np.isnan(f0) & (f0 > 50.0)
+    voiced_frames = f0[voiced_mask]
+    total_frames = len(f0)
+    voiced_ratio = len(voiced_frames) / max(total_frames, 1)
+
+    result["voiced_ratio"] = round(float(voiced_ratio), 4)
+
+    if len(voiced_frames) == 0 or voiced_ratio < MIN_VOICED_RATIO:
+        result["details"] = "insufficient voiced frames (" + str(round(voiced_ratio * 100)) + "%)"
+        return result
+
+    median_pitch = float(np.median(voiced_frames))
+    result["median_pitch"] = round(median_pitch, 1)
+
+    result["is_male"] = median_pitch < MALE_PITCH_THRESHOLD
+    if result["is_male"]:
+        result["details"] = "男声(中值" + str(int(median_pitch)) + "Hz)"
+    else:
+        result["details"] = "女声(中值" + str(int(median_pitch)) + "Hz)"
+
+    return result
+
+
 def vad_filter(audio_path: str) -> tuple[bool, dict]:
     """VAD-based noise event detection. Returns (has_noise_issue, info)."""
     y, sr = librosa.load(audio_path, sr=SR, mono=True)
