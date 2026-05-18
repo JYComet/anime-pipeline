@@ -226,7 +226,14 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
 
   <!-- 本地文件 -->
   <div id="tab-local" class="tab">
-    <h3 style="margin-bottom:12px;">本地视频文件</h3>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+      <h3 style="margin:0;">本地视频文件</h3>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <input type="file" id="local-upload-input" accept=".mkv,.mp4,.avi,.mov,.wmv" multiple style="display:none;" onchange="uploadLocalFiles()">
+        <button class="btn btn-primary" style="font-size:12px;padding:5px 12px;" onclick="document.getElementById('local-upload-input').click()">上传文件</button>
+        <span id="local-upload-progress" style="font-size:11px;color:var(--text2);display:none;"></span>
+      </div>
+    </div>
     <div id="local-files" class="file-list">
       <div class="empty-state"><p>加载中...</p></div>
     </div>
@@ -844,6 +851,39 @@ async function loadLocalFiles() {
   }
 }
 
+async function uploadLocalFiles() {
+  var input = document.getElementById('local-upload-input');
+  var files = input.files;
+  if (!files.length) return;
+
+  var progress = document.getElementById('local-upload-progress');
+  progress.style.display = 'inline';
+
+  for (var i = 0; i < files.length; i++) {
+    var formData = new FormData();
+    formData.append('file', files[i]);
+
+    progress.textContent = '上传中... ' + (i + 1) + '/' + files.length;
+    try {
+      var resp = await fetch(API + '/api/local/upload', {
+        method: 'POST',
+        body: formData
+      });
+      var data = await resp.json();
+      if (data.status === 'ok') {
+        toast(files[i].name + ' 上传完成', 'success');
+      } else {
+        toast(files[i].name + ' 上传失败: ' + (data.detail || ''), 'error');
+      }
+    } catch(e) {
+      toast(files[i].name + ' 上传失败: ' + e.message, 'error');
+    }
+  }
+  progress.style.display = 'none';
+  input.value = '';
+  loadLocalFiles();
+}
+
 async function processLocal(idx) {
   try {
     var v = window._localVideos[idx];
@@ -921,7 +961,7 @@ async function loadJobs() {
 
     // Filter by status
     if (_jobsFilter === 'running') {
-      jobs = jobs.filter(function(j) { return j.status === 'running' || j.status === 'pending' || j.status === 'cancelled'; });
+      jobs = jobs.filter(function(j) { return j.status === 'running' || j.status === 'pending' || j.status === 'cancelled' || j.status === 'download_submitted' || j.status === 'queued'; });
     } else if (_jobsFilter === 'completed') {
       jobs = jobs.filter(function(j) { return j.status === 'completed'; });
     } else if (_jobsFilter === 'failed') {
@@ -949,7 +989,14 @@ async function loadJobs() {
           '</div>' +
         '</div>' +
         '<div class="progress-bar"><div class="progress-fill" style="width:' + progress + '%"></div></div>' +
-        '<div style="font-size:12px;color:var(--text2);">' + progress.toFixed(0) + '% - ' + escapeHtml(stepName(j.current_step) || '等待中...') + '</div>';
+        '<div style="font-size:12px;color:var(--text2);">' + progress.toFixed(0) + '% - ' + escapeHtml(stepName(j.current_step) || '等待中...') + '</div>' +
+        (j.status === 'download_submitted' && j.download_speed > 0
+          ? '<div style="font-size:12px;color:var(--accent);">速度: ' + (j.download_speed / 1024).toFixed(1) + ' MB/s' +
+            (j.downloaded_mb ? ' | 已下载: ' + j.downloaded_mb.toFixed(0) + ' / ' + j.total_mb.toFixed(0) + ' MB' : '') +
+            ' | 种子: ' + (j.seeders || 0) + '</div>'
+          : (j.status === 'download_submitted'
+            ? '<div style="font-size:12px;color:var(--warning);">' + escapeHtml(j.current_step || '等待节点中...') + (j.total_mb > 0 ? ' | 大小: ' + j.total_mb.toFixed(0) + ' MB' : '') + '</div>'
+            : ''));
       if (j.steps && j.steps.length) {
         html += '<div class="step-list">';
         for (var si = 0; si < j.steps.length; si++) {
@@ -1443,10 +1490,10 @@ var _denoiseResultSelected = {};
 var STEP_DEFAULTS = [
   {key: 'enhance', label: '语音增强', enabled: true},
   {key: 'super_resolve', label: '超分辨率', enabled: true},
-  {key: 'reverb', label: '混响检测', enabled: true},
-  {key: 'silence', label: '静音过滤', enabled: true},
-  {key: 'vad', label: 'VAD', enabled: true},
-  {key: 'pad', label: '规范化', enabled: true},
+  {key: 'reverb', label: '混响检测', enabled: false},
+  {key: 'silence', label: '静音过滤', enabled: false},
+  {key: 'vad', label: 'VAD', enabled: false},
+  {key: 'pad', label: '规范化', enabled: false},
 ];
 var _denoiseSteps = JSON.parse(JSON.stringify(STEP_DEFAULTS)); // deep copy
 

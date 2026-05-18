@@ -8,7 +8,7 @@ import uuid
 import threading
 from pathlib import Path
 
-from fastapi import FastAPI, Query, Body, HTTPException
+from fastapi import FastAPI, Query, Body, HTTPException, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -276,20 +276,21 @@ def list_local_videos():
     for d in [VIDEO_DIR, DOWNLOAD_DIR]:
         if not os.path.exists(d):
             continue
-        for f in os.listdir(d):
-            ext = os.path.splitext(f)[1].lower()
-            if ext in video_extensions:
-                full_path = os.path.join(d, f)
-                mtime = os.path.getmtime(full_path)
-                size_mb = os.path.getsize(full_path) / 1024 / 1024
-                files.append({
-                    "name": f,
-                    "path": full_path,
-                    "source": "video" if d == VIDEO_DIR else "downloads",
-                    "size_mb": round(size_mb, 1),
-                    "mtime": mtime,
-                    "time_str": datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M"),
-                })
+        for root, dirs, filenames in os.walk(d):
+            for f in filenames:
+                ext = os.path.splitext(f)[1].lower()
+                if ext in video_extensions:
+                    full_path = os.path.join(root, f)
+                    mtime = os.path.getmtime(full_path)
+                    size_mb = os.path.getsize(full_path) / 1024 / 1024
+                    files.append({
+                        "name": f,
+                        "path": full_path,
+                        "source": "video" if d == VIDEO_DIR else "downloads",
+                        "size_mb": round(size_mb, 1),
+                        "mtime": mtime,
+                        "time_str": datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M"),
+                    })
 
     # Sort by mtime descending (newest first)
     files.sort(key=lambda x: x["mtime"], reverse=True)
@@ -481,8 +482,60 @@ def cancel_job(job_id: str):
 
 @app.get("/api/jobs")
 def list_jobs():
-    """List all pipeline jobs."""
-    return {"jobs": pipeline.get_all_jobs()}
+    """List all pipeline jobs. Updates download_submitted jobs from aria2c status."""
+    jobs = pipeline.get_all_jobs()
+
+    # Check aria2c status for download_submitted jobs
+    for j in jobs:
+        if j.get("status") != "download_submitted":
+            continue
+        job_gid = j.get("gid", "")
+        try:
+            from aria2_rpc import tell_status
+            if job_gid:
+                a = tell_status(job_gid)
+                if not a:
+                    continue
+                a_status = a.get("status", "")
+                a_completed = int(a.get("completedLength", 0))
+                a_total = int(a.get("totalLength", 0))
+                a_speed = int(a.get("downloadSpeed", 0))
+                a_seeders = int(a.get("numSeeders", 0))
+                a_conn = int(a.get("connections", 0))
+                a_error = a.get("errorMessage", "")
+
+                j["download_speed"] = a_speed
+                j["total_mb"] = a_total / 1048576
+                j["seeders"] = a_seeders
+                j["connections"] = a_conn
+                if a_status in ("complete", "removed"):
+                    j["status"] = "completed"
+                    j["progress"] = 100
+                elif a_status == "error":
+                    if "already registered" in a_error.lower():
+                        # Duplicate — find the active download with same infohash
+                        j["status"] = "download_submitted"
+                        j["current_step"] = "已加入下载队列（重复提交）"
+                        j["progress"] = 0
+                    else:
+                        j["status"] = "failed"
+                        j["progress"] = 0
+                        j["current_step"] = f"下载失败: {a_error[:50]}"
+                elif a_total > 0:
+                    j["progress"] = (a_completed / a_total) * 100
+                    j["downloaded_mb"] = a_completed / 1048576
+                    if a_speed > 0:
+                        j["current_step"] = f"下载中 {a_speed//1024}KB/s 种子:{a_seeders}"
+                    elif a_conn > 0:
+                        j["current_step"] = f"连接中 种子:{a_seeders}"
+                    else:
+                        j["current_step"] = "等待节点中..."
+                else:
+                    j["current_step"] = "获取文件信息中..."
+        except Exception:
+            pass
+
+    return {"jobs": jobs}
 
 
 @app.post("/api/jobs/{job_id}/cancel")

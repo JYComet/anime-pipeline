@@ -36,6 +36,7 @@ class PipelineJob:
     job_id: str
     title: str = ""
     magnet: str = ""
+    gid: str = ""
     mkv_path: str = ""
     subtitle_paths: list[str] = field(default_factory=list)
     clip_dir: str = ""
@@ -66,6 +67,7 @@ class PipelineJob:
             "job_id": self.job_id,
             "title": self.title,
             "magnet": self.magnet,
+            "gid": self.gid,
             "mkv_path": self.mkv_path,
             "subtitle_paths": self.subtitle_paths,
             "clip_dir": self.clip_dir,
@@ -210,6 +212,7 @@ class Pipeline:
                 from aria2_rpc import add_magnet, tell_status
 
                 gid = add_magnet(magnet)
+                job.gid = gid
                 status = tell_status(gid)
                 name = status.get("bittorrent", {}).get("info", {}).get("name", "")
                 total_mb = int(status.get("totalLength", 0)) / 1024 / 1024
