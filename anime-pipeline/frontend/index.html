@@ -179,6 +179,91 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
 .review-player-wrap { position: relative; width: 100%; padding-top: 56.25%; background: #000; border-radius: 8px; overflow: hidden; }
 .review-controls { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
 .review-stats { font-size: 13px; color: var(--text2); margin-bottom: 12px; }
+
+/* Extract tab */
+.track-card {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 14px; margin-bottom: 4px;
+  display: flex; align-items: center; gap: 10px; transition: .2s;
+}
+.track-card:hover { border-color: var(--accent2); }
+.track-card.selected { border-color: var(--accent); background: #1a1a3a; }
+.track-type {
+  font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 600;
+  white-space: nowrap;
+}
+.track-type.video { background: #1a3a2a; color: #4ecca3; }
+.track-type.audio { background: #0f3460; color: #4a9eff; }
+.track-type.subtitles { background: #3a2a0a; color: #f0a500; }
+.track-type.other { background: #2a2a3a; color: #888; }
+.track-info { flex: 1; font-size: 13px; }
+.track-meta { font-size: 11px; color: var(--text2); }
+.mkv-file-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+  cursor: pointer; transition: .2s;
+}
+.mkv-file-item:hover { background: var(--bg2); }
+.mkv-file-item.active { background: var(--bg3); border-left: 3px solid var(--accent); }
+
+/* Split tab */
+.split-layout { display: flex; gap: 16px; flex-wrap: wrap; }
+.split-left { flex: 0 0 380px; min-width: 300px; }
+.split-right { flex: 1; min-width: 350px; }
+.split-file-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+  cursor: pointer; transition: .2s;
+}
+.split-file-item:hover { background: var(--bg2); }
+.split-file-item.selected { background: var(--bg3); border-left: 3px solid var(--accent); }
+.split-sub-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-bottom: 1px solid var(--border);
+  cursor: pointer; transition: .2s; font-size: 13px;
+}
+.split-sub-item:hover { background: var(--bg2); }
+.split-sub-item.selected { background: var(--bg3); border-left: 3px solid var(--success); }
+.split-mode-tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+.split-mode-tabs button {
+  padding: 6px 16px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg2); color: var(--text2); cursor: pointer; font-size: 13px; transition: .2s;
+}
+.split-mode-tabs button:hover { border-color: var(--accent); color: var(--text); }
+.split-mode-tabs button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.split-config { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+.split-config label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 4px; }
+.split-config input, .split-config select {
+  width: 100%; padding: 8px 12px; border-radius: 6px; margin-bottom: 12px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 13px;
+}
+.split-config input:focus, .split-config select:focus { outline: none; border-color: var(--accent); }
+.split-config .hint { font-size: 11px; color: var(--text2); margin-top: -8px; margin-bottom: 8px; }
+.split-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.split-progress { margin-top: 12px; display: none; }
+.split-progress .progress-text { font-size: 12px; color: var(--text2); margin-top: 4px; }
+.split-results { margin-top: 16px; }
+.split-results h4 { font-size: 14px; color: var(--success); margin-bottom: 8px; }
+.split-clip-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.split-clip-item:hover { background: var(--bg2); }
+.split-clip-name { flex: 1; word-break: break-all; font-size: 12px; }
+
+/* Stitch tab */
+.stitch-clip-card {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 14px; border-bottom: 1px solid var(--border);
+  transition: .2s; cursor: pointer;
+}
+.stitch-clip-card:hover { background: var(--bg2); }
+.stitch-clip-card.selected { background: var(--accent2); border-left: 3px solid var(--accent); }
+.stitch-clip-sub {
+  font-size: 12px; color: var(--warning); line-height: 1.5;
+  margin-top: 2px; word-break: break-all;
+}
 </style>
 </head>
 <body>
@@ -192,6 +277,9 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
     <button data-tab="review">审核</button>
     <button data-tab="results">输出结果</button>
     <button data-tab="denoise">降噪</button>
+    <button data-tab="extract">字幕提取</button>
+    <button data-tab="stitch">音频拼接</button>
+    <button data-tab="split">视频切割</button>
   </nav>
 </header>
 
@@ -278,10 +366,30 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
           <button class="btn btn-secondary" id="btn-skip">跳过 (S)</button>
           <button class="btn btn-secondary" id="btn-review-next">下一条 ▶</button>
           <button class="btn btn-secondary" id="btn-jump-pending" style="font-size:12px;">↑ 跳到待审核</button>
+          <span style="font-size:12px;color:var(--text2);margin-left:8px;">| 清除 ≤</span>
+          <input type="number" id="review-clear-dur" value="2" step="0.5" min="0.5" max="60"
+            style="width:55px;padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:12px;text-align:center;">
+          <span style="font-size:12px;color:var(--text2);">秒的视频</span>
+          <button class="btn btn-secondary" id="btn-clear-short" style="font-size:11px;padding:4px 10px;background:var(--danger);color:#fff;">删除</button>
+          <span style="font-size:12px;color:var(--text2);margin-left:8px;">|</span>
+          <button class="btn btn-secondary" id="btn-detect-bgm" style="font-size:11px;padding:4px 10px;background:var(--warning);color:#000;">检测BGM/混响</button>
           <span id="review-clip-name" style="font-size:13px;color:var(--text2);margin-left:8px;"></span>
         </div>
       </div>
       <div style="flex:1;min-width:250px;max-height:400px;overflow-y:auto;" id="review-list"></div>
+    </div>
+
+    <!-- BGM/Reverb detection results -->
+    <div id="bgm-results-panel" style="display:none;margin-top:16px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <h4 style="margin:0;color:var(--warning);">BGM/混响检测结果 <span id="bgm-count" style="font-size:12px;"></span></h4>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-secondary" id="btn-bgm-select-all" style="font-size:11px;padding:4px 10px;" onclick="toggleBgmSelectAll()">全选</button>
+          <button class="btn btn-primary" id="btn-bgm-delete-selected" style="font-size:11px;padding:4px 10px;background:var(--danger);"
+            onclick="deleteBgmSelected()">删除选中</button>
+        </div>
+      </div>
+      <div id="bgm-results-list" class="file-list" style="max-height:300px;"></div>
     </div>
   </div>
 
@@ -411,6 +519,256 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
       <div id="results-playing-name" style="font-size:11px;color:var(--text2);margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
     </div>
   </div>
+
+  <!-- 字幕提取 -->
+  <div id="tab-extract" class="tab">
+    <div style="display:flex;gap:16px;flex-wrap:wrap;">
+      <!-- Left: MKV file list -->
+      <div style="flex:0 0 380px;min-width:300px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <h3 style="margin:0;">MKV 文件</h3>
+          <button class="btn btn-secondary" onclick="loadExtractFiles()" style="font-size:11px;padding:4px 10px;">刷新</button>
+        </div>
+        <div id="extract-file-list" class="file-list" style="max-height:65vh;border:1px solid var(--border);border-radius:8px;">
+          <div class="empty-state"><p>加载中...</p></div>
+        </div>
+      </div>
+
+      <!-- Right: Track panel -->
+      <div style="flex:1;min-width:350px;">
+        <div id="extract-track-panel" style="display:none;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+            <h3 style="margin:0;" id="extract-current-file">轨道信息</h3>
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-primary" id="btn-extract-selected" onclick="extractSelectedTracks()">
+                提取选中轨道
+              </button>
+              <button class="btn btn-secondary" id="btn-extract-all-subs" onclick="extractAllSubs()">
+                提取全部字幕
+              </button>
+            </div>
+          </div>
+
+          <!-- Track list -->
+          <div id="extract-track-list" style="margin-bottom:12px;">
+            <div class="empty-state"><p>选择一个 MKV 文件查看轨道</p></div>
+          </div>
+
+          <!-- Extraction status -->
+          <div id="extract-status" style="display:none;margin-top:12px;padding:12px;border-radius:8px;background:var(--bg2);border:1px solid var(--border);">
+            <div class="progress-bar" style="margin-bottom:8px;">
+              <div id="extract-progress-fill" class="progress-fill" style="width:0%;"></div>
+            </div>
+            <div id="extract-status-text" style="font-size:12px;color:var(--text2);"></div>
+          </div>
+
+          <!-- Extracted subtitles preview -->
+          <div id="extract-result-preview" style="margin-top:16px;">
+            <h4 style="margin:0 0 8px 0;font-size:14px;color:var(--success);">
+              已提取字幕 (<span id="extract-sub-count">0</span>)
+            </h4>
+            <div id="extract-sub-list" class="file-list" style="max-height:300px;border:1px solid var(--border);border-radius:8px;">
+              <div class="empty-state"><p>暂无提取的字幕</p></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Empty state when no file selected -->
+        <div id="extract-empty-state" style="text-align:center;padding:80px 20px;color:var(--text2);">
+          <p style="font-size:48px;margin-bottom:12px;">📁</p>
+          <p>选择左侧 MKV 文件查看可提取的轨道</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 视频切割 -->
+  <div id="tab-split" class="tab">
+    <div class="split-layout">
+      <!-- Left: Video list -->
+      <div class="split-left">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <h3 style="margin:0;">MKV 文件</h3>
+          <button class="btn btn-secondary" onclick="loadSplitVideos()" style="font-size:11px;padding:4px 10px;">刷新</button>
+        </div>
+        <div id="split-video-list" class="file-list" style="max-height:60vh;border:1px solid var(--border);border-radius:8px;">
+          <div class="empty-state"><p>加载中...</p></div>
+        </div>
+
+        <!-- Existing clip dirs -->
+        <div style="margin-top:16px;">
+          <h4 style="margin:0 0 8px 0;font-size:13px;color:var(--text2);">已有切片目录</h4>
+          <div id="split-clip-dirs" class="file-list" style="max-height:200px;border:1px solid var(--border);border-radius:8px;">
+            <div class="empty-state"><p>加载中...</p></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Config + Results -->
+      <div class="split-right">
+        <div id="split-no-video" style="text-align:center;padding:80px 20px;color:var(--text2);">
+          <p style="font-size:48px;margin-bottom:12px;">✂️</p>
+          <p>选择左侧视频文件开始切割</p>
+        </div>
+
+        <div id="split-config-panel" style="display:none;">
+          <h3 style="margin:0 0 12px 0;" id="split-current-video">视频切割配置</h3>
+
+          <!-- Mode selector -->
+          <div class="split-mode-tabs">
+            <button class="active" data-split-mode="subtitle" onclick="switchSplitMode('subtitle')">字幕分割</button>
+            <button data-split-mode="duration" onclick="switchSplitMode('duration')">时长分割</button>
+            <button data-split-mode="size" onclick="switchSplitMode('size')">大小分割</button>
+          </div>
+
+          <!-- Subtitle mode config -->
+          <div id="split-cfg-subtitle" class="split-config">
+            <label>字幕文件</label>
+            <select id="split-sub-select" onchange="onSplitSubSelect()">
+              <option value="">-- 选择字幕文件 --</option>
+            </select>
+            <div id="split-sub-preview" style="font-size:11px;color:var(--text2);margin:-8px 0 8px 0;display:none;"></div>
+
+            <label>前后填充 (秒)</label>
+            <input type="number" id="split-padding" value="0.1" step="0.05" min="0" max="10">
+
+            <label>每段包含字幕数</label>
+            <input type="number" id="split-group-count" value="1" step="1" min="1" max="50">
+            <div class="hint">设为1则每句字幕切一段；设为N则每N句合并为一段</div>
+
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text);">
+              <input type="checkbox" id="split-deduplicate" style="width:auto;margin:0;">
+              去重叠筛选（合并时间重叠的字幕条目，减少重复片段）
+            </label>
+          </div>
+
+          <!-- Duration mode config -->
+          <div id="split-cfg-duration" class="split-config" style="display:none;">
+            <label>每段时长</label>
+            <input type="text" id="split-seg-duration" value="60" placeholder="秒数，如 60 或 5:30">
+            <div class="hint">支持格式: 秒数（如 90）或 mm:ss（如 1:30）</div>
+
+            <div style="display:flex;gap:12px;">
+              <div style="flex:1;">
+                <label>开始时间 (可选)</label>
+                <input type="text" id="split-start-time" value="" placeholder="留空=从头开始">
+              </div>
+              <div style="flex:1;">
+                <label>结束时间 (可选)</label>
+                <input type="text" id="split-end-time" value="" placeholder="留空=到视频结尾">
+              </div>
+            </div>
+          </div>
+
+          <!-- Size mode config -->
+          <div id="split-cfg-size" class="split-config" style="display:none;">
+            <label>目标文件大小 (MB)</label>
+            <input type="number" id="split-target-size" value="100" step="1" min="1" max="10000">
+            <div class="hint">每个切片大约为此大小。实际大小可能略有偏差。</div>
+          </div>
+
+          <!-- Shared config -->
+          <div class="split-config">
+            <label>输出格式</label>
+            <select id="split-output-ext">
+              <option value=".mp4">MP4 (.mp4)</option>
+              <option value=".mkv">MKV (.mkv)</option>
+              <option value=".mov">MOV (.mov)</option>
+            </select>
+            <label>硬件加速</label>
+            <select id="split-hw-accel">
+              <option value="auto">自动检测</option>
+              <option value="nvenc" selected>NVIDIA NVENC</option>
+              <option value="amf">AMD AMF</option>
+              <option value="qsv">Intel QSV</option>
+              <option value="libx264">CPU (libx264)</option>
+            </select>
+          </div>
+
+          <!-- Output dir info -->
+          <div style="font-size:12px;color:var(--text2);margin-bottom:12px;">
+            输出目录: <code id="split-output-dir" style="color:var(--success);">-</code>
+          </div>
+
+          <!-- Actions -->
+          <div class="split-actions">
+            <button class="btn btn-primary" id="btn-split-run" onclick="runSplit()">▶ 开始切割</button>
+            <button class="btn btn-secondary" id="btn-split-cancel" onclick="cancelSplit()" style="display:none;">取消</button>
+            <span id="split-status-text" style="font-size:12px;color:var(--text2);"></span>
+          </div>
+
+          <!-- Progress -->
+          <div class="split-progress" id="split-progress-bar">
+            <div class="progress-bar">
+              <div id="split-progress-fill" class="progress-fill" style="width:0%;"></div>
+            </div>
+            <div class="progress-text" id="split-progress-text"></div>
+          </div>
+        </div>
+
+        <!-- Results -->
+        <div class="split-results" id="split-results-section" style="display:none;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <h4 id="split-results-title" style="margin:0;">切割结果</h4>
+            <button class="btn btn-secondary" onclick="loadSplitClips()" style="font-size:11px;padding:4px 10px;">刷新</button>
+          </div>
+          <div id="split-results-list" class="file-list" style="max-height:400px;border:1px solid var(--border);border-radius:8px;">
+            <div class="empty-state"><p>暂无切割结果</p></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 音频拼接 -->
+  <div id="tab-stitch" class="tab">
+    <div style="display:flex;gap:16px;flex-wrap:wrap;">
+      <!-- Left: Video selector + clip list -->
+      <div style="flex:1;min-width:350px;">
+        <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+          <h3 style="margin:0;">音频拼接</h3>
+          <select id="stitch-video-select" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:13px;" onchange="loadStitchClips()">
+            <option value="">选择视频...</option>
+          </select>
+          <button class="btn btn-secondary" onclick="loadStitchVideos()" style="font-size:11px;padding:4px 10px;">刷新</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <span id="stitch-clip-count" style="font-size:12px;color:var(--text2);">未选择视频</span>
+          <button class="btn btn-primary" id="btn-stitch-selected" onclick="stitchSelected()" style="font-size:12px;padding:5px 14px;display:none;">拼接选中</button>
+          <button class="btn btn-secondary" id="btn-stitch-all" onclick="stitchAll()" style="font-size:12px;padding:5px 14px;display:none;">拼接全部</button>
+        </div>
+        <div id="stitch-clip-list" class="file-list" style="max-height:50vh;border:1px solid var(--border);border-radius:8px;overflow-y:auto;">
+          <div class="empty-state"><p>选择视频后显示可拼接片段</p></div>
+        </div>
+      </div>
+
+      <!-- Right: Preview & Result -->
+      <div style="flex:1;min-width:300px;">
+        <!-- Subtitle preview for selected clips -->
+        <div id="stitch-subtitle-preview" style="margin-bottom:16px;">
+          <h4 style="margin:0 0 8px 0;font-size:14px;color:var(--accent);">字幕预览</h4>
+          <div id="stitch-subtitle-text" style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 16px;max-height:300px;overflow-y:auto;font-size:13px;line-height:1.8;color:var(--text2);min-height:80px;">
+            请选择左侧片段查看字幕
+          </div>
+          <button class="btn btn-secondary" id="btn-copy-subs" onclick="copyMergedSubs()" style="font-size:11px;padding:4px 10px;margin-top:8px;display:none;">复制字幕文本</button>
+        </div>
+
+        <!-- Result audio -->
+        <div id="stitch-result-section" style="display:none;">
+          <h4 style="margin:0 0 8px 0;font-size:14px;color:var(--success);">
+            拼接结果 (<span id="stitch-result-count">0</span> 个片段)
+          </h4>
+          <div id="stitch-result-player-bar" style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;">
+            <audio id="stitch-audio-player" controls style="width:100%;min-width:250px;"></audio>
+            <div id="stitch-result-name" style="font-size:12px;color:var(--text2);margin-top:6px;"></div>
+          </div>
+          <div style="margin-top:8px;display:flex;gap:8px;">
+            <button class="btn btn-success" id="btn-stitch-download" onclick="downloadStitched()" style="font-size:11px;">下载音频</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 </main>
 
 <!-- player bars deployed inside respective tabs below -->
@@ -461,6 +819,8 @@ document.addEventListener('click', function(e) {
   if (btn.id === 'btn-review-prev') { reviewPrev(); return; }
   if (btn.id === 'btn-review-next') { reviewNext(); return; }
   if (btn.id === 'btn-jump-pending') { jumpToFirstPending(); return; }
+  if (btn.id === 'btn-clear-short') { clearShortClips(); return; }
+  if (btn.id === 'btn-detect-bgm') { detectBgmClips(); return; }
   if (btn.id === 'btn-approve') { reviewAction('approve'); return; }
   if (btn.id === 'btn-skip') { reviewAction('skip'); return; }
 
@@ -521,6 +881,9 @@ function switchTab(name) {
   if (name === 'results') loadResults();
   if (name === 'review') loadReviewDirs();
   if (name === 'denoise') loadDenoiseDirs();
+  if (name === 'extract') { loadExtractFiles(); loadExtractedSubs(); }
+  if (name === 'stitch') loadStitchVideos();
+  if (name === 'split') { loadSplitVideos(); loadSplitClipDirs(); }
 }
 
 // ============================================================
@@ -1195,6 +1558,193 @@ function jumpToFirstPending() {
     if (window._reviewClips[i].status === 'pending') { playReviewClip(i); return; }
   }
   toast('所有音频已审核完毕', 'info');
+}
+
+async function clearShortClips() {
+  if (!window._reviewDir) { toast('请先加载审核目录', 'error'); return; }
+  var minDur = parseFloat(document.getElementById('review-clear-dur').value) || 2.0;
+  if (!confirm('确定要删除所有时长 <= ' + minDur + ' 秒的视频片段吗？\n此操作不可撤销。')) return;
+  try {
+    var url = API + '/api/review/clear-short?clip_dir=' + encodeURIComponent(window._reviewDir) + '&min_duration=' + minDur;
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    if (data.status === 'started') {
+      toast('正在扫描并删除短片段...', 'info');
+      // Poll for completion
+      var pollTimer = setInterval(async function() {
+        try {
+          var r2 = await fetch(API + '/api/jobs/' + data.job_id);
+          var job = await r2.json();
+          if (job.status === 'completed') {
+            clearInterval(pollTimer);
+            var msg = (job.steps && job.steps.length) ? job.steps[job.steps.length - 1].message : '完成';
+            toast(msg, 'success');
+            loadReviewClips();
+          } else if (job.status === 'failed') {
+            clearInterval(pollTimer);
+            toast('删除失败', 'error');
+            loadReviewClips();
+          }
+        } catch(e) { clearInterval(pollTimer); }
+      }, 1000);
+    } else {
+      toast('操作失败', 'error');
+    }
+  } catch(e) { toast('操作失败: ' + e.message, 'error'); }
+}
+
+var _bgmResults = [];       // [{name, path, size_mb, has_bgm, has_reverb, bgm_score, silence_ratio, details}]
+var _bgmSelected = {};      // {name: true}
+
+async function detectBgmClips() {
+  if (!window._reviewDir) { toast('请先加载审核目录', 'error'); return; }
+  var btn = document.getElementById('btn-detect-bgm');
+  btn.disabled = true;
+  btn.textContent = '检测中...';
+  toast('正在分析音频特征，请稍候...', 'info');
+
+  try {
+    var url = API + '/api/review/detect-bgm?clip_dir=' + encodeURIComponent(window._reviewDir);
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    if (data.status !== 'started') { throw new Error('启动失败'); }
+
+    // Poll for completion
+    var pollTimer = setInterval(async function() {
+      try {
+        var r2 = await fetch(API + '/api/jobs/' + data.job_id);
+        var job = await r2.json();
+        if (job.status === 'completed') {
+          clearInterval(pollTimer);
+          btn.disabled = false;
+          btn.textContent = '检测BGM/混响';
+          // Extract results from step data
+          var results = [];
+          if (job.steps && job.steps.length) {
+            var stepData = job.steps[job.steps.length - 1].data;
+            if (stepData && stepData.results) results = stepData.results;
+          }
+          _bgmResults = results;
+          _bgmSelected = {};
+          renderBgmResults();
+          if (results.length === 0) {
+            toast('未检测到BGM/混响片段', 'success');
+          } else {
+            toast('检测到 ' + results.length + ' 个BGM/混响片段', 'info');
+          }
+        } else if (job.status === 'failed') {
+          clearInterval(pollTimer);
+          btn.disabled = false;
+          btn.textContent = '检测BGM/混响';
+          toast('检测失败', 'error');
+        }
+      } catch(e) { clearInterval(pollTimer); btn.disabled = false; btn.textContent = '检测BGM/混响'; }
+    }, 1500);
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = '检测BGM/混响';
+    toast('启动失败: ' + e.message, 'error');
+  }
+}
+
+function renderBgmResults() {
+  var panel = document.getElementById('bgm-results-panel');
+  var list = document.getElementById('bgm-results-list');
+  var countEl = document.getElementById('bgm-count');
+
+  if (!_bgmResults.length) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  panel.style.display = 'block';
+  countEl.textContent = '(' + _bgmResults.length + ' 个)';
+
+  var html = '';
+  for (var i = 0; i < _bgmResults.length; i++) {
+    var r = _bgmResults[i];
+    var checked = _bgmSelected[r.name] ? ' checked' : '';
+    var badge = '';
+    if (r.has_bgm && r.has_reverb) badge = '<span style="background:var(--danger);color:#fff;font-size:10px;padding:1px 5px;border-radius:3px;">BGM+混响</span>';
+    else if (r.has_bgm) badge = '<span style="background:var(--warning);color:#000;font-size:10px;padding:1px 5px;border-radius:3px;">BGM</span>';
+    else if (r.has_reverb) badge = '<span style="background:#f0a500;color:#000;font-size:10px;padding:1px 5px;border-radius:3px;">混响</span>';
+
+    html += '<div class="file-item" style="cursor:pointer;" onclick="toggleBgmSelect(\'' +
+      escapeHtml(r.name).replace(/'/g, "\\'") + '\')">' +
+      '<input type="checkbox"' + checked + ' style="pointer-events:none;" onclick="event.stopPropagation();">' +
+      badge +
+      '<span class="file-name" style="font-size:12px;margin-left:6px;" title="' + escapeHtml(r.details) + '">' +
+        escapeHtml(r.name) + '</span>' +
+      '<span class="file-size">' + r.size_mb + ' MB</span>' +
+      '<span style="font-size:10px;color:var(--text2);">静音' + Math.round(r.silence_ratio * 100) + '% 评分' + r.bgm_score + '</span>' +
+      '<a class="btn btn-secondary" style="font-size:10px;padding:3px 6px;text-decoration:none;margin-left:6px;" ' +
+        'href="' + API + '/api/review/stream?path=' + encodeURIComponent(r.path) + '" target="_blank" ' +
+        'onclick="event.stopPropagation();">试听</a>' +
+      '</div>';
+  }
+  list.innerHTML = html;
+}
+
+function toggleBgmSelect(name) {
+  if (_bgmSelected[name]) {
+    delete _bgmSelected[name];
+  } else {
+    _bgmSelected[name] = true;
+  }
+  // Refresh checkbox state without rebuilding
+  var items = document.querySelectorAll('#bgm-results-list .file-item');
+  for (var i = 0; i < items.length; i++) {
+    var cb = items[i].querySelector('input[type=checkbox]');
+    if (!cb) continue;
+    var onclick = items[i].getAttribute('onclick') || '';
+    if (onclick.indexOf(name.replace(/'/g, "\\'")) >= 0) {
+      cb.checked = !!_bgmSelected[name];
+      break;
+    }
+  }
+}
+
+function toggleBgmSelectAll() {
+  var allSelected = Object.keys(_bgmSelected).length === _bgmResults.length;
+  if (allSelected) {
+    _bgmSelected = {};
+  } else {
+    for (var i = 0; i < _bgmResults.length; i++) {
+      _bgmSelected[_bgmResults[i].name] = true;
+    }
+  }
+  renderBgmResults();
+}
+
+async function deleteBgmSelected() {
+  var toDelete = [];
+  for (var i = 0; i < _bgmResults.length; i++) {
+    if (_bgmSelected[_bgmResults[i].name]) toDelete.push(_bgmResults[i].path);
+  }
+  if (!toDelete.length) { toast('请先选择要删除的片段', 'info'); return; }
+  if (!confirm('确定要删除选中的 ' + toDelete.length + ' 个片段吗？\n此操作不可撤销。')) return;
+
+  try {
+    var resp = await fetch(API + '/api/results/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: toDelete }),
+    });
+    var data = await resp.json();
+    toast('已删除 ' + data.deleted + ' 个片段', 'success');
+
+    // Remove deleted from results and refresh
+    var deletedPaths = {};
+    for (var i = 0; i < toDelete.length; i++) deletedPaths[toDelete[i]] = true;
+    var remaining = [];
+    for (var i = 0; i < _bgmResults.length; i++) {
+      if (!deletedPaths[_bgmResults[i].path]) remaining.push(_bgmResults[i]);
+    }
+    _bgmResults = remaining;
+    _bgmSelected = {};
+    renderBgmResults();
+    loadReviewClips();
+  } catch(e) { toast('删除失败: ' + e.message, 'error'); }
 }
 
 // Keyboard shortcuts for review tab
@@ -2073,6 +2623,440 @@ async function deleteSelected() {
 }
 
 // ============================================================
+// Subtitle Extraction
+// ============================================================
+var _extractFiles = [];
+var _extractTracks = [];
+var _extractActiveFile = null;
+var _extractSelectedTracks = {};
+var _extractJobId = null;
+var _extractPollTimer = null;
+
+async function loadExtractFiles() {
+  var cont = document.getElementById('extract-file-list');
+  try {
+    var resp = await fetch(API + '/api/extract/mkv-files');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var data = await resp.json();
+    _extractFiles = data.files || [];
+    if (!_extractFiles.length) {
+      cont.innerHTML = '<div class="empty-state"><p>data/downloads 中没有 MKV 文件</p></div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < _extractFiles.length; i++) {
+      var f = _extractFiles[i];
+      var activeClass = _extractActiveFile === f.path ? ' active' : '';
+      html += '<div class="mkv-file-item' + activeClass + '" data-extract-path="' + safeAttr(f.path) + '">' +
+        '<span style="font-size:16px;">📦</span>' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(f.name) + '</div>' +
+          '<div style="font-size:11px;color:var(--text2);">' + f.size_mb + ' MB | ' + f.time_str + '</div>' +
+        '</div>' +
+      '</div>';
+    }
+    cont.innerHTML = html;
+    // Re-highlight active
+    if (_extractActiveFile) {
+      var items = cont.querySelectorAll('.mkv-file-item');
+      for (var k = 0; k < items.length; k++) {
+        if (items[k].getAttribute('data-extract-path') === _extractActiveFile) {
+          items[k].classList.add('active');
+          break;
+        }
+      }
+    }
+  } catch(e) {
+    cont.innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
+  }
+}
+
+async function selectExtractFile(path) {
+  _extractActiveFile = path;
+  _extractSelectedTracks = {};
+  _extractJobId = null;
+  if (_extractPollTimer) { clearInterval(_extractPollTimer); _extractPollTimer = null; }
+  document.getElementById('extract-status').style.display = 'none';
+
+  // Highlight active file
+  var items = document.querySelectorAll('#extract-file-list .mkv-file-item');
+  for (var i = 0; i < items.length; i++) {
+    var p = items[i].getAttribute('data-extract-path');
+    items[i].classList.toggle('active', p === path);
+  }
+
+  // Show track panel
+  document.getElementById('extract-empty-state').style.display = 'none';
+  var panel = document.getElementById('extract-track-panel');
+  panel.style.display = 'block';
+  document.getElementById('extract-current-file').textContent = '轨道 — ' + (path.split('/').pop().split('\\').pop());
+
+  // Load tracks
+  var tCont = document.getElementById('extract-track-list');
+  tCont.innerHTML = '<div class="empty-state"><p>加载轨道信息...</p></div>';
+  var btnExtract = document.getElementById('btn-extract-selected');
+  var btnAll = document.getElementById('btn-extract-all-subs');
+  btnExtract.style.display = 'none';
+  btnAll.style.display = 'none';
+
+  try {
+    var resp = await fetch(API + '/api/extract/tracks?path=' + encodeURIComponent(path));
+    var data = await resp.json();
+    _extractTracks = data.tracks || [];
+    renderExtractTracks();
+  } catch(e) {
+    tCont.innerHTML = '<div class="empty-state"><p>获取轨道失败: ' + escapeHtml(e.message) + '</p></div>';
+  }
+}
+
+function renderExtractTracks() {
+  var tCont = document.getElementById('extract-track-list');
+  var btnExtract = document.getElementById('btn-extract-selected');
+  var btnAll = document.getElementById('btn-extract-all-subs');
+  var hasSubs = false;
+
+  if (!_extractTracks.length) {
+    tCont.innerHTML = '<div class="empty-state"><p>此文件无可提取轨道</p></div>';
+    btnExtract.style.display = 'none';
+    btnAll.style.display = 'none';
+    return;
+  }
+
+  var html = '';
+  for (var i = 0; i < _extractTracks.length; i++) {
+    var t = _extractTracks[i];
+    var typeClass = t.type === 'video' ? 'video' : (t.type === 'audio' ? 'audio' : (t.type === 'subtitles' ? 'subtitles' : 'other'));
+    var typeLabel = t.type === 'video' ? '视频' : (t.type === 'audio' ? '音频' : (t.type === 'subtitles' ? '字幕' : '其他'));
+
+    if (t.type === 'subtitles') hasSubs = true;
+
+    var isSelected = _extractSelectedTracks[t.id] || false;
+    var trackClass = isSelected ? ' selected' : '';
+    var checkbox = t.type === 'subtitles'
+      ? '<input type="checkbox" ' + (isSelected ? 'checked' : '') + ' data-track-id="' + t.id + '" style="flex-shrink:0;cursor:pointer;">'
+      : '';
+
+    html += '<div class="track-card' + trackClass + '" data-track-card="' + t.id + '">' +
+      checkbox +
+      '<span class="track-type ' + typeClass + '">' + typeLabel + '</span>' +
+      '<div class="track-info">' +
+        '<span>ID: ' + t.id + ' — ' + escapeHtml(t.codec || '?') + '</span>' +
+        '<div class="track-meta">' +
+          '语言: ' + escapeHtml(t.language || '未知') +
+          (t.name ? ' | 名称: ' + escapeHtml(t.name) : '') +
+          (t.codec_id ? ' | ' + escapeHtml(t.codec_id) : '') +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+  tCont.innerHTML = html;
+
+  // Wire checkbox changes
+  var checks = tCont.querySelectorAll('input[data-track-id]');
+  for (var c = 0; c < checks.length; c++) {
+    checks[c].onchange = function() {
+      var tid = parseInt(this.getAttribute('data-track-id'));
+      _extractSelectedTracks[tid] = this.checked;
+      updateTrackCardHighlight(tid, this.checked);
+      updateExtractButtons();
+    };
+  }
+
+  btnAll.style.display = hasSubs ? 'inline-block' : 'none';
+  updateExtractButtons();
+}
+
+function updateTrackCardHighlight(trackId, selected) {
+  var card = document.querySelector('[data-track-card="' + trackId + '"]');
+  if (card) card.classList.toggle('selected', selected);
+}
+
+function updateExtractButtons() {
+  var btnExtract = document.getElementById('btn-extract-selected');
+  var count = Object.values(_extractSelectedTracks).filter(function(v) { return v; }).length;
+  btnExtract.style.display = count > 0 ? 'inline-block' : 'none';
+  btnExtract.textContent = count > 0 ? '提取选中轨道 (' + count + ')' : '提取选中轨道';
+}
+
+async function extractSelectedTracks() {
+  if (!_extractActiveFile) return;
+  var ids = [];
+  for (var k in _extractSelectedTracks) {
+    if (_extractSelectedTracks[k]) ids.push(k);
+  }
+  if (!ids.length) { toast('请先选择要提取的字幕轨道', 'info'); return; }
+  startExtraction(_extractActiveFile, ids.join(','));
+}
+
+async function extractAllSubs() {
+  if (!_extractActiveFile) return;
+  startExtraction(_extractActiveFile, '');
+}
+
+async function startExtraction(path, trackIds) {
+  try {
+    var url = API + '/api/extract/run?path=' + encodeURIComponent(path);
+    if (trackIds) url += '&track_ids=' + encodeURIComponent(trackIds);
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    if (data.status !== 'started') { toast('启动提取失败', 'error'); return; }
+    _extractJobId = data.job_id;
+    document.getElementById('extract-status').style.display = 'block';
+    document.getElementById('extract-status-text').textContent = '启动提取...';
+    document.getElementById('extract-progress-fill').style.width = '0%';
+    toast('字幕提取任务已启动', 'success');
+    startExtractPolling();
+  } catch(e) {
+    toast('提取失败: ' + e.message, 'error');
+  }
+}
+
+function startExtractPolling() {
+  if (_extractPollTimer) clearInterval(_extractPollTimer);
+  _extractPollTimer = setInterval(pollExtractJob, 800);
+  pollExtractJob();
+}
+
+function stopExtractPolling() {
+  if (_extractPollTimer) { clearInterval(_extractPollTimer); _extractPollTimer = null; }
+}
+
+async function pollExtractJob() {
+  if (!_extractJobId) { stopExtractPolling(); return; }
+  try {
+    var resp = await fetch(API + '/api/jobs/' + _extractJobId);
+    var job = await resp.json();
+    var fill = document.getElementById('extract-progress-fill');
+    var text = document.getElementById('extract-status-text');
+    fill.style.width = (job.progress || 0) + '%';
+    text.textContent = job.current_step || '处理中...';
+
+    if (job.status === 'completed') {
+      stopExtractPolling();
+      document.getElementById('extract-status-text').textContent = job.steps && job.steps.length ? job.steps[0].message : '提取完成';
+      if (job.status === 'completed') {
+        toast('字幕提取完成', 'success');
+      }
+      loadExtractedSubs();
+    } else if (job.status === 'failed') {
+      stopExtractPolling();
+      var msg = job.steps && job.steps.length ? job.steps[0].message : '提取失败';
+      document.getElementById('extract-status-text').textContent = '失败: ' + msg;
+      toast('提取失败: ' + msg, 'error');
+    }
+  } catch(e) {}
+}
+
+async function loadExtractedSubs() {
+  try {
+    var resp = await fetch(API + '/api/extract/subtitle-files');
+    if (!resp.ok) return;
+    var data = await resp.json();
+    var subs = data.subtitles || [];
+    var cont = document.getElementById('extract-sub-list');
+    document.getElementById('extract-sub-count').textContent = subs.length;
+    if (!subs.length) {
+      cont.innerHTML = '<div class="empty-state"><p>暂无提取的字幕</p></div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < subs.length; i++) {
+      var s = subs[i];
+      html += '<div class="file-item"><span>📝</span><span class="file-name">' + escapeHtml(s.name) + '</span><span class="file-size">' + s.size_kb + ' KB</span></div>';
+    }
+    cont.innerHTML = html;
+  } catch(e) {}
+}
+
+// Wire delegation for extract file list clicks
+document.getElementById('extract-file-list').addEventListener('click', function(e) {
+  var item = e.target.closest('.mkv-file-item');
+  if (!item) return;
+  var path = item.getAttribute('data-extract-path');
+  if (path) selectExtractFile(path);
+});
+
+// ============================================================
+// Audio Stitching
+// ============================================================
+var _stitchClips = [];
+var _stitchSelected = {};
+var _stitchOutputPath = '';
+var _stitchMergedSubs = '';
+
+async function loadStitchVideos() {
+  try {
+    var resp = await fetch(API + '/api/stitch/videos');
+    if (!resp.ok) return;
+    var data = await resp.json();
+    var sel = document.getElementById('stitch-video-select');
+    var curVal = sel.value;
+    sel.innerHTML = '<option value="">选择视频...</option>';
+    for (var i = 0; i < data.videos.length; i++) {
+      var v = data.videos[i];
+      sel.innerHTML += '<option value="' + safeAttr(v.name) + '">' + escapeHtml(v.name) + ' (' + v.wav_count + ' 个降噪音频)</option>';
+    }
+    if (curVal) {
+      for (var j = 0; j < sel.options.length; j++) {
+        if (sel.options[j].value === curVal) { sel.selectedIndex = j; break; }
+      }
+    }
+    if (data.videos.length > 0 && !curVal) { sel.selectedIndex = 1; loadStitchClips(); }
+    else if (curVal) loadStitchClips();
+  } catch(e) {}
+}
+
+async function loadStitchClips() {
+  var video = document.getElementById('stitch-video-select').value;
+  _stitchClips = [];
+  _stitchSelected = {};
+  _stitchOutputPath = '';
+  _stitchMergedSubs = '';
+  document.getElementById('stitch-result-section').style.display = 'none';
+  document.getElementById('btn-copy-subs').style.display = 'none';
+  var cont = document.getElementById('stitch-clip-list');
+
+  if (!video) {
+    cont.innerHTML = '<div class="empty-state"><p>选择视频后显示可拼接片段</p></div>';
+    document.getElementById('stitch-clip-count').textContent = '未选择视频';
+    document.getElementById('btn-stitch-selected').style.display = 'none';
+    document.getElementById('btn-stitch-all').style.display = 'none';
+    document.getElementById('stitch-subtitle-text').textContent = '请选择左侧片段查看字幕';
+    return;
+  }
+
+  try {
+    var resp = await fetch(API + '/api/stitch/clips?video=' + encodeURIComponent(video));
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var data = await resp.json();
+    _stitchClips = data.clips || [];
+    document.getElementById('stitch-clip-count').textContent = _stitchClips.length + ' 个片段';
+    document.getElementById('btn-stitch-selected').style.display = _stitchClips.length ? 'inline-block' : 'none';
+    document.getElementById('btn-stitch-all').style.display = _stitchClips.length ? 'inline-block' : 'none';
+
+    if (!_stitchClips.length) {
+      cont.innerHTML = '<div class="empty-state"><p>没有可拼接的音频片段</p></div>';
+      return;
+    }
+
+    var html = '';
+    for (var i = 0; i < _stitchClips.length; i++) {
+      var c = _stitchClips[i];
+      var checked = _stitchSelected[c.path] ? ' checked' : '';
+      var durStr = c.duration_s > 0 ? formatDuration(c.duration_s) : '?';
+      html += '<div class="stitch-clip-card" data-stitch-path="' + safeAttr(c.path) + '">' +
+        '<input type="checkbox" value="' + safeAttr(c.path) + '" style="flex-shrink:0;margin-top:4px;"' + checked + ' data-stitch-check="1">' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-size:13px;">' + escapeHtml(c.name) + '</div>' +
+          '<div class="stitch-clip-sub">' + (c.subtitle_text ? escapeHtml(c.subtitle_text) : '<span style="color:var(--text2);">无字幕</span>') + '</div>' +
+        '</div>' +
+        '<div style="flex-shrink:0;text-align:right;font-size:11px;color:var(--text2);">' + c.size_mb + ' MB<br>' + durStr + '</div>' +
+      '</div>';
+    }
+    cont.innerHTML = html;
+
+    // Wire checkboxes
+    var checks = cont.querySelectorAll('input[data-stitch-check]');
+    for (var k = 0; k < checks.length; k++) {
+      checks[k].onchange = function() {
+        _stitchSelected[this.value] = this.checked;
+        updateStitchPreview();
+      };
+    }
+    updateStitchPreview();
+  } catch(e) {
+    cont.innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
+  }
+}
+
+function updateStitchPreview() {
+  var lines = [];
+  for (var i = 0; i < _stitchClips.length; i++) {
+    var c = _stitchClips[i];
+    if (_stitchSelected[c.path]) {
+      lines.push(c.subtitle_text || '(无字幕)');
+    }
+  }
+  var preview = document.getElementById('stitch-subtitle-text');
+  if (lines.length) {
+    preview.innerHTML = lines.map(function(l) { return '<div style="margin-bottom:4px;">' + escapeHtml(l) + '</div>'; }).join('');
+  } else {
+    preview.textContent = '请选择左侧片段查看字幕';
+  }
+}
+
+async function stitchSelected() {
+  var paths = [];
+  for (var i = 0; i < _stitchClips.length; i++) {
+    var c = _stitchClips[i];
+    if (_stitchSelected[c.path]) paths.push(c.path);
+  }
+  if (!paths.length) { toast('请先选择要拼接的片段', 'info'); return; }
+  runStitch(paths);
+}
+
+async function stitchAll() {
+  if (!_stitchClips.length) { toast('没有可拼接的片段', 'info'); return; }
+  var paths = _stitchClips.map(function(c) { return c.path; });
+  runStitch(paths);
+}
+
+async function runStitch(paths) {
+  var video = document.getElementById('stitch-video-select').value;
+  try {
+    var resp = await fetch(API + '/api/stitch/concat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({video: video, paths: paths})
+    });
+    if (!resp.ok) { var err = await resp.json(); toast('拼接失败: ' + (err.detail || ''), 'error'); return; }
+    var data = await resp.json();
+    _stitchOutputPath = data.output_path;
+    _stitchMergedSubs = data.merged_subtitle || '';
+
+    // Show result
+    var section = document.getElementById('stitch-result-section');
+    section.style.display = 'block';
+    document.getElementById('stitch-result-count').textContent = data.clip_count;
+    document.getElementById('stitch-result-name').textContent = data.output_name;
+
+    var player = document.getElementById('stitch-audio-player');
+    player.src = API + '/api/results/stream?path=' + encodeURIComponent(data.output_path);
+    player.load();
+
+    // Show merged subtitles in preview
+    var preview = document.getElementById('stitch-subtitle-text');
+    if (_stitchMergedSubs) {
+      preview.innerHTML = _stitchMergedSubs.split('\n').map(function(l) {
+        return '<div style="margin-bottom:4px;">' + escapeHtml(l) + '</div>';
+      }).join('');
+    } else {
+      preview.textContent = '(无字幕)';
+    }
+
+    document.getElementById('btn-copy-subs').style.display = _stitchMergedSubs ? 'inline-block' : 'none';
+    toast('拼接完成: ' + data.clip_count + ' 个片段', 'success');
+  } catch(e) { toast('拼接失败: ' + e.message, 'error'); }
+}
+
+function copyMergedSubs() {
+  if (!_stitchMergedSubs) return;
+  var plainText = _stitchMergedSubs.replace(/\n/g, '');  // single line
+  navigator.clipboard.writeText(plainText).then(
+    function() { toast('字幕文本已复制', 'success'); },
+    function() { toast('复制失败', 'error'); }
+  );
+}
+
+function downloadStitched() {
+  if (!_stitchOutputPath) return;
+  var a = document.createElement('a');
+  a.href = API + '/api/results/stream?path=' + encodeURIComponent(_stitchOutputPath);
+  a.download = _stitchOutputPath.split('/').pop().split('\\').pop();
+  a.click();
+}
+
+// ============================================================
 // Init
 // ============================================================
 loadLocalFiles();
@@ -2097,6 +3081,454 @@ async function fetchFansubTeams() {
 document.getElementById('results-audio-player').addEventListener('ended', function() {
   if (_playingEl) { _playingEl.classList.remove('playing'); _playingEl = null; }
 });
+
+// ============================================================
+// Video Split / Cut
+// ============================================================
+var _splitVideoPath = '';
+var _splitVideoName = '';
+var _splitMode = 'subtitle';
+var _splitJobId = null;
+var _splitPollTimer = null;
+var _splitSubFiles = [];
+
+async function loadSplitVideos() {
+  var container = document.getElementById('split-video-list');
+  container.innerHTML = '<div class="empty-state"><p>加载中...</p></div>';
+  try {
+    var resp = await fetch(API + '/api/local/videos');
+    if (!resp.ok) throw new Error(await resp.text());
+    var data = await resp.json();
+    var videos = data.videos || [];
+    // Show MKV only
+    var filtered = [];
+    for (var i = 0; i < videos.length; i++) {
+      if (videos[i].name.toLowerCase().endsWith('.mkv')) {
+        filtered.push(videos[i]);
+      }
+    }
+    if (!filtered.length) {
+      container.innerHTML = '<div class="empty-state"><p>未找到 MKV 文件<br><small>请将 MKV 放入 data/downloads/ 目录</small></p></div>';
+    } else {
+      var html = '';
+      for (var i = 0; i < filtered.length; i++) {
+        var v = filtered[i];
+        var sel = (v.path === _splitVideoPath) ? ' selected' : '';
+        html += '<div class="split-file-item' + sel + '" onclick="selectSplitVideo(\'' +
+          escapeHtml(v.name).replace(/'/g, "\\'") + '\',\'' +
+          v.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">' +
+          '<span class="file-name">' + escapeHtml(v.name) + '</span>' +
+          '<span class="file-size">' + v.size_mb + ' MB</span>' +
+          '<span style="font-size:10px;color:var(--text2);">' + (v.time_str || '') + '</span>' +
+          '</div>';
+      }
+      container.innerHTML = html;
+    }
+  } catch(e) {
+    container.innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
+  }
+}
+
+function selectSplitVideo(name, path) {
+  // Unescape backslashes in path
+  var realPath = path.replace(/\\\\/g, '\\');
+  _splitVideoPath = realPath;
+  _splitVideoName = name;
+
+  // Update visual selection
+  var items = document.querySelectorAll('#split-video-list .split-file-item');
+  for (var i = 0; i < items.length; i++) {
+    items[i].classList.remove('selected');
+  }
+  // Find and select the matching item
+  for (var i = 0; i < items.length; i++) {
+    var onclick = items[i].getAttribute('onclick') || '';
+    if (onclick.indexOf(name.replace(/'/g, "\\'")) >= 0) {
+      items[i].classList.add('selected');
+      break;
+    }
+  }
+
+  // Show config panel
+  document.getElementById('split-no-video').style.display = 'none';
+  document.getElementById('split-config-panel').style.display = 'block';
+  document.getElementById('split-current-video').textContent = name;
+
+  // Update output dir
+  var baseName = name.replace(/\.[^.]+$/, '');
+  document.getElementById('split-output-dir').textContent = 'data/clips/' + baseName + '/';
+
+  // Load subtitles (will auto-match to this video)
+  loadSplitSubs();
+  // Load existing clips for this video
+  loadSplitClips();
+  document.getElementById('split-results-section').style.display = 'block';
+}
+
+async function loadSplitSubs() {
+  var select = document.getElementById('split-sub-select');
+  var preview = document.getElementById('split-sub-preview');
+  select.innerHTML = '<option value="">-- 加载中 --</option>';
+  preview.style.display = 'none';
+
+  try {
+    var resp = await fetch(API + '/api/local/subtitles');
+    if (!resp.ok) throw new Error(await resp.text());
+    var data = await resp.json();
+    _splitSubFiles = data.subtitles || [];
+
+    // Also try to load subtitles matching video name
+    var resp2 = await fetch(API + '/api/extract/subtitle-files');
+    if (resp2.ok) {
+      var data2 = await resp2.json();
+      var subs2 = data2.subtitles || [];
+      // Merge, deduplicate by path
+      var seen = {};
+      var merged = [];
+      for (var i = 0; i < _splitSubFiles.length; i++) {
+        if (!seen[_splitSubFiles[i].path]) {
+          seen[_splitSubFiles[i].path] = true;
+          merged.push(_splitSubFiles[i]);
+        }
+      }
+      for (var i = 0; i < subs2.length; i++) {
+        if (!seen[subs2[i].path]) {
+          seen[subs2[i].path] = true;
+          merged.push(subs2[i]);
+        }
+      }
+      _splitSubFiles = merged;
+    }
+
+    var html = '<option value="">-- 选择字幕文件 --</option>';
+    for (var i = 0; i < _splitSubFiles.length; i++) {
+      var s = _splitSubFiles[i];
+      html += '<option value="' + i + '">' + escapeHtml(s.name) + ' (' + s.size_kb + 'KB)</option>';
+    }
+    select.innerHTML = html;
+
+    // Auto-match subtitle to selected video
+    autoMatchSubtitle();
+  } catch(e) {
+    select.innerHTML = '<option value="">-- 加载失败 --</option>';
+  }
+}
+
+function autoMatchSubtitle() {
+  if (!_splitVideoName || !_splitSubFiles.length) return;
+  var select = document.getElementById('split-sub-select');
+  var preview = document.getElementById('split-sub-preview');
+
+  // Normalize video base name for matching
+  var videoBase = _splitVideoName.replace(/\.[^.]+$/, '').toLowerCase();
+  // Also try extracting the common part (e.g. "[SubsPlease] Show - 01 (1080p)" -> "Show - 01")
+  var videoClean = videoBase
+    .replace(/\[.*?\]/g, '')   // remove [tags]
+    .replace(/\(.*?\)/g, '')   // remove (tags)
+    .replace(/{\s*}/g, '')     // remove {tags}
+    .replace(/1080p|720p|480p/gi, '')
+    .replace(/x264|x265|hevc|avc/gi, '')
+    .replace(/aac|flac|opus/gi, '')
+    .replace(/web-dl|bdrip|webrip/gi, '')
+    .trim();
+
+  // Score each subtitle file for match quality
+  var bestIdx = -1;
+  var bestScore = 0;
+  for (var i = 0; i < _splitSubFiles.length; i++) {
+    var subName = _splitSubFiles[i].name.toLowerCase();
+    var subPath = (_splitSubFiles[i].path || '').toLowerCase();
+    var score = 0;
+
+    // Full video base name match (best)
+    if (subName.indexOf(videoBase) >= 0 || videoBase.indexOf(subName.replace(/\.[^.]+$/, '')) >= 0) {
+      score += 100;
+    }
+    // Clean name match
+    if (videoClean && videoClean.length > 3) {
+      if (subName.indexOf(videoClean) >= 0 || videoClean.indexOf(subName.replace(/\.[^.]+$/, '')) >= 0) {
+        score += 80;
+      }
+    }
+    // Word-by-word match
+    if (videoClean) {
+      var words = videoClean.split(/[\s\-_]+/);
+      for (var w = 0; w < words.length; w++) {
+        if (words[w].length >= 2 && subName.indexOf(words[w]) >= 0) {
+          score += 10;
+        }
+      }
+    }
+    // Prefer Chinese subtitles
+    if (/chi|zho|zh|chs|sc|简|中/.test(subName)) {
+      score += 20;
+    }
+    // Prefer Simplified Chinese over Traditional
+    if (/hans|chs|sc|简|gb|cn/i.test(subName)) {
+      score += 10;
+    } else if (/hant|cht|tc|繁|big5|hk|tw/i.test(subName)) {
+      score -= 5;
+    }
+    // Prefer ASS/SSA over SRT (more features)
+    if (/\.(ass|ssa)$/i.test(subName)) {
+      score += 5;
+    }
+    // Prefer files from subtitles dir over downloads dir
+    if (subPath.indexOf('subtitles') >= 0) {
+      score += 3;
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestIdx = i;
+    }
+  }
+
+  if (bestIdx >= 0 && bestScore > 10) {
+    select.value = bestIdx;
+    preview.style.display = 'block';
+    preview.textContent = '自动匹配: ' + _splitSubFiles[bestIdx].path;
+  } else {
+    select.value = '';
+    preview.style.display = 'none';
+  }
+}
+
+function onSplitSubSelect() {
+  var idx = parseInt(document.getElementById('split-sub-select').value);
+  var preview = document.getElementById('split-sub-preview');
+  if (isNaN(idx) || idx < 0 || idx >= _splitSubFiles.length) {
+    preview.style.display = 'none';
+    return;
+  }
+  preview.style.display = 'block';
+  preview.textContent = '路径: ' + _splitSubFiles[idx].path;
+}
+
+function switchSplitMode(mode) {
+  _splitMode = mode;
+  var buttons = document.querySelectorAll('.split-mode-tabs button');
+  for (var i = 0; i < buttons.length; i++) {
+    buttons[i].classList.remove('active');
+    if (buttons[i].getAttribute('data-split-mode') === mode) {
+      buttons[i].classList.add('active');
+    }
+  }
+  document.getElementById('split-cfg-subtitle').style.display = (mode === 'subtitle') ? 'block' : 'none';
+  document.getElementById('split-cfg-duration').style.display = (mode === 'duration') ? 'block' : 'none';
+  document.getElementById('split-cfg-size').style.display = (mode === 'size') ? 'block' : 'none';
+}
+
+function parseTimeInput(val) {
+  // Parse "90", "1:30", "1:30:00" to seconds
+  val = String(val).trim();
+  if (!val) return null;
+  if (/^\d+(\.\d+)?$/.test(val)) return parseFloat(val);
+  var parts = val.split(':');
+  if (parts.length === 2) {
+    return parseInt(parts[0]) * 60 + parseFloat(parts[1]);
+  }
+  if (parts.length === 3) {
+    return parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseFloat(parts[2]);
+  }
+  return null;
+}
+
+async function runSplit() {
+  if (!_splitVideoPath) {
+    toast('请先选择视频文件', 'error');
+    return;
+  }
+
+  var payload = {
+    mode: _splitMode,
+    video_path: _splitVideoPath,
+    hw_accel: document.getElementById('split-hw-accel').value,
+    output_ext: document.getElementById('split-output-ext').value,
+  };
+
+  if (_splitMode === 'subtitle') {
+    var subIdx = parseInt(document.getElementById('split-sub-select').value);
+    if (isNaN(subIdx) || subIdx < 0 || subIdx >= _splitSubFiles.length) {
+      toast('请选择字幕文件', 'error');
+      return;
+    }
+    payload.subtitle_path = _splitSubFiles[subIdx].path;
+    payload.padding = parseFloat(document.getElementById('split-padding').value) || 0.1;
+    payload.group_count = parseInt(document.getElementById('split-group-count').value) || 1;
+    payload.deduplicate = document.getElementById('split-deduplicate').checked;
+  } else if (_splitMode === 'duration') {
+    var segDur = parseTimeInput(document.getElementById('split-seg-duration').value);
+    if (!segDur || segDur <= 0) {
+      toast('请输入有效的片段时长', 'error');
+      return;
+    }
+    payload.segment_duration = segDur;
+    var st = parseTimeInput(document.getElementById('split-start-time').value);
+    if (st !== null) payload.start_time = st;
+    var et = parseTimeInput(document.getElementById('split-end-time').value);
+    if (et !== null) payload.end_time = et;
+  } else if (_splitMode === 'size') {
+    var tsize = parseFloat(document.getElementById('split-target-size').value);
+    if (!tsize || tsize <= 0) {
+      toast('请输入有效的目标大小 (MB)', 'error');
+      return;
+    }
+    payload.target_size_mb = tsize;
+  }
+
+  try {
+    document.getElementById('btn-split-run').style.display = 'none';
+    document.getElementById('btn-split-cancel').style.display = 'inline-block';
+    document.getElementById('split-status-text').textContent = '启动中...';
+    document.getElementById('split-progress-bar').style.display = 'block';
+    document.getElementById('split-progress-fill').style.width = '2%';
+    document.getElementById('split-progress-text').textContent = '提交任务...';
+
+    var resp = await fetch(API + '/api/split/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    var data = await resp.json();
+    _splitJobId = data.job_id;
+    document.getElementById('split-status-text').textContent = '任务 ' + _splitJobId + ' 运行中...';
+
+    // Start polling
+    startSplitPolling();
+  } catch(e) {
+    toast('启动失败: ' + e.message, 'error');
+    resetSplitUI();
+  }
+}
+
+function cancelSplit() {
+  if (!_splitJobId) return;
+  fetch(API + '/api/jobs/' + _splitJobId + '/cancel', { method: 'POST' }).catch(function(){});
+  toast('正在取消...', 'info');
+}
+
+function startSplitPolling() {
+  stopSplitPolling();
+  _splitPollTimer = setInterval(pollSplitJob, 1000);
+}
+
+function stopSplitPolling() {
+  if (_splitPollTimer) { clearInterval(_splitPollTimer); _splitPollTimer = null; }
+}
+
+async function pollSplitJob() {
+  if (!_splitJobId) { stopSplitPolling(); return; }
+  try {
+    var resp = await fetch(API + '/api/jobs/' + _splitJobId);
+    if (!resp.ok) throw new Error(await resp.text());
+    var job = await resp.json();
+
+    var pct = job.progress || 0;
+    document.getElementById('split-progress-fill').style.width = pct + '%';
+    document.getElementById('split-progress-text').textContent =
+      (job.current_step || '') + ' ' + Math.round(pct) + '%';
+
+    if (job.status === 'completed') {
+      stopSplitPolling();
+      resetSplitUI();
+      toast('切割完成! 共生成 ' + (job.clip_count || 0) + ' 个片段', 'success');
+      loadSplitClips();
+      loadSplitClipDirs();
+    } else if (job.status === 'failed') {
+      stopSplitPolling();
+      resetSplitUI();
+      var errMsg = '切割失败';
+      if (job.steps && job.steps.length) {
+        errMsg += ': ' + (job.steps[job.steps.length - 1].message || '');
+      }
+      toast(errMsg, 'error');
+    } else if (job.status === 'cancelled') {
+      stopSplitPolling();
+      resetSplitUI();
+      toast('已取消', 'info');
+      loadSplitClips();
+    }
+  } catch(e) {
+    // Job may have been deleted
+  }
+}
+
+function resetSplitUI() {
+  document.getElementById('btn-split-run').style.display = 'inline-block';
+  document.getElementById('btn-split-cancel').style.display = 'none';
+  document.getElementById('split-progress-bar').style.display = 'none';
+  document.getElementById('split-status-text').textContent = '';
+  _splitJobId = null;
+}
+
+async function loadSplitClipDirs() {
+  var container = document.getElementById('split-clip-dirs');
+  try {
+    var resp = await fetch(API + '/api/split/clip-dirs');
+    if (!resp.ok) throw new Error(await resp.text());
+    var data = await resp.json();
+    var dirs = data.dirs || [];
+    if (!dirs.length) {
+      container.innerHTML = '<div class="empty-state"><p>暂无切片目录</p></div>';
+    } else {
+      var html = '';
+      for (var i = 0; i < dirs.length; i++) {
+        var d = dirs[i];
+        html += '<div class="split-clip-item" style="cursor:pointer;" ' +
+          'onclick="loadSplitClipsFor(\'' + escapeHtml(d.name).replace(/'/g, "\\'") + '\')">' +
+          '<span class="file-name">' + escapeHtml(d.name) + '</span>' +
+          '<span class="file-size">' + d.clip_count + ' 片段</span>' +
+          '<span style="font-size:10px;color:var(--text2);">' + d.total_size_mb + ' MB</span>' +
+          '</div>';
+      }
+      container.innerHTML = html;
+    }
+  } catch(e) {
+    container.innerHTML = '<div class="empty-state"><p>加载失败</p></div>';
+  }
+}
+
+function loadSplitClipsFor(videoName) {
+  _splitVideoName = videoName;
+  _splitVideoPath = '';  // not needed for loading results
+  document.getElementById('split-no-video').style.display = 'none';
+  document.getElementById('split-config-panel').style.display = 'none';
+  document.getElementById('split-results-section').style.display = 'block';
+  document.getElementById('split-results-title').textContent = '切片: ' + videoName;
+  loadSplitClips();
+}
+
+async function loadSplitClips() {
+  var container = document.getElementById('split-results-list');
+  var videoName = _splitVideoName.replace(/\.[^.]+$/, '');
+  if (!videoName) { return; }
+
+  try {
+    var resp = await fetch(API + '/api/split/clips/' + encodeURIComponent(videoName));
+    if (!resp.ok) throw new Error(await resp.text());
+    var data = await resp.json();
+    var clips = data.clips || [];
+    if (!clips.length) {
+      container.innerHTML = '<div class="empty-state"><p>暂无切割结果</p></div>';
+    } else {
+      var html = '';
+      for (var i = 0; i < clips.length; i++) {
+        var c = clips[i];
+        html += '<div class="split-clip-item">' +
+          '<span class="split-clip-name" title="' + escapeHtml(c.name) + '">' + escapeHtml(c.name) + '</span>' +
+          '<span class="file-size">' + c.size_mb + ' MB</span>' +
+          '<a class="btn btn-secondary" style="font-size:10px;padding:3px 8px;text-decoration:none;" ' +
+            'href="' + API + '/api/review/stream?path=' + encodeURIComponent(c.path) + '" target="_blank">预览</a>' +
+          '</div>';
+      }
+      container.innerHTML = html;
+    }
+  } catch(e) {
+    container.innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
+  }
+}
 </script>
 </body>
 </html>

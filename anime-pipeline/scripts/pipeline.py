@@ -74,7 +74,7 @@ class PipelineJob:
             "clip_count": len(self.clip_paths),
             "steps": [
                 {"step": s.step, "status": s.status.value, "message": s.message,
-                 "duration": s.duration_seconds}
+                 "duration": s.duration_seconds, "data": s.data}
                 for s in self.steps
             ],
             "current_step": self.current_step,

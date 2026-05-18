@@ -160,6 +160,153 @@ def check_silence_ratio(audio_path: str) -> tuple[bool, dict]:
 
 
 # ============================================================
+# Combined BGM / Reverb analysis
+# ============================================================
+def analyze_clip_bgm(audio_path: str) -> dict:
+    """Analyze a clip for BGM (background music) and reverb characteristics.
+
+    Returns a dict with:
+        has_bgm: bool — likely has background music
+        has_reverb: bool — likely has reverb/echo
+        bgm_score: int — 0-6, higher = more likely BGM/reverb
+        silence_ratio: float
+        energy_ratio: float
+        avg_zcr: float
+        details: str — human-readable explanation
+    """
+    result = {
+        "has_bgm": False,
+        "has_reverb": False,
+        "bgm_score": 0,
+        "silence_ratio": 0.0,
+        "energy_ratio": 0.0,
+        "avg_zcr": 0.0,
+        "details": "",
+    }
+
+    # Load audio
+    try:
+        y, sr = librosa.load(audio_path, sr=SR, mono=True)
+    except Exception:
+        result["details"] = "failed to load audio"
+        return result
+
+    if len(y) < sr * 0.3:
+        result["details"] = "too short"
+        return result
+
+    rms = _rms(y)
+    if len(rms) == 0:
+        result["details"] = "no frames"
+        return result
+
+    # --- Silence ratio ---
+    is_silent = rms < SIL_VOL_THRESHOLD
+    silence_ratio = float(np.sum(is_silent) / len(rms))
+    result["silence_ratio"] = round(silence_ratio, 4)
+
+    # --- Reverb detection ---
+    peak = np.max(rms)
+    tail_start_idx = len(rms) - 1
+    for i in range(len(rms) - 1, -1, -1):
+        if rms[i] > peak * 0.1:
+            tail_start_idx = i
+            break
+
+    tail_frames = len(rms) - tail_start_idx
+    energy_ratio = 0.0
+    avg_zcr = 0.0
+    has_reverb = False
+
+    if tail_frames >= int(0.5 / HOP_MS):
+        tail_rms = np.mean(rms[tail_start_idx:])
+        total_rms = np.mean(rms)
+        energy_ratio = float(tail_rms / (total_rms + 1e-9))
+        result["energy_ratio"] = round(energy_ratio, 4)
+
+        tail_samples = y[tail_start_idx * HOP_LEN:]
+        if len(tail_samples) > FRAME_LEN:
+            zcr = librosa.feature.zero_crossing_rate(
+                tail_samples, frame_length=FRAME_LEN, hop_length=HOP_LEN
+            )[0]
+            avg_zcr = float(np.mean(zcr) * sr / 2)
+            result["avg_zcr"] = round(avg_zcr, 1)
+
+        has_reverb = energy_ratio > TAIL_ENERGY_RATIO_THRESH or avg_zcr > ZCR_TAIL_THRESH
+
+    result["has_reverb"] = has_reverb
+
+    # --- Energy variance (coefficient of variation) ---
+    # Dialogue: words → attack/decay → high RMS variance
+    # BGM: sustained music → low RMS variance
+    rms_mean = float(np.mean(rms))
+    rms_std = float(np.std(rms))
+    rms_cv = rms_std / (rms_mean + 1e-9)
+    is_steady = rms_cv < 0.8  # low variance → steady energy → likely BGM
+
+    # --- Compute BGM score (duration-aware) ---
+    score = 0
+    reasons = []
+    duration = len(y) / sr
+
+    # Score = silence score + energy steadiness score + reverb score
+    # All must agree for short clips; any can contribute for long clips.
+
+    if duration < 3.0:
+        # Short clips: need BOTH low silence AND steady energy to suspect BGM
+        if silence_ratio < 0.05 and is_steady:
+            score += 2
+            reasons.append("短片段连续音频")
+        elif silence_ratio < 0.05 and not is_steady:
+            # Low silence but variable energy → likely dialogue (no pauses)
+            pass
+    elif duration < 6.0:
+        if silence_ratio < 0.08 and is_steady:
+            score += 3
+            reasons.append("连续低静音(" + str(round(silence_ratio * 100)) + "%)")
+        elif silence_ratio < 0.08:
+            score += 1  # low silence but variable → maybe
+            reasons.append("低静音波动(" + str(round(silence_ratio * 100)) + "%)")
+        elif silence_ratio < 0.15 and is_steady:
+            score += 1
+    else:
+        # Long clips: low silence strongly suggests BGM
+        if silence_ratio < 0.10:
+            score += 3
+            reasons.append("极低静音比(" + str(round(silence_ratio * 100)) + "%)")
+        elif silence_ratio < 0.18:
+            score += 2
+            reasons.append("较低静音比(" + str(round(silence_ratio * 100)) + "%)")
+        elif silence_ratio < 0.30:
+            score += 1
+
+    # Reverb always counts heavily
+    if has_reverb:
+        score += 3
+        if energy_ratio > TAIL_ENERGY_RATIO_THRESH:
+            reasons.append("混响尾音")
+        if avg_zcr > ZCR_TAIL_THRESH:
+            reasons.append("尾音高频")
+
+    # Long clips with sustained audio → extra confidence
+    if duration > 8.0 and silence_ratio < 0.15:
+        score += 1
+        reasons.append("长片段持续音频")
+
+    result["bgm_score"] = score
+    result["has_bgm"] = score >= 4
+
+    if reasons:
+        result["details"] = "; ".join(reasons)
+    elif score > 0:
+        result["details"] = "轻微(" + str(score) + "分)"
+    else:
+        result["details"] = "正常对话"
+
+    return result
+
+
+# ============================================================
 # Step 3: VAD (Voice Activity Detection)
 # ============================================================
 def vad_filter(audio_path: str) -> tuple[bool, dict]:

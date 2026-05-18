@@ -111,7 +111,26 @@ def extract_subtitle_track(
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-    # ffmpeg subtitle stream index is 0-based; mkvextract track ID is 1-based
+    if cancel_event and cancel_event.is_set():
+        return None
+
+    if cancel_event and cancel_event.is_set():
+        return None
+
+    # Try mkvextract first (instant for subtitles)
+    proc = subprocess.run(
+        [MKVEXTRACT, "tracks", mkv_path, f"{track_id}:{output_path}"],
+        capture_output=True, text=True, encoding='utf-8', errors='replace',
+        timeout=30,
+    )
+    if proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+        return output_path
+
+    # Fallback to ffmpeg
+    if cancel_event and cancel_event.is_set():
+        return None
+
+    # ffmpeg subtitle stream index is 0-based
     stream_idx = 0
     tracks = get_mkv_tracks(mkv_path)
     sub_count = 0
@@ -123,57 +142,15 @@ def extract_subtitle_track(
             break
         sub_count += 1
 
-    if cancel_event and cancel_event.is_set():
-        return None
-
-    # Try ffmpeg first (more robust); use Popen for cancel support
-    cmd = [FFMPEG, "-y", "-i", mkv_path, "-map", f"0:s:{stream_idx}", "-c:s", "copy", output_path]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            text=True, encoding='utf-8', errors='replace')
-
-    # Wait with cancel check
-    try:
-        while proc.poll() is None:
-            if cancel_event and cancel_event.is_set():
-                proc.kill()
-                proc.wait()
-                return None
-            time.sleep(0.5)
-        stdout, stderr = proc.communicate(timeout=0)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
-        return None
-
-    if proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+    proc2 = subprocess.run(
+        [FFMPEG, "-y", "-i", mkv_path, "-map", f"0:s:{stream_idx}", "-c:s", "copy", output_path],
+        capture_output=True, text=True, encoding='utf-8', errors='replace',
+        timeout=60,
+    )
+    if proc2.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
         return output_path
 
-    # Fallback to mkvextract
-    if cancel_event and cancel_event.is_set():
-        return None
-
-    cmd2 = [MKVEXTRACT, "tracks", mkv_path, f"{track_id}:{output_path}"]
-    proc2 = subprocess.Popen(cmd2, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                             text=True, encoding='utf-8', errors='replace')
-    try:
-        while proc2.poll() is None:
-            if cancel_event and cancel_event.is_set():
-                proc2.kill()
-                proc2.wait()
-                return None
-            time.sleep(0.5)
-        proc2.communicate(timeout=0)
-    except subprocess.TimeoutExpired:
-        proc2.kill()
-        proc2.wait()
-        return None
-
-    if proc2.returncode != 0:
-        print(f"Subtitle extraction failed for track {track_id}")
-        return None
-
-    if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-        return output_path
+    print(f"Subtitle extraction failed for track {track_id}")
     return None
 
 

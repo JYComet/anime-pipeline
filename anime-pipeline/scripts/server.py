@@ -5,6 +5,7 @@ Provides REST API endpoints for search, download, extraction, and splitting.
 import os
 import json
 import uuid
+import subprocess
 import threading
 from pathlib import Path
 
@@ -16,7 +17,8 @@ import uvicorn
 
 from config import (
     PROJECT_ROOT, DOWNLOAD_DIR, SUBTITLE_DIR, CLIPS_DIR, APPROVED_DIR, CLEANED_DIR,
-    FFPROBE
+    STITCHED_DIR,
+    FFPROBE, FFMPEG
 )
 from pipeline import pipeline, PipelineJob, StepStatus
 
@@ -921,6 +923,143 @@ def skip_clip(
     return {"status": "ok", "action": "skipped"}
 
 
+@app.post("/api/review/clear-short")
+def clear_short_clips(
+    clip_dir: str = Query(..., description="Path to clip directory"),
+    min_duration: float = Query(2.0, description="Delete clips with duration <= this value (seconds)"),
+):
+    """Delete all clips in the directory with duration <= min_duration seconds.
+
+    Runs in background to avoid timeout from ffprobe scanning.
+    """
+    if not os.path.exists(clip_dir):
+        raise HTTPException(status_code=404, detail="Clip directory not found")
+
+    job_id = uuid.uuid4().hex[:12]
+
+    def _run():
+        from split_video import get_video_duration
+
+        deleted = []
+        errors = []
+        mp4_files = [f for f in sorted(os.listdir(clip_dir)) if f.endswith(".mp4")]
+        total = len(mp4_files)
+
+        job = pipeline.create_job(job_id, title="clear-short: " + os.path.basename(clip_dir))
+        job.status = "running"
+        job.current_step = "scanning"
+        job.progress = 0
+
+        for i, f in enumerate(mp4_files):
+            full = os.path.join(clip_dir, f)
+            try:
+                dur = get_video_duration(full)
+                if dur > 0 and dur <= min_duration:
+                    os.remove(full)
+                    deleted.append(f)
+            except OSError as e:
+                errors.append({"file": f, "reason": str(e)})
+            job.progress = ((i + 1) / total) * 100
+
+        # Update review state
+        state = _get_review_state(clip_dir)
+        for name in deleted:
+            if name in state.get("approved", []):
+                state["approved"].remove(name)
+            if name in state.get("skipped", []):
+                state["skipped"].remove(name)
+        _save_review_state(clip_dir, state)
+
+        job.status = "completed"
+        job.progress = 100
+        job.current_step = "done"
+        from pipeline import StepResult, StepStatus
+        job.steps = [StepResult(
+            step="clear_short",
+            status=StepStatus.COMPLETED,
+            message=f"删除了 {len(deleted)} 个时长<={min_duration}s 的片段",
+        )]
+        pipeline._save_jobs()
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    return {
+        "status": "started",
+        "job_id": job_id,
+    }
+
+
+@app.post("/api/review/detect-bgm")
+def detect_bgm_clips(
+    clip_dir: str = Query(..., description="Path to clip directory"),
+):
+    """Analyze all clips for BGM/reverb characteristics. Runs in background.
+
+    Returns a job_id for polling.
+    """
+    if not os.path.exists(clip_dir):
+        raise HTTPException(status_code=404, detail="Clip directory not found")
+
+    job_id = uuid.uuid4().hex[:12]
+
+    def _run():
+        from audio_pipeline import analyze_clip_bgm
+
+        mp4_files = sorted([f for f in os.listdir(clip_dir) if f.endswith(".mp4")])
+        total = len(mp4_files)
+        results = []
+
+        job = pipeline.create_job(job_id, title="BGM检测: " + os.path.basename(clip_dir))
+        job.status = "running"
+        job.current_step = "analyzing"
+        job.progress = 0
+
+        for i, f in enumerate(mp4_files):
+            full = os.path.join(clip_dir, f)
+            try:
+                # Extract audio to temp WAV
+                import tempfile
+                wav_tmp = os.path.join(tempfile.gettempdir(), "bgm_detect_" + uuid.uuid4().hex[:8] + ".wav")
+                subprocess.run(
+                    [FFMPEG, "-y", "-i", full, "-vn", "-acodec", "pcm_s16le",
+                     "-ar", "16000", "-ac", "1", "-t", "120", wav_tmp],
+                    capture_output=True, timeout=30,
+                )
+                if os.path.exists(wav_tmp) and os.path.getsize(wav_tmp) > 0:
+                    analysis = analyze_clip_bgm(wav_tmp)
+                    if analysis["has_bgm"] or analysis["has_reverb"]:
+                        results.append({
+                            "name": f,
+                            "path": full,
+                            "size_mb": round(os.path.getsize(full) / 1024 / 1024, 1),
+                            **analysis,
+                        })
+                    try:
+                        os.remove(wav_tmp)
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"[detect-bgm] Error on {f}: {e}")
+
+            job.progress = ((i + 1) / total) * 100
+
+        job.status = "completed"
+        job.progress = 100
+        job.current_step = "done"
+        from pipeline import StepResult, StepStatus
+        job.steps = [StepResult(
+            step="detect_bgm",
+            status=StepStatus.COMPLETED,
+            message=f"检测完成: {len(mp4_files)} 个片段中 {len(results)} 个含有BGM/混响",
+            data={"results": results},
+        )]
+        pipeline._save_jobs()
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    return {"status": "started", "job_id": job_id}
+
+
 @app.get("/api/review/stream")
 def stream_clip(path: str = Query(..., description="Full path to clip file")):
     """Stream a clip file for playback in the browser."""
@@ -1080,6 +1219,576 @@ def get_cleaned_for_video(video_name: str):
                     "sample_rate": info["sample_rate"],
                 })
     return {"cleaned": items, "count": len(items)}
+
+
+# ============================================================
+# MKV Subtitle Extraction endpoints
+# ============================================================
+
+@app.get("/api/extract/mkv-files")
+def list_mkv_files():
+    """List all MKV files available for extraction from downloads directory."""
+    mkv_files = []
+    if os.path.exists(DOWNLOAD_DIR):
+        for root, dirs, filenames in os.walk(DOWNLOAD_DIR):
+            for f in filenames:
+                if f.lower().endswith(".mkv"):
+                    full = os.path.join(root, f)
+                    size_mb = os.path.getsize(full) / 1024 / 1024
+                    mtime = os.path.getmtime(full)
+                    from datetime import datetime
+                    mkv_files.append({
+                        "name": f,
+                        "path": full,
+                        "size_mb": round(size_mb, 1),
+                        "mtime": mtime,
+                        "time_str": datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M"),
+                    })
+    mkv_files.sort(key=lambda x: x["mtime"], reverse=True)
+    return {"files": mkv_files}
+
+
+@app.get("/api/extract/tracks")
+def get_extract_tracks(path: str = Query(..., description="Full path to MKV file")):
+    """Get all tracks from an MKV file for extraction selection."""
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File not found")
+    try:
+        from extract_subs import get_mkv_tracks
+        tracks = get_mkv_tracks(path)
+        return {"tracks": tracks}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/extract/run")
+def run_extraction(
+    path: str = Query(..., description="Full path to MKV file"),
+    track_ids: str = Query("", description="Comma-separated track IDs to extract. Empty = all subtitle tracks"),
+):
+    """Extract subtitle tracks from an MKV file to the subtitles directory.
+
+    If track_ids is empty, extracts all subtitle tracks.
+    Returns the list of extracted file paths.
+    """
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    import threading
+
+    job_id = uuid.uuid4().hex[:12]
+
+    def _run():
+        from extract_subs import get_mkv_tracks, extract_subtitle_track
+        import time as _time
+
+        # Create a job record for tracking
+        job = pipeline.create_job(job_id, title=os.path.basename(path))
+        job.mkv_path = path
+        job.status = "running"
+        job.progress = 10
+        job.current_step = "inspecting"
+
+        from pipeline import StepResult, StepStatus
+
+        try:
+            all_tracks = get_mkv_tracks(path)
+
+            if track_ids:
+                requested_ids = set(int(t.strip()) for t in track_ids.split(",") if t.strip())
+                sub_tracks = [t for t in all_tracks if t.get("id") in requested_ids and t.get("type") == "subtitles"]
+            else:
+                # Extract all subtitle tracks
+                sub_tracks = [t for t in all_tracks if t.get("type") == "subtitles"]
+
+            if not sub_tracks:
+                job.status = "completed"
+                job.progress = 100
+                job.current_step = "done"
+                job.steps = [StepResult(
+                    step="extract",
+                    status=StepStatus.COMPLETED,
+                    message="没有找到可提取的字幕轨道",
+                )]
+                pipeline._save_jobs()
+                return
+
+            extracted = []
+            total = len(sub_tracks)
+            for i, track in enumerate(sub_tracks):
+                track_id = track.get("id", 0)
+                codec = track.get("codec", "")
+                codec_id = track.get("codec_id", "")
+                if "ass" in codec.lower() + codec_id.lower() or "substation" in codec.lower() + codec_id.lower():
+                    ext = ".ass"
+                elif "subrip" in (codec.lower() + codec_id.lower()):
+                    ext = ".srt"
+                else:
+                    ext = ".ass"
+
+                base = os.path.splitext(os.path.basename(path))[0]
+                lang = track.get("language", "unknown")
+                output = os.path.join(SUBTITLE_DIR, f"{base}_track{track_id}_{lang}{ext}")
+
+                job.current_step = f"extracting track {track_id}"
+                job.progress = 10 + (i / total) * 80
+
+                result = extract_subtitle_track(path, track_id, output)
+                if result:
+                    extracted.append(result)
+
+            job.progress = 100
+            job.status = "completed"
+            job.current_step = "done"
+            msg = f"提取完成: {len(extracted)}/{total} 个字幕轨道"
+            if not extracted:
+                msg = "提取失败: 没有成功提取任何字幕轨道"
+            job.steps = [StepResult(
+                step="extract",
+                status=StepStatus.COMPLETED,
+                message=msg,
+            )]
+
+        except Exception as e:
+            job.status = "failed"
+            job.progress = 0
+            job.current_step = "error"
+            job.steps = [StepResult(
+                step="extract",
+                status=StepStatus.FAILED,
+                message=str(e),
+            )]
+
+        pipeline._save_jobs()
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    return {"job_id": job_id, "status": "started"}
+
+
+@app.get("/api/extract/subtitle-files")
+def list_extracted_subtitles():
+    """List all extracted subtitle files."""
+    files = []
+    if os.path.exists(SUBTITLE_DIR):
+        for f in sorted(os.listdir(SUBTITLE_DIR)):
+            ext = os.path.splitext(f)[1].lower()
+            if ext in {".srt", ".ass", ".ssa", ".vtt"}:
+                full = os.path.join(SUBTITLE_DIR, f)
+                files.append({
+                    "name": f,
+                    "path": full,
+                    "size_kb": round(os.path.getsize(full) / 1024, 1),
+                })
+    return {"subtitles": files}
+
+
+# ============================================================
+# Audio Stitching endpoints
+# ============================================================
+
+def _find_subtitle_for_video(video_name: str) -> str:
+    """Find the subtitle file in SUBTITLE_DIR that best matches a video name."""
+    if not os.path.exists(SUBTITLE_DIR):
+        return ""
+    for f in sorted(os.listdir(SUBTITLE_DIR)):
+        if f.endswith(('.ass', '.srt', '.ssa')) and video_name in f:
+            return os.path.join(SUBTITLE_DIR, f)
+    return ""
+
+
+def _extract_index_from_clip_name(clip_name: str) -> int:
+    """Extract subtitle index from clip filename like 'video_S003_text.wav'."""
+    import re
+    m = re.search(r'_S(\d+)_', clip_name)
+    if m:
+        return int(m.group(1)) - 1  # 1-based in filename, 0-based in entries
+    return -1
+
+
+@app.get("/api/stitch/videos")
+def list_stitchable_videos():
+    """List videos that have denoised WAV files available for stitching."""
+    videos = []
+    if os.path.exists(CLEANED_DIR):
+        for entry in sorted(os.listdir(CLEANED_DIR)):
+            full = os.path.join(CLEANED_DIR, entry)
+            if os.path.isdir(full):
+                wavs = [f for f in os.listdir(full) if f.lower().endswith('.wav')]
+                if wavs:
+                    videos.append({
+                        "name": entry,
+                        "path": full,
+                        "wav_count": len(wavs),
+                    })
+    return {"videos": videos}
+
+
+@app.get("/api/stitch/clips")
+def list_stitch_clips(video: str = Query(..., description="Video name")):
+    """List denoised WAV clips for a video with associated subtitle text."""
+    cleaned_dir = os.path.join(CLEANED_DIR, video)
+    if not os.path.isdir(cleaned_dir):
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    # Parse subtitle file to get full text per entry
+    sub_texts = {}  # index -> text
+    sub_path = _find_subtitle_for_video(video)
+    if sub_path:
+        try:
+            from split_video import parse_subtitle_file
+            sf = parse_subtitle_file(sub_path)
+            if sf:
+                for entry in sf.entries:
+                    sub_texts[entry.index] = entry.text
+        except Exception:
+            pass
+
+    clips = []
+    for f in sorted(os.listdir(cleaned_dir)):
+        if not f.lower().endswith('.wav'):
+            continue
+        full = os.path.join(cleaned_dir, f)
+        idx = _extract_index_from_clip_name(f)
+        text = sub_texts.get(idx, '')
+        size_mb = round(os.path.getsize(full) / 1024 / 1024, 1)
+
+        # Get duration via ffprobe
+        dur = 0
+        try:
+            import subprocess as sp
+            r = sp.run(
+                [FFPROBE, "-v", "quiet", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", full],
+                capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=10,
+            )
+            if r.returncode == 0:
+                dur = round(float(r.stdout.strip()), 1)
+        except Exception:
+            pass
+
+        clips.append({
+            "name": f,
+            "path": full,
+            "index": idx,
+            "size_mb": size_mb,
+            "duration_s": dur,
+            "subtitle_text": text,
+        })
+
+    return {"clips": clips, "video": video, "subtitle_path": sub_path or ""}
+
+
+@app.post("/api/stitch/concat")
+def concat_clips(payload: dict = Body(...)):
+    """Concatenate selected WAV clips into one audio file, merge subtitles.
+
+    Body: {video: str, paths: [str, ...]}
+
+    Uses ffmpeg concat demuxer for lossless WAV concatenation.
+    Returns the output path and merged subtitle text.
+    """
+    video = payload.get("video", "unknown")
+    paths = payload.get("paths", [])
+
+    if not paths:
+        raise HTTPException(status_code=400, detail="No clips selected")
+    if len(paths) == 1:
+        # Single clip — just return it directly with its subtitle
+        idx = _extract_index_from_clip_name(os.path.basename(paths[0]))
+        sub_texts = {}
+        sub_path = _find_subtitle_for_video(video)
+        if sub_path:
+            try:
+                from split_video import parse_subtitle_file
+                sf = parse_subtitle_file(sub_path)
+                if sf:
+                    for e in sf.entries:
+                        sub_texts[e.index] = e.text
+            except Exception:
+                pass
+        merged_text = sub_texts.get(idx, os.path.splitext(os.path.basename(paths[0]))[0])
+        return {
+            "status": "ok",
+            "output_path": paths[0],
+            "output_name": os.path.basename(paths[0]),
+            "clip_count": 1,
+            "merged_subtitle": merged_text,
+        }
+
+    # Validate all files exist
+    for p in paths:
+        if not os.path.exists(p):
+            raise HTTPException(status_code=404, detail=f"File not found: {p}")
+
+    # Get subtitle text for each clip
+    sub_texts = {}
+    sub_path = _find_subtitle_for_video(video)
+    if sub_path:
+        try:
+            from split_video import parse_subtitle_file
+            sf = parse_subtitle_file(sub_path)
+            if sf:
+                for e in sf.entries:
+                    sub_texts[e.index] = e.text
+        except Exception:
+            pass
+
+    # Build merged subtitle: each clip's text on its own line
+    merged_lines = []
+    for p in paths:
+        idx = _extract_index_from_clip_name(os.path.basename(p))
+        text = sub_texts.get(idx, '')
+        if not text:
+            text = os.path.splitext(os.path.basename(p))[0]
+            # Try to extract text from filename: video_S003_text.wav -> text
+            parts = text.split('_', 2)
+            if len(parts) >= 3:
+                text = parts[2]
+        merged_lines.append(text)
+
+    # Write concat file list for ffmpeg
+    import time as _time
+    ts = str(int(_time.time()))
+    safe_video = video.replace('/', '_').replace('\\', '_')
+    output_name = f"{safe_video}_stitched_{ts}.wav"
+    output_path = os.path.join(STITCHED_DIR, output_name)
+
+    concat_list_path = os.path.join(STITCHED_DIR, f"_concat_{ts}.txt")
+    try:
+        with open(concat_list_path, "w", encoding="utf-8") as clf:
+            for p in paths:
+                # ffmpeg concat uses 'file <path>' lines
+                safe_p = p.replace("'", "'\\''")
+                clf.write(f"file '{safe_p}'\n")
+
+        # Use ffmpeg concat demuxer (lossless for WAV)
+        result = subprocess.run(
+            [FFMPEG, "-y", "-f", "concat", "-safe", "0", "-i", concat_list_path,
+             "-c", "copy", output_path],
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300,
+        )
+
+        if result.returncode != 0 or not os.path.exists(output_path):
+            raise HTTPException(status_code=500, detail=f"Concat failed: {result.stderr[:200]}")
+    finally:
+        # Clean up temp concat list
+        if os.path.exists(concat_list_path):
+            try:
+                os.remove(concat_list_path)
+            except OSError:
+                pass
+
+    return {
+        "status": "ok",
+        "output_path": output_path,
+        "output_name": output_name,
+        "clip_count": len(paths),
+        "merged_subtitle": "\n".join(merged_lines),
+    }
+
+
+# ============================================================
+# Video Split / Cut endpoints
+# ============================================================
+
+@app.get("/api/split/clip-dirs")
+def list_split_clip_dirs():
+    """List all clip directories under data/clips/ with stats."""
+    dirs = []
+    if os.path.exists(CLIPS_DIR):
+        for entry in sorted(os.listdir(CLIPS_DIR)):
+            full = os.path.join(CLIPS_DIR, entry)
+            if os.path.isdir(full):
+                mp4_count = len([f for f in os.listdir(full) if f.endswith(".mp4")])
+                mkvs = [f for f in os.listdir(full) if f.endswith(".mkv")]
+                dirs.append({
+                    "name": entry,
+                    "path": full,
+                    "clip_count": mp4_count,
+                    "total_size_mb": round(
+                        sum(os.path.getsize(os.path.join(full, f))
+                            for f in os.listdir(full)
+                            if f.endswith(".mp4") and os.path.isfile(os.path.join(full, f))
+                        ) / 1024 / 1024, 1,
+                    ),
+                    "mtime": os.path.getmtime(full),
+                })
+    dirs.sort(key=lambda d: d["mtime"], reverse=True)
+    return {"dirs": dirs, "count": len(dirs)}
+
+
+@app.get("/api/split/clips/{video_name}")
+def list_split_clips(video_name: str):
+    """List all clips in data/clips/{video_name}/."""
+    clips_dir = os.path.join(CLIPS_DIR, video_name)
+    if not os.path.exists(clips_dir):
+        return {"clips": [], "count": 0, "video_name": video_name}
+
+    clips = []
+    for f in sorted(os.listdir(clips_dir)):
+        if not f.endswith(".mp4"):
+            continue
+        full = os.path.join(clips_dir, f)
+        clips.append({
+            "name": f,
+            "path": full,
+            "size_mb": round(os.path.getsize(full) / 1024 / 1024, 1),
+        })
+    return {"clips": clips, "count": len(clips), "video_name": video_name}
+
+
+@app.post("/api/split/run")
+def run_split(payload: dict = Body(...)):
+    """Run a video split job in any of 3 modes.
+
+    Body:
+        mode: "subtitle" | "duration" | "size"
+        video_path: str (required)
+        subtitle_path: str (for subtitle mode)
+        padding: float (subtitle mode, default 0.1)
+        group_count: int (subtitle mode, default 1)
+        segment_duration: float (duration mode, seconds)
+        target_size_mb: float (size mode, MB)
+        hw_accel: str (default "auto")
+        output_ext: str (default ".mp4")
+        start_time: float (duration/size modes, default 0)
+        end_time: float (duration/size modes, default 0 = full)
+    """
+    mode = payload.get("mode", "subtitle")
+    video_path = payload.get("video_path", "")
+    hw_accel = payload.get("hw_accel", "auto")
+
+    if not video_path or not os.path.exists(video_path):
+        raise HTTPException(status_code=404, detail="Video file not found")
+
+    job_id = uuid.uuid4().hex[:12]
+    title = os.path.splitext(os.path.basename(video_path))[0]
+
+    def run():
+        job = pipeline.create_job(job_id, title=title)
+        job.mkv_path = video_path
+        job.status = "running"
+        job.current_step = mode
+        job.progress = 5
+
+        try:
+            if mode == "subtitle":
+                subtitle_path = payload.get("subtitle_path", "")
+                if not subtitle_path or not os.path.exists(subtitle_path):
+                    job.status = "failed"
+                    job.current_step = "error"
+                    job.progress = 0
+                    from pipeline import StepResult, StepStatus
+                    job.steps = [StepResult(
+                        step="split_video", status=StepStatus.FAILED,
+                        message="请选择一个字幕文件",
+                    )]
+                    pipeline._save_jobs()
+                    return
+
+                padding = float(payload.get("padding", 0.1))
+                group_count = int(payload.get("group_count", 1))
+                deduplicate = bool(payload.get("deduplicate", False))
+
+                from split_video import split_video_by_subtitle
+                job.current_step = "subtitle_split"
+                job.progress = 10
+
+                # If group_count > 1, we split normally then can post-process
+                # For now, split one-per-sub
+                clips = split_video_by_subtitle(
+                    video_path, subtitle_path,
+                    hw_accel=hw_accel, padding=padding,
+                    deduplicate=deduplicate,
+                    on_progress=lambda c, t, txt: setattr(
+                        job, 'progress', 10 + (c / max(t, 1)) * 80),
+                    cancel_event=job.cancel_event,
+                )
+                job.clip_paths = clips
+                if clips:
+                    job.clip_dir = os.path.dirname(clips[0])
+
+            elif mode == "duration":
+                segment_duration = float(payload.get("segment_duration", 60))
+                start_time = float(payload.get("start_time", 0))
+                end_time = float(payload.get("end_time", 0))
+                output_ext = payload.get("output_ext", ".mp4")
+
+                from split_video import split_video_by_duration
+                job.current_step = "duration_split"
+                job.progress = 10
+
+                clips = split_video_by_duration(
+                    video_path, segment_duration,
+                    hw_accel=hw_accel, output_ext=output_ext,
+                    start_offset=start_time, end_time=end_time,
+                    on_progress=lambda c, t: setattr(
+                        job, 'progress', 10 + (c / max(t, 1)) * 80),
+                    cancel_event=job.cancel_event,
+                )
+                job.clip_paths = clips
+                if clips:
+                    job.clip_dir = os.path.dirname(clips[0])
+
+            elif mode == "size":
+                target_size_mb = float(payload.get("target_size_mb", 100))
+                output_ext = payload.get("output_ext", ".mp4")
+
+                from split_video import split_video_by_size
+                job.current_step = "size_split"
+                job.progress = 10
+
+                clips = split_video_by_size(
+                    video_path, target_size_mb,
+                    hw_accel=hw_accel, output_ext=output_ext,
+                    on_progress=lambda c, t: setattr(
+                        job, 'progress', 10 + (c / max(t, 1)) * 80),
+                    cancel_event=job.cancel_event,
+                )
+                job.clip_paths = clips
+                if clips:
+                    job.clip_dir = os.path.dirname(clips[0])
+
+            else:
+                job.status = "failed"
+                job.progress = 0
+                from pipeline import StepResult, StepStatus
+                job.steps = [StepResult(
+                    step="split_video", status=StepStatus.FAILED,
+                    message=f"Unknown mode: {mode}",
+                )]
+                pipeline._save_jobs()
+                return
+
+            job.progress = 100
+            job.status = "completed"
+            job.current_step = "done"
+            from pipeline import StepResult, StepStatus
+            msg = f"切割完成: 生成 {len(job.clip_paths)} 个片段"
+            job.steps = [StepResult(
+                step="split_video", status=StepStatus.COMPLETED, message=msg,
+            )]
+
+        except Exception as e:
+            job.status = "failed"
+            job.progress = 0
+            job.current_step = "error"
+            from pipeline import StepResult, StepStatus
+            job.steps = [StepResult(
+                step="split_video", status=StepStatus.FAILED, message=str(e),
+            )]
+
+        pipeline._save_jobs()
+
+    threading.Thread(target=run, daemon=True).start()
+
+    return {
+        "job_id": job_id,
+        "title": title,
+        "status": "started",
+        "mode": mode,
+    }
 
 
 # ============================================================

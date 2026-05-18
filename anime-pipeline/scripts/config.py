@@ -53,8 +53,10 @@ HEADERS = {
     "Accept": "application/json",
 }
 
+STITCHED_DIR = os.path.join(DATA_DIR, "stitched")
+
 # Ensure all data directories exist
-for d in [DOWNLOAD_DIR, SUBTITLE_DIR, CLIPS_DIR, TEMP_DIR, APPROVED_DIR, CLEANED_DIR]:
+for d in [DOWNLOAD_DIR, SUBTITLE_DIR, CLIPS_DIR, TEMP_DIR, APPROVED_DIR, CLEANED_DIR, STITCHED_DIR]:
     os.makedirs(d, exist_ok=True)
 
 

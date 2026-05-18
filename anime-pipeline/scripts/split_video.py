@@ -184,6 +184,53 @@ def _parse_srt(lines: list[str], path: str) -> SubtitleFile:
     return SubtitleFile(path=path, format="srt", entries=entries)
 
 
+def deduplicate_entries(entries: list[SubtitleEntry]) -> list[SubtitleEntry]:
+    """Remove or merge overlapping subtitle entries.
+
+    Handles three overlap patterns common in anime ASS subtitles:
+    1. Fully contained: entry B's time range is entirely within entry A's → skip B
+    2. Partial overlap: two entries overlap but neither fully contains the other → merge
+    3. Sequential with same text: entries share text and are adjacent → merge
+
+    The original entries are not modified — a new list is returned.
+    """
+    if not entries:
+        return []
+
+    # Sort by start time; for same start, longer entry first (so contained check works)
+    sorted_entries = sorted(entries, key=lambda e: (e.start, -(e.end - e.start)))
+
+    cleaned = []
+    for entry in sorted_entries:
+        if not cleaned:
+            cleaned.append(SubtitleEntry(
+                index=0, start=entry.start, end=entry.end,
+                text=entry.text, style=entry.style,
+            ))
+            continue
+
+        prev = cleaned[-1]
+
+        # Case 1: This entry is fully contained within the previous one's time range
+        if entry.start >= prev.start and entry.end <= prev.end:
+            continue
+
+        # Case 2: Overlaps in time (strict <, not <= — adjacent entries are NOT merged)
+        if entry.start < prev.end:
+            prev.end = max(prev.end, entry.end)
+            if entry.text not in prev.text:
+                prev.text = prev.text + " | " + entry.text
+            continue
+
+        # Case 3: No overlap — add as new entry
+        cleaned.append(SubtitleEntry(
+            index=len(cleaned), start=entry.start, end=entry.end,
+            text=entry.text, style=entry.style,
+        ))
+
+    return cleaned
+
+
 def get_video_duration(video_path: str) -> float:
     """Get the duration of a video file in seconds using ffprobe."""
     cmd = [
@@ -242,12 +289,16 @@ def split_video_by_subtitle(
     padding: float = 0.1,  # seconds to pad before/after
     hw_accel: str = "auto",
     min_duration: float = 0.5,  # skip entries shorter than this
+    deduplicate: bool = False,  # merge/remove overlapping entries
     on_progress=None,
     cancel_event=None,  # threading.Event to signal cancellation
 ) -> list[str]:
     """Split a video into clips based on subtitle timing.
 
     Each subtitle entry becomes a separate video clip.
+
+    If deduplicate=True, overlapping entries are merged or skipped
+    before splitting, avoiding duplicate/overlapping clips.
 
     Args:
         video_path: Path to the source video file
@@ -267,7 +318,7 @@ def split_video_by_subtitle(
     try:
         return _split_video_by_subtitle_impl(
             video_path, subtitle_path, output_dir, padding,
-            hw_accel, min_duration, on_progress, cancel_event,
+            hw_accel, min_duration, deduplicate, on_progress, cancel_event,
         )
     finally:
         _split_semaphore.release()
@@ -280,6 +331,7 @@ def _split_video_by_subtitle_impl(
     padding: float = 0.1,
     hw_accel: str = "auto",
     min_duration: float = 0.5,
+    deduplicate: bool = False,
     on_progress=None,
     cancel_event=None,
 ) -> list[str]:
@@ -288,6 +340,14 @@ def _split_video_by_subtitle_impl(
     if not sub or not sub.entries:
         print(f"No subtitle entries found in {subtitle_path}")
         return []
+
+    original_count = len(sub.entries)
+
+    # Apply deduplication if requested
+    if deduplicate:
+        sub.entries = deduplicate_entries(sub.entries)
+        removed = original_count - len(sub.entries)
+        print(f"Deduplicated: {original_count} -> {len(sub.entries)} entries ({removed} removed/merged)")
 
     print(f"Parsed {len(sub.entries)} subtitle entries from {os.path.basename(subtitle_path)}")
 
@@ -483,3 +543,249 @@ def filter_short_clips(
         "total_before": total,
         "total_after": len(kept),
     }
+
+
+def split_video_by_duration(
+    video_path: str,
+    segment_duration: float,
+    output_dir: str = "",
+    hw_accel: str = "auto",
+    output_ext: str = ".mp4",
+    start_offset: float = 0.0,
+    end_time: float = 0.0,
+    on_progress=None,
+    cancel_event=None,
+) -> list[str]:
+    """Split a video into equal-duration chunks.
+
+    Each output segment is approximately segment_duration seconds long
+    (the last segment may be shorter).
+
+    Args:
+        video_path: Path to the source video file
+        segment_duration: Duration of each segment in seconds
+        output_dir: Where to write the clips
+        hw_accel: Hardware acceleration type (nvenc/amf/qsv/libx264/auto)
+        output_ext: Output container format (default .mp4)
+        start_offset: Start time in seconds (skip beginning of video)
+        end_time: End time in seconds (0 = use full duration)
+        on_progress: Optional callback(current, total)
+        cancel_event: Optional threading.Event to abort
+
+    Returns:
+        List of paths to the created video clips.
+    """
+    # Acquire split semaphore
+    _split_semaphore.acquire()
+    try:
+        return _split_video_by_duration_impl(
+            video_path, segment_duration, output_dir, hw_accel,
+            output_ext, start_offset, end_time, on_progress, cancel_event,
+        )
+    finally:
+        _split_semaphore.release()
+
+
+def _split_video_by_duration_impl(
+    video_path: str,
+    segment_duration: float,
+    output_dir: str = "",
+    hw_accel: str = "auto",
+    output_ext: str = ".mp4",
+    start_offset: float = 0.0,
+    end_time: float = 0.0,
+    on_progress=None,
+    cancel_event=None,
+) -> list[str]:
+    if segment_duration <= 0:
+        print(f"Invalid segment duration: {segment_duration}")
+        return []
+
+    video_duration = get_video_duration(video_path)
+    if video_duration <= 0:
+        print(f"Could not determine video duration for {video_path}")
+        return []
+
+    effective_end = min(end_time if end_time > 0 else video_duration, video_duration)
+    effective_start = max(0, start_offset)
+    total_cut_duration = effective_end - effective_start
+    if total_cut_duration <= 0:
+        print(f"Invalid time range: start={effective_start} end={effective_end}")
+        return []
+
+    total_segments = int(math.ceil(total_cut_duration / segment_duration))
+
+    # Setup output
+    if not output_dir:
+        base_name = os.path.splitext(os.path.basename(video_path))[0]
+        output_dir = os.path.join(CLIPS_DIR, base_name)
+    os.makedirs(output_dir, exist_ok=True)
+
+    hw_config = get_hw_accel_params(hw_accel)
+    base_name = os.path.splitext(os.path.basename(video_path))[0]
+
+    clips = []
+    for i in range(total_segments):
+        if cancel_event and cancel_event.is_set():
+            print(f"[split-duration] Cancelled after {len(clips)} clips")
+            break
+
+        seg_start = effective_start + i * segment_duration
+        seg_end = min(seg_start + segment_duration, effective_end)
+        seg_dur = seg_end - seg_start
+
+        if seg_dur < 0.5:
+            continue
+
+        output_name = f"{base_name}_D{i+1:04d}{output_ext}"
+        output_path = os.path.join(output_dir, output_name)
+
+        cmd = [FFMPEG, "-y"]
+        cmd.extend(hw_config["hwaccel_in"])
+        cmd.extend(["-ss", str(seg_start)])
+        cmd.extend(["-i", video_path])
+        cmd.extend(["-t", str(seg_dur)])
+        cmd.extend(["-map", "0:v", "-map", "0:a?"])
+        cmd.extend(["-c:a", "copy"])
+        cmd.extend(["-c:v", hw_config["video_encoder"]])
+        cmd.extend(hw_config["extra_flags"])
+        cmd.extend(["-avoid_negative_ts", "make_zero"])
+        cmd.append(output_path)
+
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True,
+                encoding='utf-8', errors='replace', timeout=300,
+            )
+            if result.returncode == 0 and os.path.exists(output_path):
+                clips.append(output_path)
+                if on_progress:
+                    on_progress(i + 1, total_segments)
+            else:
+                # Fallback: stream copy
+                fb_cmd = [FFMPEG, "-y",
+                    "-ss", str(seg_start),
+                    "-i", video_path,
+                    "-t", str(seg_dur),
+                    "-map", "0:v", "-map", "0:a?",
+                    "-c", "copy",
+                    "-avoid_negative_ts", "make_zero",
+                    output_path,
+                ]
+                subprocess.run(fb_cmd, capture_output=True, text=True,
+                             encoding='utf-8', errors='replace', timeout=300)
+                if os.path.exists(output_path):
+                    clips.append(output_path)
+        except subprocess.TimeoutExpired:
+            print(f"  Timeout on segment {i+1}")
+        except Exception as e:
+            print(f"  Error on segment {i+1}: {e}")
+
+    print(f"Created {len(clips)} duration-based clips in {output_dir}")
+    return clips
+
+
+def split_video_by_size(
+    video_path: str,
+    target_size_mb: float,
+    output_dir: str = "",
+    hw_accel: str = "auto",
+    output_ext: str = ".mp4",
+    on_progress=None,
+    cancel_event=None,
+) -> list[str]:
+    """Split a video into chunks of approximately target_size_mb each.
+
+    Calculates the video bitrate and determines the duration per segment
+    needed to hit the target file size. Final sizes may vary slightly
+    depending on content complexity.
+
+    Args:
+        video_path: Path to the source video file
+        target_size_mb: Approximate target size per segment in megabytes
+        output_dir: Where to write the clips
+        hw_accel: Hardware acceleration type
+        output_ext: Output container format (default .mp4)
+        on_progress: Optional callback(current, total)
+        cancel_event: Optional threading.Event to abort
+
+    Returns:
+        List of paths to the created video clips.
+    """
+    _split_semaphore.acquire()
+    try:
+        return _split_video_by_size_impl(
+            video_path, target_size_mb, output_dir, hw_accel,
+            output_ext, on_progress, cancel_event,
+        )
+    finally:
+        _split_semaphore.release()
+
+
+def _split_video_by_size_impl(
+    video_path: str,
+    target_size_mb: float,
+    output_dir: str = "",
+    hw_accel: str = "auto",
+    output_ext: str = ".mp4",
+    on_progress=None,
+    cancel_event=None,
+) -> list[str]:
+    if target_size_mb <= 0:
+        print(f"Invalid target size: {target_size_mb} MB")
+        return []
+
+    # Get video bitrate using ffprobe
+    try:
+        result = subprocess.run(
+            [FFPROBE, "-v", "quiet", "-print_format", "json",
+             "-show_format", "-show_streams", video_path],
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=30,
+        )
+        if result.returncode != 0:
+            print(f"ffprobe failed for {video_path}")
+            return []
+
+        import json
+        data = json.loads(result.stdout)
+        fmt = data.get("format", {})
+        video_bitrate = int(fmt.get("bit_rate", 0))
+        video_duration = float(fmt.get("duration", 0))
+
+        if video_duration <= 0:
+            print(f"Could not determine video duration")
+            return []
+        if video_bitrate <= 0:
+            # Estimate: file_size / duration
+            file_size_bytes = os.path.getsize(video_path)
+            video_bitrate = int((file_size_bytes * 8) / video_duration)
+            if video_bitrate <= 0:
+                print(f"Could not estimate video bitrate")
+                return []
+
+        # Calculate segment duration: target_size (in bits) / bitrate
+        target_size_bits = target_size_mb * 8 * 1024 * 1024
+        segment_duration = target_size_bits / video_bitrate
+
+        # Cap segment duration at video duration
+        segment_duration = min(segment_duration, video_duration * 0.95)
+        if segment_duration < 1.0:
+            segment_duration = 1.0  # minimum 1 second
+
+        print(f"Video: {video_duration:.1f}s, bitrate: {video_bitrate/1000:.0f}kbps, "
+              f"target {target_size_mb}MB -> segment {segment_duration:.1f}s")
+
+        return _split_video_by_duration_impl(
+            video_path=video_path,
+            segment_duration=segment_duration,
+            output_dir=output_dir,
+            hw_accel=hw_accel,
+            output_ext=output_ext,
+            start_offset=0.0,
+            end_time=0.0,
+            on_progress=on_progress,
+            cancel_event=cancel_event,
+        )
+    except Exception as e:
+        print(f"Error in split_video_by_size: {e}")
+        return []
