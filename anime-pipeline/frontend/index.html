@@ -408,9 +408,26 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
 
   <!-- 降噪 -->
   <div id="tab-denoise" class="tab">
+    <!-- Sub-tabs -->
+    <div style="display:flex;gap:4px;margin-bottom:12px;">
+      <button id="denoise-subtab-reviewed" class="btn btn-primary" style="font-size:13px;" onclick="switchDenoiseSubtab('reviewed')">已审核音频</button>
+      <button id="denoise-subtab-unreviewed" class="btn btn-secondary" style="font-size:13px;" onclick="switchDenoiseSubtab('unreviewed')">未审核音频</button>
+    </div>
+
+    <!-- Step config panel (shared between both sub-tabs) -->
+    <div id="denoise-step-config" style="display:none;margin-bottom:12px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <span style="font-size:12px;font-weight:600;color:var(--text);">处理步骤 <span style="color:var(--text2);font-weight:400;">(拖拽排序 / 勾选启用)</span></span>
+        <button class="btn btn-secondary" style="font-size:10px;padding:3px 8px;" onclick="resetStepConfig()">恢复默认</button>
+      </div>
+      <div id="denoise-step-list" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;"></div>
+    </div>
+
+    <!-- Sub-tab: Reviewed (existing content) -->
+    <div id="denoise-panel-reviewed">
     <!-- Toolbar -->
     <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
-      <h3 style="margin:0;">音频降噪处理</h3>
+      <h3 style="margin:0;font-size:15px;">已审核音频降噪</h3>
       <select id="denoise-video-select" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;" onchange="loadDenoiseSources()">
         <option value="">选择视频...</option>
       </select>
@@ -421,15 +438,6 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
       <button id="btn-denoise-all" class="btn btn-primary" style="font-size:12px;padding:5px 12px;display:none;" onclick="denoiseAll()">全部降噪</button>
       <button id="btn-denoise-source-select" class="btn btn-secondary" style="font-size:11px;padding:4px 10px;display:none;" onclick="toggleSourceSelect()">选择</button>
       <button id="btn-denoise-refresh" class="btn btn-secondary" style="font-size:11px;padding:4px 10px;display:none;" onclick="refreshDenoise()">刷新</button>
-    </div>
-
-    <!-- Step config panel (draggable + toggleable) -->
-    <div id="denoise-step-config" style="display:none;margin-bottom:12px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-        <span style="font-size:12px;font-weight:600;color:var(--text);">处理步骤 <span style="color:var(--text2);font-weight:400;">(拖拽排序 / 勾选启用)</span></span>
-        <button class="btn btn-secondary" style="font-size:10px;padding:3px 8px;" onclick="resetStepConfig()">恢复默认</button>
-      </div>
-      <div id="denoise-step-list" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;"></div>
     </div>
 
     <!-- Overall progress bar -->
@@ -473,6 +481,40 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
       </div>
       <div id="denoise-playing-name" style="font-size:11px;color:var(--text2);margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
     </div>
+    </div><!-- end denoise-panel-reviewed -->
+
+    <!-- Sub-tab: Unreviewed -->
+    <div id="denoise-panel-unreviewed" style="display:none;">
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+        <h3 style="margin:0;font-size:15px;">未审核音频降噪</h3>
+        <select id="denoise-urev-dir-select" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;" onchange="loadUnreviewedClips()">
+          <option value="">选择视频...</option>
+        </select>
+        <span id="denoise-urev-stats" style="font-size:12px;color:var(--text2);"></span>
+        <button id="btn-denoise-urev-all" class="btn btn-primary" style="font-size:12px;padding:5px 12px;display:none;" onclick="denoiseUnreviewedAll()">全部降噪</button>
+        <button id="btn-denoise-urev-refresh" class="btn btn-secondary" style="font-size:11px;padding:4px 10px;display:none;" onclick="loadUnreviewedDirs()">刷新</button>
+      </div>
+
+      <!-- Progress bar -->
+      <div id="denoise-urev-progress" style="display:none;margin-bottom:12px;">
+        <div class="progress-bar"><div id="denoise-urev-progress-fill" class="progress-fill" style="width:0%;background:var(--success);"></div></div>
+        <div id="denoise-urev-progress-text" style="font-size:12px;color:var(--text2);margin-top:4px;"></div>
+      </div>
+
+      <!-- Clip list -->
+      <div id="denoise-urev-file-list" style="max-height:40vh;overflow-y:auto;margin-bottom:16px;">
+        <div class="empty-state"><p>选择视频后显示未审核片段</p></div>
+      </div>
+
+      <!-- Results -->
+      <div id="denoise-urev-results-section" style="display:none;">
+        <h4 style="margin:0 0 8px 0;font-size:14px;color:var(--success);">降噪结果 — 未审核 (<span id="denoise-urev-passed-count">0</span>)</h4>
+        <div id="denoise-urev-result-list" class="file-list" style="max-height:300px;">
+          <div class="empty-state"><p>暂无</p></div>
+        </div>
+      </div>
+    </div><!-- end denoise-panel-unreviewed -->
+
   </div>
 
   <!-- 输出结果 -->
@@ -901,7 +943,7 @@ function switchTab(name) {
   if (name === 'jobs') { loadJobs(); startJobPolling(); } else stopJobPolling();
   if (name === 'results') loadResults();
   if (name === 'review') loadReviewDirs();
-  if (name === 'denoise') loadDenoiseDirs();
+  if (name === 'denoise') { loadDenoiseDirs(); loadUnreviewedDirs(); }
   if (name === 'extract') { loadExtractFiles(); loadExtractedSubs(); }
   if (name === 'stitch') loadStitchVideos();
   if (name === 'split') { loadSplitVideos(); loadSplitClipDirs(); }
@@ -1804,6 +1846,163 @@ async function deleteAllBgm() {
 // ============================================================
 // Male voice detection
 // ============================================================
+// ============================================================
+// Denoise — Unreviewed sub-tab
+// ============================================================
+var _denoiseUrevDir = '';
+var _denoiseUrevClips = [];
+var _denoiseUrevJobId = null;
+var _denoiseUrevPollTimer = null;
+
+function switchDenoiseSubtab(name) {
+  document.getElementById('denoise-panel-reviewed').style.display = (name === 'reviewed') ? 'block' : 'none';
+  document.getElementById('denoise-panel-unreviewed').style.display = (name === 'unreviewed') ? 'block' : 'none';
+  document.getElementById('denoise-subtab-reviewed').className = (name === 'reviewed') ? 'btn btn-primary' : 'btn btn-secondary';
+  document.getElementById('denoise-subtab-unreviewed').className = (name === 'unreviewed') ? 'btn btn-primary' : 'btn btn-secondary';
+  // Show shared step config for both sub-tabs
+  var stepCfg = document.getElementById('denoise-step-config');
+  if (name === 'reviewed' || name === 'unreviewed') {
+    stepCfg.style.display = 'block';
+    if (!window._denoiseStepsLoaded) { buildStepConfig(); window._denoiseStepsLoaded = true; }
+  }
+  if (name === 'unreviewed') loadUnreviewedDirs();
+  if (name === 'reviewed') loadDenoiseDirs();
+}
+
+async function loadUnreviewedDirs() {
+  var select = document.getElementById('denoise-urev-dir-select');
+  select.innerHTML = '<option value="">加载中...</option>';
+  try {
+    var resp = await fetch(API + '/api/denoise/unreviewed-dirs');
+    var data = await resp.json();
+    var dirs = data.dirs || [];
+    var html = '<option value="">选择视频...</option>';
+    for (var i = 0; i < dirs.length; i++) {
+      html += '<option value="' + escapeHtml(dirs[i].path) + '">' +
+        escapeHtml(dirs[i].name) + ' (' + dirs[i].pending + ' 未审核)</option>';
+    }
+    select.innerHTML = html;
+    document.getElementById('btn-denoise-urev-refresh').style.display = 'inline-block';
+  } catch(e) { select.innerHTML = '<option value="">加载失败</option>'; }
+}
+
+async function loadUnreviewedClips() {
+  var dir = document.getElementById('denoise-urev-dir-select').value;
+  if (!dir) { return; }
+  _denoiseUrevDir = dir;
+  var list = document.getElementById('denoise-urev-file-list');
+  list.innerHTML = '<div class="empty-state"><p>加载中...</p></div>';
+  try {
+    var resp = await fetch(API + '/api/denoise/unreviewed-clips?clip_dir=' + encodeURIComponent(dir));
+    var data = await resp.json();
+    _denoiseUrevClips = data.clips || [];
+    if (!_denoiseUrevClips.length) {
+      list.innerHTML = '<div class="empty-state"><p>该视频没有未审核片段</p></div>';
+      document.getElementById('btn-denoise-urev-all').style.display = 'none';
+    } else {
+      var html = '';
+      for (var i = 0; i < _denoiseUrevClips.length; i++) {
+        var c = _denoiseUrevClips[i];
+        html += '<div class="file-item">' +
+          '<span class="file-name" style="font-size:12px;">' + escapeHtml(c.name) + '</span>' +
+          '<span class="file-size">' + c.size_mb + ' MB</span>' +
+          '</div>';
+      }
+      list.innerHTML = html;
+      document.getElementById('btn-denoise-urev-all').style.display = 'inline-block';
+    }
+    document.getElementById('denoise-urev-stats').textContent = '共 ' + _denoiseUrevClips.length + ' 个未审核片段';
+  } catch(e) {
+    list.innerHTML = '<div class="empty-state"><p>加载失败</p></div>';
+  }
+}
+
+async function denoiseUnreviewedAll() {
+  if (!_denoiseUrevClips.length) return;
+  var enabledKeys = getEnabledStepKeys();
+  if (!enabledKeys.length) { toast('请至少启用一个处理步骤', 'error'); return; }
+
+  var paths = [];
+  for (var i = 0; i < _denoiseUrevClips.length; i++) { paths.push(_denoiseUrevClips[i].path); }
+  var videoName = document.getElementById('denoise-urev-dir-select').selectedOptions[0].text.split(' (')[0] || '';
+
+  var payload = { video_name: videoName, paths: paths, steps: enabledKeys };
+  try {
+    var resp = await fetch(API + '/api/denoise/unreviewed-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    var data = await resp.json();
+    if (data.status !== 'ok') throw new Error('启动失败');
+
+    _denoiseUrevJobId = data.job_id;
+    document.getElementById('btn-denoise-urev-all').style.display = 'none';
+    document.getElementById('denoise-urev-progress').style.display = 'block';
+    document.getElementById('denoise-urev-progress-fill').style.width = '0%';
+    document.getElementById('denoise-urev-progress-text').textContent = '启动降噪...';
+    toast('开始降噪 ' + data.file_count + ' 个片段...', 'info');
+
+    startUrevDenoisePolling();
+  } catch(e) { toast('启动失败: ' + e.message, 'error'); }
+}
+
+function startUrevDenoisePolling() {
+  stopUrevDenoisePolling();
+  _denoiseUrevPollTimer = setInterval(pollUrevDenoiseJob, 1500);
+}
+
+function stopUrevDenoisePolling() {
+  if (_denoiseUrevPollTimer) { clearInterval(_denoiseUrevPollTimer); _denoiseUrevPollTimer = null; }
+}
+
+async function pollUrevDenoiseJob() {
+  if (!_denoiseUrevJobId) { stopUrevDenoisePolling(); return; }
+  try {
+    var resp = await fetch(API + '/api/denoise/job/' + _denoiseUrevJobId);
+    var job = await resp.json();
+    var pct = job.progress || 0;
+    document.getElementById('denoise-urev-progress-fill').style.width = pct + '%';
+    document.getElementById('denoise-urev-progress-text').textContent =
+      job.current_file + ' — ' + Math.round(pct) + '%';
+
+    if (job.status === 'completed') {
+      stopUrevDenoisePolling();
+      document.getElementById('btn-denoise-urev-all').style.display = 'inline-block';
+      toast('降噪完成！已保存到 cleaned_unreviewed/', 'success');
+      loadUrevDenoiseResults();
+    }
+  } catch(e) {}
+}
+
+async function loadUrevDenoiseResults() {
+  var videoName = document.getElementById('denoise-urev-dir-select').selectedOptions[0].text.split(' (')[0] || '';
+  var section = document.getElementById('denoise-urev-results-section');
+  var list = document.getElementById('denoise-urev-result-list');
+  var countEl = document.getElementById('denoise-urev-passed-count');
+
+  try {
+    var resp = await fetch(API + '/api/denoise/unreviewed-results?video_name=' + encodeURIComponent(videoName));
+    var data = await resp.json();
+    var results = data.results || [];
+    countEl.textContent = results.length;
+    if (!results.length) {
+      list.innerHTML = '<div class="empty-state"><p>暂无</p></div>';
+    } else {
+      var html = '';
+      for (var i = 0; i < results.length; i++) {
+        var r = results[i];
+        html += '<div class="file-item">' +
+          '<span class="file-name" style="font-size:12px;">' + escapeHtml(r.name) + '</span>' +
+          '<span class="file-size">' + r.size_mb + ' MB | ' + r.duration_s + 's | ' + r.codec + '</span>' +
+          '</div>';
+      }
+      list.innerHTML = html;
+    }
+    section.style.display = 'block';
+  } catch(e) {}
+}
+
 var _maleResults = [];
 var _maleSelected = {};
 
@@ -2256,6 +2455,7 @@ var STEP_DEFAULTS = [
   {key: 'silence', label: '静音过滤', enabled: false},
   {key: 'vad', label: 'VAD', enabled: false},
   {key: 'pad', label: '规范化', enabled: false},
+  {key: 'male_voice', label: '去除男声', enabled: false},
 ];
 var _denoiseSteps = JSON.parse(JSON.stringify(STEP_DEFAULTS)); // deep copy
 

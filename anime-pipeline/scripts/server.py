@@ -17,7 +17,7 @@ import uvicorn
 
 from config import (
     PROJECT_ROOT, DOWNLOAD_DIR, SUBTITLE_DIR, CLIPS_DIR, APPROVED_DIR, CLEANED_DIR,
-    STITCHED_DIR,
+    CLEANED_UNREVIEWED_DIR, STITCHED_DIR,
     FFPROBE, FFMPEG
 )
 from pipeline import pipeline, PipelineJob, StepStatus
@@ -1317,6 +1317,155 @@ def list_denoise_sources():
                     "size_mb": round(size_mb, 1),
                 })
     return {"sources": items, "count": len(items)}
+
+
+# ============================================================
+# Denoise — Unreviewed clips
+# ============================================================
+
+@app.get("/api/denoise/unreviewed-dirs")
+def list_unreviewed_denoise_dirs():
+    """List clip directories with unreviewed (pending) clips."""
+    dirs = []
+    for entry in sorted(os.listdir(CLIPS_DIR)):
+        full = os.path.join(CLIPS_DIR, entry)
+        if not os.path.isdir(full):
+            continue
+        # Load review state
+        state = _get_review_state(full)
+        approved = set(state.get("approved", []))
+        skipped = set(state.get("skipped", []))
+        mp4_files = [f for f in os.listdir(full) if f.endswith(".mp4")]
+        pending = [f for f in mp4_files if f not in approved and f not in skipped]
+        if pending:
+            dirs.append({
+                "name": entry,
+                "path": full,
+                "total": len(mp4_files),
+                "pending": len(pending),
+            })
+    return {"dirs": dirs}
+
+
+@app.get("/api/denoise/unreviewed-clips")
+def list_unreviewed_clips(
+    clip_dir: str = Query(..., description="Path to clip directory"),
+):
+    """List unreviewed (pending) clips in a directory."""
+    if not os.path.exists(clip_dir):
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    state = _get_review_state(clip_dir)
+    approved = set(state.get("approved", []))
+    skipped = set(state.get("skipped", []))
+
+    clips = []
+    for f in sorted(os.listdir(clip_dir)):
+        if not f.endswith(".mp4"):
+            continue
+        if f in approved or f in skipped:
+            continue
+        full = os.path.join(clip_dir, f)
+        clips.append({
+            "name": f,
+            "path": full,
+            "size_mb": round(os.path.getsize(full) / 1024 / 1024, 1),
+        })
+    return {"clips": clips, "count": len(clips), "clip_dir": clip_dir}
+
+
+@app.post("/api/denoise/unreviewed-batch")
+def denoise_unreviewed_batch(payload: dict = Body(...)):
+    """Batch denoise unreviewed clips. Saves to CLEANED_UNREVIEWED_DIR.
+
+    Body: {video_name: str, paths: [str, ...], steps: [str, ...]?}
+    """
+    video_name = payload.get("video_name", "")
+    paths = payload.get("paths", [])
+    steps = payload.get("steps")
+
+    valid_paths = [p for p in paths if os.path.exists(p) and p.lower().endswith(".mp4")]
+    if not valid_paths:
+        raise HTTPException(status_code=400, detail="No valid MP4 files found")
+
+    job_id = uuid.uuid4().hex[:12]
+    files = [DenoiseFileItem(
+        name=os.path.basename(p),
+        input_path=p,
+    ) for p in valid_paths]
+
+    job = DenoiseJob(job_id=job_id, video_name=video_name, files=files)
+    with _denoise_lock:
+        _denoise_jobs[job_id] = job
+
+    def _run():
+        from denoise_audio import run_full_denoise
+
+        job.status = "running"
+        total = len(files)
+        completed_count = 0
+
+        for f in job.files:
+            f.status = "running"
+            job.current_file = f.name
+            job.progress = (completed_count / total) * 100
+
+            video_dir = video_name or os.path.basename(os.path.dirname(f.input_path))
+            output_dir = os.path.join(CLEANED_UNREVIEWED_DIR, video_dir)
+            os.makedirs(output_dir, exist_ok=True)
+
+            def on_step(step_key, status, message):
+                f.steps.append({"step": step_key, "status": status, "message": message})
+
+            result = run_full_denoise(f.input_path, output_dir, on_step=on_step, steps=steps)
+
+            if result["success"]:
+                f.status = "completed"
+                f.output_path = result["output_path"]
+            elif result.get("discard_reason"):
+                f.status = "discarded"
+            else:
+                f.status = "error"
+
+            completed_count += 1
+            job.progress = (completed_count / total) * 100
+
+        job.current_file = ""
+        job.status = "completed"
+        job.progress = 100
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    return {"status": "ok", "job_id": job_id, "file_count": len(valid_paths)}
+
+
+@app.get("/api/denoise/unreviewed-results")
+def list_unreviewed_denoise_results(
+    video_name: str = Query("", description="Filter by video name"),
+):
+    """List denoised unreviewed WAV files."""
+    items = []
+    if os.path.exists(CLEANED_UNREVIEWED_DIR):
+        for root, dirs, files in os.walk(CLEANED_UNREVIEWED_DIR):
+            for f in sorted(files):
+                if not f.endswith("_norm.wav"):
+                    continue
+                full = os.path.join(root, f)
+                info = _get_audio_info(full)
+                vname = os.path.basename(os.path.dirname(full))
+                if video_name and vname != video_name:
+                    continue
+                items.append({
+                    "name": f,
+                    "path": full,
+                    "video": vname,
+                    "size_mb": round(os.path.getsize(full) / 1024 / 1024, 1),
+                    "duration_s": info["duration_s"],
+                    "codec": info["codec"],
+                    "bitrate": info["bitrate"],
+                    "sample_rate": info["sample_rate"],
+                })
+    return {"results": items, "count": len(items)}
 
 
 @app.get("/api/results/video/{video_name}/cleaned")

@@ -43,7 +43,7 @@ def _get_sr_model():
 
 STEP_REGISTRY = {}  # Populated below
 
-DEFAULT_STEPS = ["enhance", "super_resolve", "reverb", "silence", "vad", "pad"]
+DEFAULT_STEPS = ["enhance", "super_resolve", "reverb", "silence", "vad", "pad", "male_voice"]
 
 STEP_LABELS = {
     "enhance": "语音增强",
@@ -52,6 +52,7 @@ STEP_LABELS = {
     "silence": "静音过滤",
     "vad": "VAD 噪声检测",
     "pad": "静音规范化",
+    "male_voice": "去除男声",
 }
 
 
@@ -125,6 +126,15 @@ def _step_pad(current_path, output_dir, base):
         return {"success": False, "discard_reason": f"PAD失败: {str(e)[:100]}"}
 
 
+def _step_male_voice(current_path, output_dir, base):
+    """Remove male voice clips via pitch detection."""
+    from audio_pipeline import analyze_clip_gender
+    analysis = analyze_clip_gender(current_path)
+    if analysis["is_male"]:
+        return {"success": False, "discard_reason": f"男声({analysis['median_pitch']}Hz)", "info": analysis}
+    return {"success": True, "output_path": current_path, "info": analysis}
+
+
 STEP_REGISTRY = {
     "enhance": _step_enhance,
     "super_resolve": _step_super_resolve,
@@ -132,6 +142,7 @@ STEP_REGISTRY = {
     "silence": _step_silence,
     "vad": _step_vad,
     "pad": _step_pad,
+    "male_voice": _step_male_voice,
 }
 
 

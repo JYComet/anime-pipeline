@@ -16,7 +16,8 @@ SUBTITLE_DIR = os.path.join(DATA_DIR, "subtitles")
 CLIPS_DIR = os.path.join(DATA_DIR, "clips")
 TEMP_DIR = os.path.join(DATA_DIR, "temp")
 APPROVED_DIR = os.path.join(DATA_DIR, "approved")  # clips that pass audio review
-CLEANED_DIR = os.path.join(DATA_DIR, "cleaned")    # denoised audio output
+CLEANED_DIR = os.path.join(DATA_DIR, "cleaned")    # denoised audio output (reviewed clips)
+CLEANED_UNREVIEWED_DIR = os.path.join(DATA_DIR, "cleaned_unreviewed")  # denoised from unreviewed
 
 # --- External tools ---
 MKVTOOLNIX_DIR = os.path.join(COMICUT_ROOT, "mkvtoolnix")
@@ -59,7 +60,7 @@ HEADERS = {
 STITCHED_DIR = os.path.join(DATA_DIR, "stitched")
 
 # Ensure all data directories exist
-for d in [DOWNLOAD_DIR, SUBTITLE_DIR, CLIPS_DIR, TEMP_DIR, APPROVED_DIR, CLEANED_DIR, STITCHED_DIR]:
+for d in [DOWNLOAD_DIR, SUBTITLE_DIR, CLIPS_DIR, TEMP_DIR, APPROVED_DIR, CLEANED_DIR, CLEANED_UNREVIEWED_DIR, STITCHED_DIR]:
     os.makedirs(d, exist_ok=True)
 
 
