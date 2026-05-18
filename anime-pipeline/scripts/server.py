@@ -334,6 +334,25 @@ def list_local_subtitles():
     return {"subtitles": files}
 
 
+@app.post("/api/local/upload")
+async def upload_local_video(file: UploadFile = File(...)):
+    """Upload a video file to the video directory."""
+    import shutil
+    safe_name = file.filename.replace("\\", "/").split("/")[-1]
+    dest = os.path.join(VIDEO_DIR, safe_name)
+
+    if os.path.exists(dest):
+        return {"status": "error", "detail": f"文件已存在: {safe_name}"}
+
+    try:
+        with open(dest, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        return {"status": "ok", "path": dest, "name": safe_name,
+                "size_mb": round(os.path.getsize(dest) / 1024 / 1024, 1)}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+
+
 # ============================================================
 # Pipeline job endpoints
 # ============================================================

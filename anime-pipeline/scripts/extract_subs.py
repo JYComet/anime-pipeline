@@ -181,16 +181,15 @@ def extract_all_chinese_subs(mkv_path: str, cancel_event=None) -> list[str]:
     """Extract Simplified Chinese subtitle tracks from an MKV file.
 
     Prefers zh-Hans (Simplified Chinese), skips zh-Hant (Traditional).
+    If no embedded tracks found, checks for external SRT/ASS files.
     Returns list of paths to extracted subtitle files.
     """
     tracks = get_mkv_tracks(mkv_path)
     sub_tracks = find_subtitle_tracks(tracks, language="chi")
 
     if not sub_tracks:
-        # Try with 'zho' explicitly
         sub_tracks = find_subtitle_tracks(tracks, language="zho")
     if not sub_tracks:
-        # Fallback: find any subtitle that might be Chinese by name
         sub_tracks = find_subtitle_tracks(tracks, language="")
 
     # Prefer Simplified Chinese over Traditional
@@ -199,40 +198,57 @@ def extract_all_chinese_subs(mkv_path: str, cancel_event=None) -> list[str]:
     for t in sub_tracks:
         ietf = t.get("language_ietf", "").lower()
         name = t.get("name", "").lower()
-        # Check for Simplified Chinese markers
         if "hans" in ietf or any(kw in name for kw in ["简", "chs", "sc", "gb", "cn", "简体"]):
             simplified.append(t)
         elif "hant" in ietf or any(kw in name for kw in ["繁", "cht", "tc", "big5", "hk", "tw", "繁體"]):
             traditional.append(t)
         else:
-            # Unknown - treat as simplified by default (track 2 is usually simplified)
             simplified.append(t)
 
-    # Use simplified only; fall back to all if no simplified found
     chosen = simplified if simplified else sub_tracks
-
     extracted = []
-    for track in chosen:
-        track_id = track.get("id", 0)
-        codec = track.get("codec", "")
-        codec_id = track.get("codec_id", "")
-        # Determine extension from codec
-        if any(c in codec.lower() + codec_id.lower()
-               for c in ["ass", "ssa", "substation"]):
-            ext = ".ass"
-        elif "subrip" in (codec.lower() + codec_id.lower()):
-            ext = ".srt"
-        else:
-            ext = ".ass"  # default for anime subtitles
 
-        base = os.path.splitext(os.path.basename(mkv_path))[0]
-        lang = track.get("language", "unknown")
-        output = os.path.join(SUBTITLE_DIR, f"{base}_track{track_id}_{lang}{ext}")
+    if chosen:
+        for track in chosen:
+            track_id = track.get("id", 0)
+            codec = track.get("codec", "")
+            codec_id = track.get("codec_id", "")
+            if any(c in codec.lower() + codec_id.lower()
+                   for c in ["ass", "ssa", "substation"]):
+                ext = ".ass"
+            elif "subrip" in (codec.lower() + codec_id.lower()):
+                ext = ".srt"
+            else:
+                ext = ".ass"
 
-        result = extract_subtitle_track(mkv_path, track_id, output, cancel_event=cancel_event)
-        if result:
-            extracted.append(result)
-            print(f"  Extracted subtitle: {os.path.basename(result)}")
+            base = os.path.splitext(os.path.basename(mkv_path))[0]
+            lang = track.get("language", "unknown")
+            output = os.path.join(SUBTITLE_DIR, f"{base}_track{track_id}_{lang}{ext}")
+
+            result = extract_subtitle_track(mkv_path, track_id, output, cancel_event=cancel_event)
+            if result:
+                extracted.append(result)
+                print(f"  Extracted subtitle: {os.path.basename(result)}")
+
+    # Fallback: check for external subtitle files next to the MKV
+    if not extracted:
+        import shutil
+        base_no_ext = os.path.splitext(mkv_path)[0]
+        mkv_dir = os.path.dirname(mkv_path)
+        mkv_basename = os.path.basename(base_no_ext)
+
+        # Look for same-name SRT/ASS files in same directory
+        for ext in [".srt", ".ass", ".ssa"]:
+            # Check exact name match
+            candidate = base_no_ext + ext
+            if os.path.exists(candidate):
+                dest = os.path.join(SUBTITLE_DIR, os.path.basename(candidate))
+                if not os.path.exists(dest):
+                    os.makedirs(SUBTITLE_DIR, exist_ok=True)
+                    shutil.copy2(candidate, dest)
+                extracted.append(dest)
+                print(f"  Using external subtitle: {os.path.basename(candidate)}")
+                break
 
     return extracted
 
