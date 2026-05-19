@@ -485,13 +485,17 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
 
     <!-- Sub-tab: Unreviewed -->
     <div id="denoise-panel-unreviewed" style="display:none;">
+      <!-- Toolbar -->
       <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
         <h3 style="margin:0;font-size:15px;">未审核音频降噪</h3>
         <select id="denoise-urev-dir-select" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;" onchange="loadUnreviewedClips()">
           <option value="">选择视频...</option>
         </select>
         <span id="denoise-urev-stats" style="font-size:12px;color:var(--text2);"></span>
-        <button id="btn-denoise-urev-all" class="btn btn-primary" style="font-size:12px;padding:5px 12px;display:none;" onclick="denoiseUnreviewedAll()">全部降噪</button>
+        <button id="btn-denoise-urev-selected" class="btn btn-primary" style="font-size:12px;padding:5px 12px;display:none;" onclick="denoiseUrevSelected()">降噪选中</button>
+        <button id="btn-denoise-urev-select-all" class="btn btn-secondary" style="font-size:11px;padding:5px 10px;display:none;" onclick="selectAllUrevSources()">全选</button>
+        <button id="btn-denoise-urev-all" class="btn btn-primary" style="font-size:12px;padding:5px 12px;display:none;" onclick="denoiseUrevAll()">全部降噪</button>
+        <button id="btn-denoise-urev-select" class="btn btn-secondary" style="font-size:11px;padding:4px 10px;display:none;" onclick="toggleUrevSourceSelect()">选择</button>
         <button id="btn-denoise-urev-refresh" class="btn btn-secondary" style="font-size:11px;padding:4px 10px;display:none;" onclick="loadUnreviewedDirs()">刷新</button>
       </div>
 
@@ -501,17 +505,25 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
         <div id="denoise-urev-progress-text" style="font-size:12px;color:var(--text2);margin-top:4px;"></div>
       </div>
 
-      <!-- Clip list -->
-      <div id="denoise-urev-file-list" style="max-height:40vh;overflow-y:auto;margin-bottom:16px;">
+      <!-- File processing list -->
+      <div id="denoise-urev-file-list" style="max-height:50vh;overflow-y:auto;margin-bottom:16px;">
         <div class="empty-state"><p>选择视频后显示未审核片段</p></div>
       </div>
 
-      <!-- Results -->
+      <!-- Results section -->
       <div id="denoise-urev-results-section" style="display:none;">
-        <h4 style="margin:0 0 8px 0;font-size:14px;color:var(--success);">降噪结果 — 未审核 (<span id="denoise-urev-passed-count">0</span>)</h4>
-        <div id="denoise-urev-result-list" class="file-list" style="max-height:300px;">
-          <div class="empty-state"><p>暂无</p></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <h4 id="denoise-urev-results-title" style="margin:0;font-size:14px;color:var(--success);">降噪通过 (<span id="denoise-urev-passed-count">0</span>)</h4>
         </div>
+        <div id="denoise-urev-result-list" class="file-list" style="max-height:300px;">
+          <div class="empty-state"><p>暂无通过筛选的音频</p></div>
+        </div>
+      </div>
+
+      <!-- Discarded section -->
+      <div id="denoise-urev-discarded-section" style="display:none;margin-top:12px;">
+        <h4 style="margin:0 0 8px 0;font-size:14px;color:var(--danger);">已舍弃 (<span id="denoise-urev-discarded-count">0</span>)</h4>
+        <div id="denoise-urev-discarded-list" class="file-list" style="max-height:200px;"></div>
       </div>
     </div><!-- end denoise-panel-unreviewed -->
 
@@ -1853,13 +1865,14 @@ var _denoiseUrevDir = '';
 var _denoiseUrevClips = [];
 var _denoiseUrevJobId = null;
 var _denoiseUrevPollTimer = null;
+var _denoiseUrevSelectMode = false;
+var _denoiseUrevSelected = {};
 
 function switchDenoiseSubtab(name) {
   document.getElementById('denoise-panel-reviewed').style.display = (name === 'reviewed') ? 'block' : 'none';
   document.getElementById('denoise-panel-unreviewed').style.display = (name === 'unreviewed') ? 'block' : 'none';
   document.getElementById('denoise-subtab-reviewed').className = (name === 'reviewed') ? 'btn btn-primary' : 'btn btn-secondary';
   document.getElementById('denoise-subtab-unreviewed').className = (name === 'unreviewed') ? 'btn btn-primary' : 'btn btn-secondary';
-  // Show shared step config for both sub-tabs
   var stepCfg = document.getElementById('denoise-step-config');
   if (name === 'reviewed' || name === 'unreviewed') {
     stepCfg.style.display = 'block';
@@ -1882,14 +1895,20 @@ async function loadUnreviewedDirs() {
         escapeHtml(dirs[i].name) + ' (' + dirs[i].pending + ' 未审核)</option>';
     }
     select.innerHTML = html;
-    document.getElementById('btn-denoise-urev-refresh').style.display = 'inline-block';
+    showUrevToolbar();
   } catch(e) { select.innerHTML = '<option value="">加载失败</option>'; }
+}
+
+function showUrevToolbar() {
+  document.getElementById('btn-denoise-urev-refresh').style.display = 'inline-block';
 }
 
 async function loadUnreviewedClips() {
   var dir = document.getElementById('denoise-urev-dir-select').value;
   if (!dir) { return; }
   _denoiseUrevDir = dir;
+  _denoiseUrevSelectMode = false;
+  _denoiseUrevSelected = {};
   var list = document.getElementById('denoise-urev-file-list');
   list.innerHTML = '<div class="empty-state"><p>加载中...</p></div>';
   try {
@@ -1899,33 +1918,97 @@ async function loadUnreviewedClips() {
     if (!_denoiseUrevClips.length) {
       list.innerHTML = '<div class="empty-state"><p>该视频没有未审核片段</p></div>';
       document.getElementById('btn-denoise-urev-all').style.display = 'none';
+      document.getElementById('btn-denoise-urev-select').style.display = 'none';
+      document.getElementById('btn-denoise-urev-selected').style.display = 'none';
+      document.getElementById('btn-denoise-urev-select-all').style.display = 'none';
     } else {
-      var html = '';
-      for (var i = 0; i < _denoiseUrevClips.length; i++) {
-        var c = _denoiseUrevClips[i];
-        html += '<div class="file-item">' +
-          '<span class="file-name" style="font-size:12px;">' + escapeHtml(c.name) + '</span>' +
-          '<span class="file-size">' + c.size_mb + ' MB</span>' +
-          '</div>';
-      }
-      list.innerHTML = html;
+      buildUrevFileList();
       document.getElementById('btn-denoise-urev-all').style.display = 'inline-block';
+      document.getElementById('btn-denoise-urev-select').style.display = 'inline-block';
     }
     document.getElementById('denoise-urev-stats').textContent = '共 ' + _denoiseUrevClips.length + ' 个未审核片段';
-  } catch(e) {
-    list.innerHTML = '<div class="empty-state"><p>加载失败</p></div>';
-  }
+    // Load existing results for this video
+    loadUrevDenoiseResults();
+  } catch(e) { list.innerHTML = '<div class="empty-state"><p>加载失败</p></div>'; }
 }
 
-async function denoiseUnreviewedAll() {
+function buildUrevFileList() {
+  var list = document.getElementById('denoise-urev-file-list');
+  var html = '';
+  for (var i = 0; i < _denoiseUrevClips.length; i++) {
+    var c = _denoiseUrevClips[i];
+    var checked = _denoiseUrevSelected[c.path] ? ' checked' : '';
+    var cbStyle = _denoiseUrevSelectMode ? '' : ' style="display:none;"';
+    html += '<div class="file-item" data-urev-path="' + escapeHtml(c.path) + '">' +
+      '<input type="checkbox"' + checked + cbStyle + ' onchange="onUrevCheckbox(this,\'' +
+        escapeHtml(c.path).replace(/'/g, "\\'") + '\')">' +
+      '<span class="file-name" style="font-size:12px;cursor:pointer;" onclick="playUrevAudio(\'' +
+        c.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\',\'' +
+        escapeHtml(c.name).replace(/'/g, "\\'") + '\')">' + escapeHtml(c.name) + '</span>' +
+      '<span class="file-size">' + c.size_mb + ' MB</span>' +
+      '</div>';
+  }
+  list.innerHTML = html;
+}
+
+function toggleUrevSourceSelect() {
+  _denoiseUrevSelectMode = !_denoiseUrevSelectMode;
+  var cbs = document.querySelectorAll('#denoise-urev-file-list input[type=checkbox]');
+  for (var i = 0; i < cbs.length; i++) { cbs[i].style.display = _denoiseUrevSelectMode ? '' : 'none'; }
+  document.getElementById('btn-denoise-urev-select-all').style.display = _denoiseUrevSelectMode ? 'inline-block' : 'none';
+  document.getElementById('btn-denoise-urev-selected').style.display = _denoiseUrevSelectMode ? 'inline-block' : 'none';
+  if (!_denoiseUrevSelectMode) { _denoiseUrevSelected = {}; }
+}
+
+function onUrevCheckbox(cb, path) {
+  if (cb.checked) { _denoiseUrevSelected[path] = true; }
+  else { delete _denoiseUrevSelected[path]; }
+}
+
+function selectAllUrevSources() {
+  var allSelected = Object.keys(_denoiseUrevSelected).length === _denoiseUrevClips.length;
+  if (allSelected) {
+    _denoiseUrevSelected = {};
+  } else {
+    for (var i = 0; i < _denoiseUrevClips.length; i++) { _denoiseUrevSelected[_denoiseUrevClips[i].path] = true; }
+  }
+  var cbs = document.querySelectorAll('#denoise-urev-file-list input[type=checkbox]');
+  for (var i = 0; i < cbs.length; i++) { cbs[i].checked = !allSelected; }
+}
+
+function playUrevAudio(path, name) {
+  var player = document.getElementById('denoise-audio-player');
+  var bar = document.getElementById('denoise-player-bar');
+  player.src = API + '/api/review/stream?path=' + encodeURIComponent(path);
+  player.load();
+  player.play().catch(function(){});
+  document.getElementById('denoise-playing-name').textContent = '[未审核] ' + name;
+  bar.style.display = 'block';
+}
+
+async function denoiseUrevAll() {
   if (!_denoiseUrevClips.length) return;
+  var paths = [];
+  for (var i = 0; i < _denoiseUrevClips.length; i++) { paths.push(_denoiseUrevClips[i].path); }
+  startUrevDenoise(paths);
+}
+
+async function denoiseUrevSelected() {
+  var selected = Object.keys(_denoiseUrevSelected).filter(function(k) { return _denoiseUrevSelected[k]; });
+  if (!selected.length) { toast('请先选择要降噪的片段', 'info'); return; }
+  startUrevDenoise(selected);
+}
+
+async function startUrevDenoise(paths) {
   var enabledKeys = getEnabledStepKeys();
   if (!enabledKeys.length) { toast('请至少启用一个处理步骤', 'error'); return; }
 
-  var paths = [];
-  for (var i = 0; i < _denoiseUrevClips.length; i++) { paths.push(_denoiseUrevClips[i].path); }
-  var videoName = document.getElementById('denoise-urev-dir-select').selectedOptions[0].text.split(' (')[0] || '';
+  _denoiseUrevSelectMode = false; _denoiseUrevSelected = {};
+  document.getElementById('btn-denoise-urev-selected').style.display = 'none';
+  document.getElementById('btn-denoise-urev-select-all').style.display = 'none';
+  buildUrevFileList();
 
+  var videoName = document.getElementById('denoise-urev-dir-select').selectedOptions[0].text.split(' (')[0] || '';
   var payload = { video_name: videoName, paths: paths, steps: enabledKeys };
   try {
     var resp = await fetch(API + '/api/denoise/unreviewed-batch', {
@@ -1937,12 +2020,10 @@ async function denoiseUnreviewedAll() {
     if (data.status !== 'ok') throw new Error('启动失败');
 
     _denoiseUrevJobId = data.job_id;
-    document.getElementById('btn-denoise-urev-all').style.display = 'none';
     document.getElementById('denoise-urev-progress').style.display = 'block';
     document.getElementById('denoise-urev-progress-fill').style.width = '0%';
     document.getElementById('denoise-urev-progress-text').textContent = '启动降噪...';
     toast('开始降噪 ' + data.file_count + ' 个片段...', 'info');
-
     startUrevDenoisePolling();
   } catch(e) { toast('启动失败: ' + e.message, 'error'); }
 }
@@ -1964,15 +2045,77 @@ async function pollUrevDenoiseJob() {
     var pct = job.progress || 0;
     document.getElementById('denoise-urev-progress-fill').style.width = pct + '%';
     document.getElementById('denoise-urev-progress-text').textContent =
-      job.current_file + ' — ' + Math.round(pct) + '%';
+      (job.current_file || '') + ' — ' + Math.round(pct) + '%';
 
     if (job.status === 'completed') {
       stopUrevDenoisePolling();
-      document.getElementById('btn-denoise-urev-all').style.display = 'inline-block';
       toast('降噪完成！已保存到 cleaned_unreviewed/', 'success');
+      // Show results with passed/discarded split
+      renderUrevJobResults(job);
       loadUrevDenoiseResults();
     }
   } catch(e) {}
+}
+
+function renderUrevJobResults(job) {
+  var files = job.files || [];
+  var passed = []; var discarded = [];
+  for (var i = 0; i < files.length; i++) {
+    if (files[i].status === 'completed') passed.push(files[i]);
+    else if (files[i].status === 'discarded') discarded.push(files[i]);
+  }
+
+  // Passed
+  var pSection = document.getElementById('denoise-urev-results-section');
+  var pList = document.getElementById('denoise-urev-result-list');
+  var pCount = document.getElementById('denoise-urev-passed-count');
+  pCount.textContent = passed.length;
+  if (passed.length) {
+    var html = '';
+    for (var i = 0; i < passed.length; i++) {
+      var r = passed[i];
+      html += '<div class="file-item">' +
+        '<span class="file-name" style="font-size:12px;cursor:pointer;" onclick="playUrevResultAudio(\'' +
+          (r.output_path || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\',\'' +
+          escapeHtml(r.name).replace(/'/g, "\\'") + '\')">' + escapeHtml(r.name) + '</span>' +
+        '<span class="file-size">通过</span></div>';
+    }
+    pList.innerHTML = html;
+  }
+  pSection.style.display = 'block';
+
+  // Discarded
+  var dSection = document.getElementById('denoise-urev-discarded-section');
+  var dList = document.getElementById('denoise-urev-discarded-list');
+  var dCount = document.getElementById('denoise-urev-discarded-count');
+  dCount.textContent = discarded.length;
+  if (discarded.length) {
+    var dhtml = '';
+    for (var i = 0; i < discarded.length; i++) {
+      var d = discarded[i];
+      var reason = '';
+      if (d.steps && d.steps.length) {
+        for (var si = 0; si < d.steps.length; si++) {
+          if (d.steps[si].status === 'discarded') { reason = d.steps[si].message; break; }
+        }
+      }
+      dhtml += '<div class="file-item">' +
+        '<span class="file-name" style="font-size:12px;">' + escapeHtml(d.name) + '</span>' +
+        '<span class="file-size" style="color:var(--danger);">' + escapeHtml(reason) + '</span></div>';
+    }
+    dList.innerHTML = dhtml;
+  }
+  dSection.style.display = discarded.length ? 'block' : 'none';
+}
+
+function playUrevResultAudio(path, name) {
+  var player = document.getElementById('denoise-audio-player');
+  var bar = document.getElementById('denoise-player-bar');
+  player.src = API + '/api/results/stream?path=' + encodeURIComponent(path);
+  player.load();
+  player.play().catch(function(){});
+  document.getElementById('denoise-playing-name').textContent = '[未审核结果] ' + name;
+  bar.style.display = 'block';
 }
 
 async function loadUrevDenoiseResults() {
@@ -1986,19 +2129,18 @@ async function loadUrevDenoiseResults() {
     var data = await resp.json();
     var results = data.results || [];
     countEl.textContent = results.length;
-    if (!results.length) {
-      list.innerHTML = '<div class="empty-state"><p>暂无</p></div>';
-    } else {
-      var html = '';
-      for (var i = 0; i < results.length; i++) {
-        var r = results[i];
-        html += '<div class="file-item">' +
-          '<span class="file-name" style="font-size:12px;">' + escapeHtml(r.name) + '</span>' +
-          '<span class="file-size">' + r.size_mb + ' MB | ' + r.duration_s + 's | ' + r.codec + '</span>' +
-          '</div>';
-      }
-      list.innerHTML = html;
+    if (!results.length) { return; }
+    var html = '';
+    for (var i = 0; i < results.length; i++) {
+      var r = results[i];
+      html += '<div class="file-item">' +
+        '<span class="file-name" style="font-size:12px;cursor:pointer;" onclick="playUrevResultAudio(\'' +
+          r.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\',\'' +
+          escapeHtml(r.name).replace(/'/g, "\\'") + '\')">' + escapeHtml(r.name) + '</span>' +
+        '<span class="file-size">' + r.size_mb + ' MB | ' + r.duration_s + 's | ' + r.codec + '</span>' +
+        '</div>';
     }
+    list.innerHTML = html;
     section.style.display = 'block';
   } catch(e) {}
 }

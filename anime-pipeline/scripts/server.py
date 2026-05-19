@@ -1399,6 +1399,7 @@ def denoise_unreviewed_batch(payload: dict = Body(...)):
         _denoise_jobs[job_id] = job
 
     def _run():
+        import tempfile
         from denoise_audio import run_full_denoise
 
         job.status = "running"
@@ -1414,10 +1415,35 @@ def denoise_unreviewed_batch(payload: dict = Body(...)):
             output_dir = os.path.join(CLEANED_UNREVIEWED_DIR, video_dir)
             os.makedirs(output_dir, exist_ok=True)
 
+            # Convert MP4 to temp WAV (denoise pipeline expects WAV input)
+            wav_tmp = os.path.join(tempfile.gettempdir(), "urev_denoise_" + uuid.uuid4().hex[:8] + ".wav")
+            try:
+                conv = subprocess.run(
+                    [FFMPEG, "-y", "-i", f.input_path, "-vn", "-acodec", "pcm_s16le",
+                     "-ar", "48000", "-ac", "1", wav_tmp],
+                    capture_output=True, timeout=60,
+                )
+                if conv.returncode != 0 or not os.path.exists(wav_tmp) or os.path.getsize(wav_tmp) == 0:
+                    f.status = "error"
+                    f.steps.append({"step": "convert", "status": "error", "message": "音频提取失败"})
+                    completed_count += 1
+                    continue
+            except Exception as e:
+                f.status = "error"
+                f.steps.append({"step": "convert", "status": "error", "message": str(e)[:100]})
+                completed_count += 1
+                continue
+
             def on_step(step_key, status, message):
                 f.steps.append({"step": step_key, "status": status, "message": message})
 
-            result = run_full_denoise(f.input_path, output_dir, on_step=on_step, steps=steps)
+            result = run_full_denoise(wav_tmp, output_dir, on_step=on_step, steps=steps)
+
+            # Clean up temp WAV
+            try:
+                os.remove(wav_tmp)
+            except Exception:
+                pass
 
             if result["success"]:
                 f.status = "completed"
