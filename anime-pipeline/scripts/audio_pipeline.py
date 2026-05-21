@@ -310,33 +310,260 @@ def analyze_clip_bgm(audio_path: str) -> dict:
 # Step 3: VAD (Voice Activity Detection)
 # ============================================================
 # ============================================================
-# Gender detection (male voice)
+# Gender detection (male voice) — ONNX Wav2Vec2 classifier
 # ============================================================
-MALE_PITCH_THRESHOLD = 165.0  # Hz — median F0 below this = likely male
-MIN_VOICED_RATIO = 0.15       # must have at least this fraction of voiced frames
+# Fallback constants (used when ONNX model is unavailable)
+MALE_PITCH_THRESHOLD = 165.0  # Hz
+MIN_VOICED_RATIO = 0.15
+
+# ONNX model reference
+_GENDER_ONNX_REPO = "prithivMLmods/Common-Voice-Gender-Detection-ONNX"
+_GENDER_ONNX_FILE = "onnx/model.onnx"
+_gender_onnx_session = None
+_gender_onnx_failed = False
 
 
-def analyze_clip_gender(audio_path: str = "", audio_array=None, sr: int = SR) -> dict:
+def _load_gender_onnx():
+    """Lazy-load the Wav2Vec2 ONNX gender classifier (singleton).
+
+    Returns the InferenceSession, or None if unavailable.
+    On first failure, sets _gender_onnx_failed = True to skip retries.
+    """
+    global _gender_onnx_session, _gender_onnx_failed
+    if _gender_onnx_session is not None:
+        return _gender_onnx_session
+    if _gender_onnx_failed:
+        return None
+    try:
+        import onnxruntime as ort
+        from huggingface_hub import hf_hub_download
+
+        model_path = hf_hub_download(_GENDER_ONNX_REPO, _GENDER_ONNX_FILE)
+        so = ort.SessionOptions()
+        so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+        so.intra_op_num_threads = 2
+        so.inter_op_num_threads = 1
+        _gender_onnx_session = ort.InferenceSession(
+            model_path, so, providers=["CPUExecutionProvider"]
+        )
+        print("[gender-onnx] Model loaded successfully")
+        return _gender_onnx_session
+    except Exception as e:
+        print(f"[gender-onnx] Failed to load model: {e}")
+        _gender_onnx_failed = True
+        return None
+
+
+def _classify_gender_onnx(audio_array: np.ndarray, sr: int) -> dict | None:
+    """Run ONNX Wav2Vec2 gender inference.
+
+    Returns dict with is_male / female_prob / male_prob / confidence,
+    or None if the ONNX model is unavailable.
+    """
+    session = _load_gender_onnx()
+    if session is None:
+        return None
+
+    # Resample to 16 kHz
+    if sr != SR:
+        y = librosa.resample(
+            audio_array.astype(np.float64), orig_sr=sr, target_sr=SR
+        ).astype(np.float32)
+    else:
+        y = audio_array.astype(np.float32)
+
+    # Peak normalize
+    peak = np.max(np.abs(y))
+    if peak > 1e-6:
+        y = y / peak
+
+    # Cap at 30 s (model is transformer-based, O(n²) attention cost)
+    max_samples = SR * 30
+    if len(y) > max_samples:
+        y = y[:max_samples]
+
+    # Inference
+    input_name = session.get_inputs()[0].name
+    outputs = session.run(None, {input_name: y.reshape(1, -1)})
+    logits = outputs[0][0]
+
+    # Stable softmax
+    logits = logits - np.max(logits)
+    probs = np.exp(logits) / np.sum(np.exp(logits))
+    female_prob = float(probs[0])
+    male_prob = float(probs[1])
+
+    return {
+        "is_male": male_prob > female_prob,
+        "female_prob": round(female_prob, 4),
+        "male_prob": round(male_prob, 4),
+        "confidence": round(max(female_prob, male_prob), 4),
+    }
+
+
+def _classify_gender_yin(audio_array: np.ndarray, sr: int) -> dict:
+    """YIN pitch-based gender heuristic (fast fallback).
+
+    Returns the standard result dict with is_male / median_pitch /
+    voiced_ratio / confidence / details.
+    """
+    result: dict = {
+        "is_male": False,
+        "median_pitch": 0.0,
+        "voiced_ratio": 0.0,
+        "confidence": 0.0,
+        "details": "",
+    }
+
+    # Limit to 30 s
+    if len(audio_array) > sr * 30:
+        audio_array = audio_array[: int(sr * 30)]
+
+    try:
+        f0 = librosa.yin(
+            audio_array.astype(np.float32),
+            fmin=50.0,
+            fmax=600.0,
+            sr=sr,
+            frame_length=FRAME_LEN,
+            hop_length=HOP_LEN,
+        )
+    except Exception:
+        result["details"] = "pitch estimation failed"
+        return result
+
+    if f0 is None or len(f0) == 0:
+        result["details"] = "no pitch data"
+        return result
+
+    voiced = ~np.isnan(f0) & (f0 > 50.0)
+    voiced_frames = f0[voiced]
+    total_frames = len(f0)
+    voiced_ratio = len(voiced_frames) / max(total_frames, 1)
+
+    result["voiced_ratio"] = round(float(voiced_ratio), 4)
+
+    if len(voiced_frames) == 0 or voiced_ratio < MIN_VOICED_RATIO:
+        result["details"] = (
+            "insufficient voiced frames (" + str(round(voiced_ratio * 100)) + "%)"
+        )
+        return result
+
+    median_pitch = float(np.median(voiced_frames))
+    result["median_pitch"] = round(median_pitch, 1)
+    result["is_male"] = median_pitch < MALE_PITCH_THRESHOLD
+    result["details"] = (
+        "男声(中值" + str(int(median_pitch)) + "Hz)"
+        if result["is_male"]
+        else "女声(中值" + str(int(median_pitch)) + "Hz)"
+    )
+    return result
+
+
+def analyze_clip_gender(
+    audio_path: str = "", audio_array=None, sr: int = SR
+) -> dict:
     """Detect whether an audio clip contains a male voice.
 
-    Uses YIN pitch (F0) estimation. Male voices typically have
-    a median F0 below 165 Hz; female voices are above.
+    Primary: Wav2Vec2 ONNX classifier (~98.5% accuracy, ~180 ms/clip).
+    Fallback: YIN pitch heuristic (fast, works without ONNX dependencies).
 
     Accepts either a file path or a numpy audio array.
     When audio_array is provided, audio_path is ignored.
 
     Returns a dict with:
         is_male: bool
-        median_pitch: float — median F0 in Hz (0 if no voiced frames)
-        voiced_ratio: float — fraction of frames with reliable pitch
-        confidence: float — always 0.0 (YIN)
+        median_pitch: float — Hz (0 when ONNX is used)
+        voiced_ratio: float
+        confidence: float — model confidence (0.0 for YIN fallback)
+        details: str
+    """
+    # --- Load audio -------------------------------------------------------
+    if audio_array is not None:
+        y = audio_array.astype(np.float32)
+        sr_val = sr
+    elif audio_path:
+        try:
+            y, sr_val = librosa.load(audio_path, sr=SR, mono=True)
+        except Exception:
+            return {
+                "is_male": False,
+                "median_pitch": 0.0,
+                "voiced_ratio": 0.0,
+                "confidence": 0.0,
+                "details": "failed to load audio",
+            }
+    else:
+        return {
+            "is_male": False,
+            "median_pitch": 0.0,
+            "voiced_ratio": 0.0,
+            "confidence": 0.0,
+            "details": "no input",
+        }
+
+    if len(y) < sr_val * 0.3:
+        return {
+            "is_male": False,
+            "median_pitch": 0.0,
+            "voiced_ratio": 0.0,
+            "confidence": 0.0,
+            "details": "too short",
+        }
+
+    # --- Try ONNX first ---------------------------------------------------
+    onnx_result = _classify_gender_onnx(y, sr_val)
+    if onnx_result is not None:
+        return {
+            "is_male": onnx_result["is_male"],
+            "median_pitch": 0.0,
+            "voiced_ratio": 1.0,
+            "confidence": onnx_result["confidence"],
+            "details": (
+                "男声(置信"
+                + str(int(onnx_result["male_prob"] * 100))
+                + "%)"
+                if onnx_result["is_male"]
+                else "女声(置信"
+                + str(int(onnx_result["female_prob"] * 100))
+                + "%)"
+            ),
+        }
+
+    # --- YIN fallback -----------------------------------------------------
+    return _classify_gender_yin(y, sr_val)
+
+
+# ============================================================
+# Multi-voice detection (multiple speakers)
+# ============================================================
+MULTI_VOICE_PITCH_SPAN_THRESH = 120.0  # Hz — pitch median span across segments > this = multi-voice
+MULTI_VOICE_PITCH_CV_THRESH = 0.25     # coefficient of variation of segment medians > this = multi-voice
+MIN_SEGMENT_DURATION = 0.3             # seconds — minimum voiced segment duration
+MIN_SEGMENTS_FOR_DETECTION = 2         # need at least this many segments to analyze
+
+
+def analyze_clip_multi_voice(audio_path: str = "", audio_array=None, sr: int = SR) -> dict:
+    """Detect whether an audio clip contains multiple human speakers.
+
+    Segments voiced frames into continuous speech bursts, computes
+    median pitch per segment, and checks whether pitch patterns
+    indicate multiple distinct voice ranges (e.g. male + female).
+
+    Returns a dict with:
+        has_multi_voice: bool
+        segment_count: int — number of voiced segments found
+        pitch_span: float — range of median pitches across segments (Hz)
+        pitch_cv: float — coefficient of variation of segment medians
+        segment_pitches: list[float] — median pitch per segment
         details: str
     """
     result = {
-        "is_male": False,
-        "median_pitch": 0.0,
-        "voiced_ratio": 0.0,
-        "confidence": 0.0,
+        "has_multi_voice": False,
+        "segment_count": 0,
+        "pitch_span": 0.0,
+        "pitch_cv": 0.0,
+        "segment_pitches": [],
         "details": "",
     }
 
@@ -353,15 +580,15 @@ def analyze_clip_gender(audio_path: str = "", audio_array=None, sr: int = SR) ->
         result["details"] = "no input"
         return result
 
-    if len(y) < sr_val * 0.3:
+    if len(y) < sr_val * 0.5:
         result["details"] = "too short"
         return result
 
-    # Limit to first 30s for speed
-    if len(y) > sr_val * 30:
-        y = y[:int(sr_val * 30)]
+    # Limit to first 60s
+    if len(y) > sr_val * 60:
+        y = y[:int(sr_val * 60)]
 
-    # YIN pitch tracking (fast)
+    # YIN pitch tracking
     try:
         f0 = librosa.yin(
             y, fmin=50.0, fmax=600.0, sr=sr_val,
@@ -375,26 +602,81 @@ def analyze_clip_gender(audio_path: str = "", audio_array=None, sr: int = SR) ->
         result["details"] = "no pitch data"
         return result
 
-    # Filter voiced frames (YIN returns NaN for unvoiced)
-    voiced_mask = ~np.isnan(f0) & (f0 > 50.0)
-    voiced_frames = f0[voiced_mask]
-    total_frames = len(f0)
-    voiced_ratio = len(voiced_frames) / max(total_frames, 1)
+    # Get voiced frames
+    voiced = ~np.isnan(f0) & (f0 > 50.0)
+    total_voiced = np.sum(voiced)
 
-    result["voiced_ratio"] = round(float(voiced_ratio), 4)
-
-    if len(voiced_frames) == 0 or voiced_ratio < MIN_VOICED_RATIO:
-        result["details"] = "insufficient voiced frames (" + str(round(voiced_ratio * 100)) + "%)"
+    if total_voiced < int(sr_val * 0.3 / HOP_LEN):
+        result["details"] = "insufficient voiced frames"
         return result
 
-    median_pitch = float(np.median(voiced_frames))
-    result["median_pitch"] = round(median_pitch, 1)
+    # Segment into continuous bursts
+    min_frames = int(MIN_SEGMENT_DURATION * sr_val / HOP_LEN)
+    gap_frames = int(0.3 * sr_val / HOP_LEN)  # 300ms gap = new segment
 
-    result["is_male"] = median_pitch < MALE_PITCH_THRESHOLD
-    if result["is_male"]:
-        result["details"] = "男声(中值" + str(int(median_pitch)) + "Hz)"
+    segments = []
+    in_seg = False
+    seg_start = 0
+    silent_count = 0
+
+    for i in range(len(voiced)):
+        if voiced[i]:
+            if not in_seg:
+                seg_start = i
+                in_seg = True
+                silent_count = 0
+            else:
+                silent_count = 0
+        elif in_seg:
+            silent_count += 1
+            if silent_count >= gap_frames or i == len(voiced) - 1:
+                seg_end = i - silent_count
+                if seg_end - seg_start >= min_frames:
+                    seg_pitches = f0[seg_start:seg_end + 1]
+                    seg_voiced = seg_pitches[~np.isnan(seg_pitches) & (seg_pitches > 50.0)]
+                    if len(seg_voiced) >= min_frames:
+                        segments.append(float(np.median(seg_voiced)))
+                in_seg = False
+
+    # Handle final segment
+    if in_seg:
+        seg_end = len(voiced) - 1
+        if seg_end - seg_start >= min_frames:
+            seg_pitches = f0[seg_start:seg_end + 1]
+            seg_voiced = seg_pitches[~np.isnan(seg_pitches) & (seg_pitches > 50.0)]
+            if len(seg_voiced) >= min_frames:
+                segments.append(float(np.median(seg_voiced)))
+
+    result["segment_count"] = len(segments)
+    result["segment_pitches"] = [round(p, 1) for p in segments]
+
+    if len(segments) < MIN_SEGMENTS_FOR_DETECTION:
+        result["details"] = f"only {len(segments)} voiced segments, need >= {MIN_SEGMENTS_FOR_DETECTION}"
+        return result
+
+    # Compute multi-voice indicators
+    seg_arr = np.array(segments)
+    pitch_span = float(np.max(seg_arr) - np.min(seg_arr))
+    pitch_mean = float(np.mean(seg_arr))
+    pitch_std = float(np.std(seg_arr))
+    pitch_cv = pitch_std / (pitch_mean + 1e-9)
+
+    result["pitch_span"] = round(pitch_span, 1)
+    result["pitch_cv"] = round(pitch_cv, 4)
+
+    # Multi-voice if pitch span is wide OR variation is high
+    has_multi = pitch_span > MULTI_VOICE_PITCH_SPAN_THRESH or pitch_cv > MULTI_VOICE_PITCH_CV_THRESH
+    result["has_multi_voice"] = has_multi
+
+    if has_multi:
+        reasons = []
+        if pitch_span > MULTI_VOICE_PITCH_SPAN_THRESH:
+            reasons.append(f"音高跨度{pitch_span:.0f}Hz")
+        if pitch_cv > MULTI_VOICE_PITCH_CV_THRESH:
+            reasons.append(f"音高变异{pitch_cv:.2f}")
+        result["details"] = "多人声(" + ", ".join(reasons) + ")"
     else:
-        result["details"] = "女声(中值" + str(int(median_pitch)) + "Hz)"
+        result["details"] = f"单人声(跨{pitch_span:.0f}Hz, 段{len(segments)})"
 
     return result
 

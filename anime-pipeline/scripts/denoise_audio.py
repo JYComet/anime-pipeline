@@ -43,9 +43,10 @@ def _get_sr_model():
 
 STEP_REGISTRY = {}  # Populated below
 
-DEFAULT_STEPS = ["enhance", "super_resolve", "reverb", "silence", "vad", "pad", "male_voice"]
+DEFAULT_STEPS = ["male_voice", "enhance", "super_resolve", "reverb", "silence", "vad", "pad", "clear_short"]
 
 STEP_LABELS = {
+    "clear_short": "清除短音频",
     "enhance": "语音增强",
     "super_resolve": "超分辨率",
     "reverb": "混响检测",
@@ -54,6 +55,25 @@ STEP_LABELS = {
     "pad": "静音规范化",
     "male_voice": "去除男声",
 }
+
+
+def _step_clear_short(current_path, output_dir, base):
+    """Remove audio clips with duration <= 2 seconds."""
+    try:
+        import subprocess, json
+        from config import FFPROBE
+        result = subprocess.run(
+            [FFPROBE, "-v", "quiet", "-print_format", "json", "-show_format", current_path],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            dur = float(data.get("format", {}).get("duration", 0))
+            if dur > 0 and dur <= 2.0:
+                return {"success": False, "discard_reason": f"音频过短 ({dur:.1f}s <= 2s)"}
+        return {"success": True, "output_path": current_path}
+    except Exception as e:
+        return {"success": True, "output_path": current_path, "info": {"fallback": f"clear_short skipped: {e}"}}
 
 
 def _step_enhance(current_path, output_dir, base):
@@ -136,6 +156,7 @@ def _step_male_voice(current_path, output_dir, base):
 
 
 STEP_REGISTRY = {
+    "clear_short": _step_clear_short,
     "enhance": _step_enhance,
     "super_resolve": _step_super_resolve,
     "reverb": _step_reverb,

@@ -11,13 +11,14 @@ from pathlib import Path
 
 from fastapi import FastAPI, Query, Body, HTTPException, UploadFile, File
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 from config import (
-    PROJECT_ROOT, DOWNLOAD_DIR, SUBTITLE_DIR, CLIPS_DIR, APPROVED_DIR, CLEANED_DIR,
-    CLEANED_UNREVIEWED_DIR, STITCHED_DIR,
+    PROJECT_ROOT, DATA_DIR, DOWNLOAD_DIR, SUBTITLE_DIR, CLIPS_DIR, APPROVED_DIR, CLEANED_DIR,
+    CLEANED_UNREVIEWED_DIR, DENOISED_APPROVED_DIR, STITCHED_DIR,
+    ASR_DIR, ASR_AUDIO_DIR, ASR_SUBTITLE_DIR,
     FFPROBE, FFMPEG
 )
 from pipeline import pipeline, PipelineJob, StepStatus
@@ -356,6 +357,166 @@ async def upload_local_video(file: UploadFile = File(...)):
 
 
 # ============================================================
+# Local files browser endpoints
+# ============================================================
+
+@app.get("/api/local-files/browse")
+def browse_local_files(dir: str = Query("", description="Subdirectory relative to data dir")):
+    """List folders and files in a directory under data/.
+
+    Returns folders first, then files. Each entry has name, path, type, size, mtime.
+    """
+    from datetime import datetime
+    import shutil
+    base = os.path.normpath(DATA_DIR)
+    # Resolve target dir, prevent path traversal
+    target = os.path.normpath(os.path.join(base, dir))
+    if not target.startswith(base):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not os.path.isdir(target):
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    audio_exts = {".wav", ".mp3", ".flac", ".ogg", ".aac", ".m4a", ".wma", ".opus"}
+    video_exts = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".webm", ".flv"}
+    image_exts = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg"}
+    sub_exts = {".srt", ".ass", ".ssa", ".vtt"}
+
+    def get_file_type(ext):
+        ext = ext.lower()
+        if ext in audio_exts: return "audio"
+        if ext in video_exts: return "video"
+        if ext in image_exts: return "image"
+        if ext in sub_exts: return "subtitle"
+        return "other"
+
+    folders = []
+    files = []
+    try:
+        for name in sorted(os.listdir(target)):
+            full = os.path.join(target, name)
+            if os.path.isdir(full):
+                folders.append({"name": name, "path": full, "type": "folder"})
+            else:
+                ext = os.path.splitext(name)[1]
+                size = os.path.getsize(full)
+                mtime = os.path.getmtime(full)
+                files.append({
+                    "name": name,
+                    "path": full,
+                    "type": get_file_type(ext),
+                    "ext": ext,
+                    "size": size,
+                    "size_str": _format_file_size(size),
+                    "mtime": mtime,
+                    "time_str": datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M"),
+                })
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    # Breadcrumb: build path segments from data dir to current dir
+    breadcrumbs = [{"name": "data", "dir": ""}]
+    if dir:
+        parts = dir.replace("\\", "/").split("/")
+        accum = ""
+        for p in parts:
+            if p:
+                accum = os.path.join(accum, p).replace("\\", "/") if accum else p
+                breadcrumbs.append({"name": p, "dir": accum})
+
+    return {
+        "dir": dir,
+        "full_path": target,
+        "breadcrumbs": breadcrumbs,
+        "folders": folders,
+        "files": files,
+    }
+
+
+@app.delete("/api/local-files/delete")
+def delete_local_file(path: str = Query(..., description="Full path to file or folder to delete")):
+    """Delete a file or folder under data/ or video/."""
+    import shutil
+    allowed_bases = [os.path.normpath(DATA_DIR), os.path.normpath(VIDEO_DIR)]
+    target = os.path.normpath(path)
+    if not any(target.startswith(b) for b in allowed_bases):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not os.path.exists(target):
+        raise HTTPException(status_code=404, detail="Not found")
+
+    try:
+        if os.path.isdir(target):
+            shutil.rmtree(target)
+        else:
+            os.remove(target)
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/local-files/delete-batch")
+def delete_local_files_batch(paths: list[str] = Body(..., embed=True)):
+    """Delete multiple files/folders under data/."""
+    import shutil
+    base = os.path.normpath(DATA_DIR)
+    deleted = []
+    errors = []
+    for path in paths:
+        target = os.path.normpath(path)
+        if not target.startswith(base):
+            errors.append({"path": path, "error": "Access denied"})
+            continue
+        if not os.path.exists(target):
+            errors.append({"path": path, "error": "Not found"})
+            continue
+        try:
+            if os.path.isdir(target):
+                shutil.rmtree(target)
+            else:
+                os.remove(target)
+            deleted.append(path)
+        except Exception as e:
+            errors.append({"path": path, "error": str(e)})
+    return {"status": "ok", "deleted": len(deleted), "errors": errors}
+
+
+@app.get("/api/local-files/stream")
+def stream_local_file(path: str = Query(..., description="Full path to audio file")):
+    """Stream an audio file for playback."""
+    base = os.path.normpath(DATA_DIR)
+    target = os.path.normpath(path)
+    if not target.startswith(base):
+        raise HTTPException(status_code=403, detail="Access denied")
+    if not os.path.exists(target):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    ext = os.path.splitext(target)[1].lower()
+    media_map = {
+        ".wav": "audio/wav",
+        ".mp3": "audio/mpeg",
+        ".m4a": "audio/mp4",
+        ".aac": "audio/aac",
+        ".ogg": "audio/ogg",
+        ".flac": "audio/flac",
+        ".opus": "audio/opus",
+        ".wma": "audio/x-ms-wma",
+    }
+    media_type = media_map.get(ext, "application/octet-stream")
+    return FileResponse(target, media_type=media_type)
+
+
+def _format_file_size(size_bytes: int) -> str:
+    """Format file size for display."""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    elif size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes / 1024 / 1024:.1f} MB"
+    else:
+        return f"{size_bytes / 1024 / 1024 / 1024:.2f} GB"
+
+
+# ============================================================
 # Pipeline job endpoints
 # ============================================================
 
@@ -665,7 +826,7 @@ def _get_video_names_from_dirs(base_dir: str) -> set[str]:
 
 @app.get("/api/results/videos")
 def list_result_videos():
-    """List all processed video names."""
+    """List all processed video names with denoise status."""
     clip_names = _get_video_names_from_dirs(CLIPS_DIR)
     approved_names = _get_video_names_from_dirs(APPROVED_DIR)
     all_names = sorted(clip_names | approved_names)
@@ -674,12 +835,17 @@ def list_result_videos():
     for name in all_names:
         clip_dir = os.path.join(CLIPS_DIR, name)
         approved_dir = os.path.join(APPROVED_DIR, name)
+        cleaned_dir = os.path.join(CLEANED_DIR, name)
         total_clips = len([f for f in os.listdir(clip_dir) if f.endswith(".mp4")]) if os.path.isdir(clip_dir) else 0
         approved = len([f for f in os.listdir(approved_dir) if f.endswith(".mp4")]) if os.path.isdir(approved_dir) else 0
+        cleaned = len([f for f in os.listdir(cleaned_dir) if _is_denoised_wav(f)]) if os.path.isdir(cleaned_dir) else 0
+        denoised_all = cleaned > 0 and cleaned >= approved
         videos.append({
             "name": name,
             "total_clips": total_clips,
             "approved": approved,
+            "cleaned": cleaned,
+            "denoised_all": denoised_all,
         })
     return {"videos": videos}
 
@@ -1009,6 +1175,7 @@ def clear_short_clips(
             step="clear_short",
             status=StepStatus.COMPLETED,
             message=f"删除了 {len(deleted)} 个时长<={min_duration}s 的片段",
+            data={"deleted": deleted},
         )]
         pipeline._save_jobs()
 
@@ -1184,6 +1351,95 @@ def detect_male_voices(
     return {"status": "started", "job_id": job_id}
 
 
+@app.post("/api/review/detect-multi-voice")
+def detect_multi_voice_clips(
+    clip_dir: str = Query(..., description="Path to clip directory"),
+):
+    """Analyze all clips for multiple human voices. Runs in background.
+
+    Uses pitch segmentation analysis to detect clips where different
+    speech segments have distinctly different voice ranges.
+    """
+    if not os.path.exists(clip_dir):
+        raise HTTPException(status_code=404, detail="Clip directory not found")
+
+    job_id = uuid.uuid4().hex[:12]
+
+    def _run():
+        import numpy as np
+        from audio_pipeline import analyze_clip_multi_voice
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def _extract_audio_pipe(video_path: str):
+            proc = subprocess.Popen(
+                [FFMPEG, "-y", "-i", video_path, "-vn", "-acodec", "pcm_s16le",
+                 "-ar", "16000", "-ac", "1", "-t", "60", "-f", "wav", "pipe:1"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            )
+            raw = proc.stdout.read()
+            proc.wait(timeout=10)
+            if len(raw) < 44:
+                return None
+            audio = np.frombuffer(raw[44:], dtype=np.int16).astype(np.float32) / 32768.0
+            return audio
+
+        mp4_files = sorted([f for f in os.listdir(clip_dir) if f.endswith(".mp4")])
+        total = len(mp4_files)
+        multi_voice_results = []
+
+        job = pipeline.create_job(job_id, title="多人声检测: " + os.path.basename(clip_dir))
+        job.status = "running"
+        job.current_step = "analyzing"
+        job.progress = 0
+
+        work = [(i, f, os.path.join(clip_dir, f)) for i, f in enumerate(mp4_files)]
+        completed = 0
+
+        def _process_one(item):
+            idx, name, path = item
+            try:
+                audio = _extract_audio_pipe(path)
+                if audio is not None and len(audio) > 0:
+                    analysis = analyze_clip_multi_voice(audio_array=audio)
+                    if analysis["has_multi_voice"]:
+                        return {
+                            "name": name,
+                            "path": path,
+                            "size_mb": round(os.path.getsize(path) / 1024 / 1024, 1),
+                            **analysis,
+                        }
+            except Exception as e:
+                print(f"[detect-multi-voice] Error on {name}: {e}")
+            return None
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {executor.submit(_process_one, w): w for w in work}
+            for future in as_completed(futures):
+                completed += 1
+                job.progress = (completed / total) * 100
+                r = future.result()
+                if r is not None:
+                    multi_voice_results.append(r)
+
+        multi_voice_results.sort(key=lambda x: x["name"])
+
+        job.status = "completed"
+        job.progress = 100
+        job.current_step = "done"
+        from pipeline import StepResult, StepStatus
+        job.steps = [StepResult(
+            step="detect_multi_voice",
+            status=StepStatus.COMPLETED,
+            message=f"检测完成: {total} 个片段中 {len(multi_voice_results)} 个含多人声",
+            data={"results": multi_voice_results},
+        )]
+        pipeline._save_jobs()
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    return {"status": "started", "job_id": job_id}
+
+
 @app.get("/api/review/stream")
 def stream_clip(path: str = Query(..., description="Full path to clip file")):
     """Stream a clip file for playback in the browser."""
@@ -1205,6 +1461,42 @@ def list_review_dirs():
 # ============================================================
 # Denoise endpoints
 # ============================================================
+
+# Temp upload directory for manually selected files
+DENOISE_UPLOAD_DIR = os.path.join(DATA_DIR, "temp_uploads")
+os.makedirs(DENOISE_UPLOAD_DIR, exist_ok=True)
+
+
+@app.post("/api/denoise/upload")
+async def denoise_upload_files(files: list[UploadFile] = File(...)):
+    """Upload WAV files manually selected by the user. Returns server-side paths."""
+    saved = []
+    for f in files:
+        if not f.filename or not f.filename.lower().endswith(".wav"):
+            continue
+        # Sanitize filename
+        safe_name = f.filename.replace("\\", "/").rsplit("/", 1)[-1]
+        if not safe_name:
+            safe_name = f.filename
+        # Avoid overwrites
+        dest = os.path.join(DENOISE_UPLOAD_DIR, safe_name)
+        base, ext = os.path.splitext(safe_name)
+        counter = 1
+        while os.path.exists(dest):
+            dest = os.path.join(DENOISE_UPLOAD_DIR, f"{base}_{counter}{ext}")
+            counter += 1
+        content = await f.read()
+        with open(dest, "wb") as out:
+            out.write(content)
+        info = _get_audio_info(dest)
+        saved.append({
+            "name": os.path.basename(dest),
+            "path": dest.replace("\\", "/"),
+            "size_mb": round(os.path.getsize(dest) / 1024 / 1024, 1),
+            "duration_s": info["duration_s"],
+        })
+    return {"status": "ok", "files": saved, "count": len(saved)}
+
 
 @app.post("/api/denoise/batch")
 def denoise_batch(payload: dict = Body(...)):
@@ -1323,6 +1615,13 @@ def list_denoise_sources():
 # Denoise — Unreviewed clips
 # ============================================================
 
+def _is_denoised_wav(filename: str) -> bool:
+    """Check if a file is a denoised WAV output (contains _enhanced or _norm, ends with .wav)."""
+    if not filename.endswith(".wav"):
+        return False
+    return "_enhanced" in filename or "_norm" in filename
+
+
 @app.get("/api/denoise/unreviewed-dirs")
 def list_unreviewed_denoise_dirs():
     """List clip directories with unreviewed (pending) clips."""
@@ -1337,12 +1636,19 @@ def list_unreviewed_denoise_dirs():
         skipped = set(state.get("skipped", []))
         mp4_files = [f for f in os.listdir(full) if f.endswith(".mp4")]
         pending = [f for f in mp4_files if f not in approved and f not in skipped]
+        # Check how many have been denoised already
+        cleaned_dir = os.path.join(CLEANED_UNREVIEWED_DIR, entry)
+        denoised = 0
+        if os.path.isdir(cleaned_dir):
+            denoised = len([f for f in os.listdir(cleaned_dir) if _is_denoised_wav(f)])
         if pending:
             dirs.append({
                 "name": entry,
                 "path": full,
                 "total": len(mp4_files),
                 "pending": len(pending),
+                "denoised": denoised,
+                "denoised_all": denoised > 0 and denoised >= len(pending),
             })
     return {"dirs": dirs}
 
@@ -1474,24 +1780,455 @@ def list_unreviewed_denoise_results(
     if os.path.exists(CLEANED_UNREVIEWED_DIR):
         for root, dirs, files in os.walk(CLEANED_UNREVIEWED_DIR):
             for f in sorted(files):
-                if not f.endswith("_norm.wav"):
+                if not _is_denoised_wav(f):
                     continue
                 full = os.path.join(root, f)
-                info = _get_audio_info(full)
                 vname = os.path.basename(os.path.dirname(full))
                 if video_name and vname != video_name:
                     continue
                 items.append({
                     "name": f,
-                    "path": full,
+                    "path": full.replace("\\", "/"),
                     "video": vname,
                     "size_mb": round(os.path.getsize(full) / 1024 / 1024, 1),
-                    "duration_s": info["duration_s"],
-                    "codec": info["codec"],
-                    "bitrate": info["bitrate"],
-                    "sample_rate": info["sample_rate"],
+                    "duration_s": 0,
+                    "codec": "",
+                    "bitrate": "",
+                    "sample_rate": "",
                 })
     return {"results": items, "count": len(items)}
+
+
+# ============================================================
+# Denoise Review endpoints
+# ============================================================
+
+def _find_denoised_dirs() -> list[str]:
+    """Find all directories with denoised WAV files (from cleaned/ and cleaned_unreviewed/)."""
+    dirs = []
+    seen = set()
+    for base in [CLEANED_DIR, CLEANED_UNREVIEWED_DIR]:
+        if not os.path.exists(base):
+            continue
+        for root, subdirs, files in os.walk(base):
+            if any(_is_denoised_wav(f) for f in files):
+                if root not in seen:
+                    dirs.append(root)
+                    seen.add(root)
+    return dirs
+
+
+def _get_denoise_review_state(clip_dir: str) -> dict:
+    """Load denoise review state from a JSON file in the directory."""
+    state_path = os.path.join(clip_dir, ".denoise_review_state.json")
+    if os.path.exists(state_path):
+        import json
+        with open(state_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def _save_denoise_review_state(clip_dir: str, state: dict):
+    """Save denoise review state to a JSON file in the directory."""
+    state_path = os.path.join(clip_dir, ".denoise_review_state.json")
+    import json
+    with open(state_path, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False)
+
+
+@app.get("/api/denoise-review/dirs")
+def list_denoise_review_dirs():
+    """List all directories with denoised audio available for review."""
+    dirs = _find_denoised_dirs()
+    # Determine source type and display name
+    result = []
+    for d in dirs:
+        if d.startswith(CLEANED_UNREVIEWED_DIR):
+            source = "未审核降噪"
+            rel = os.path.relpath(d, CLEANED_UNREVIEWED_DIR)
+        elif d.startswith(CLEANED_DIR):
+            source = "已审核降噪"
+            rel = os.path.relpath(d, CLEANED_DIR)
+        else:
+            source = "未知"
+            rel = os.path.basename(d)
+        result.append({"name": rel.replace("\\", "/"), "path": d.replace("\\", "/"), "source": source})
+    return {"dirs": result}
+
+
+@app.get("/api/denoise-review/clips")
+def list_denoise_review_clips(
+    clip_dir: str = Query(..., description="Path to denoised audio directory"),
+):
+    """List denoised WAV files available for review, with review status."""
+    if not os.path.exists(clip_dir):
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    state = _get_denoise_review_state(clip_dir)
+    approved = state.get("approved", [])
+    skipped = state.get("skipped", [])
+
+    clips = []
+    for f in sorted(os.listdir(clip_dir)):
+        if not _is_denoised_wav(f):
+            continue
+        if f.startswith("."):
+            continue
+        full = os.path.join(clip_dir, f)
+        if not os.path.isfile(full) or os.path.getsize(full) == 0:
+            continue
+        status = "approved" if f in approved else ("skipped" if f in skipped else "pending")
+        clips.append({
+            "name": f,
+            "path": full.replace("\\", "/"),
+            "size_mb": round(os.path.getsize(full) / 1024 / 1024, 1),
+            "duration_s": 0,
+            "status": status,
+        })
+
+    pending_idx = next((i for i, c in enumerate(clips) if c["status"] == "pending"), -1)
+
+    return {
+        "clip_dir": clip_dir.replace("\\", "/"),
+        "clips": clips,
+        "pending_index": pending_idx,
+        "stats": {
+            "total": len(clips),
+            "approved": len(approved),
+            "skipped": len(skipped),
+            "pending": len(clips) - len(approved) - len(skipped),
+        },
+    }
+
+
+@app.post("/api/denoise-review/approve")
+def denoise_review_approve(
+    clip_dir: str = Query(..., description="Path to denoised audio directory"),
+    clip_name: str = Query(..., description="Audio filename to approve"),
+):
+    """Approve a denoised audio file: copy to DENOISED_APPROVED_DIR."""
+    src = os.path.join(clip_dir, clip_name)
+    if not os.path.exists(src):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # Create approved subfolder mirroring the source relative path
+    if clip_dir.startswith(CLEANED_UNREVIEWED_DIR):
+        dir_name = os.path.relpath(clip_dir, CLEANED_UNREVIEWED_DIR).replace("\\", "/")
+    elif clip_dir.startswith(CLEANED_DIR):
+        dir_name = os.path.relpath(clip_dir, CLEANED_DIR).replace("\\", "/")
+    else:
+        dir_name = os.path.basename(clip_dir)
+    dst_dir = os.path.join(DENOISED_APPROVED_DIR, dir_name)
+    os.makedirs(dst_dir, exist_ok=True)
+
+    dst = os.path.join(dst_dir, clip_name)
+    if not os.path.exists(dst):
+        import shutil
+        shutil.copy2(src, dst)
+
+    state = _get_denoise_review_state(clip_dir)
+    state.setdefault("approved", []).append(clip_name)
+    if clip_name in state.get("skipped", []):
+        state["skipped"].remove(clip_name)
+    _save_denoise_review_state(clip_dir, state)
+
+    return {"status": "ok", "action": "approved", "saved_to": dst}
+
+
+@app.post("/api/denoise-review/skip")
+def denoise_review_skip(
+    clip_dir: str = Query(..., description="Path to denoised audio directory"),
+    clip_name: str = Query(..., description="Audio filename to skip"),
+):
+    """Skip a denoised audio file."""
+    src = os.path.join(clip_dir, clip_name)
+    if not os.path.exists(src):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    state = _get_denoise_review_state(clip_dir)
+    state.setdefault("skipped", []).append(clip_name)
+    if clip_name in state.get("approved", []):
+        state["approved"].remove(clip_name)
+    _save_denoise_review_state(clip_dir, state)
+
+    return {"status": "ok", "action": "skipped"}
+
+
+@app.post("/api/denoise-review/remove-short")
+def denoise_review_remove_short(
+    clip_dir: str = Query(..., description="Path to denoised audio directory"),
+    min_duration: float = Query(2.0, description="Remove audio with duration <= this value (seconds)"),
+):
+    """Remove all denoised WAV files with duration <= min_duration seconds. Runs in background."""
+    if not os.path.exists(clip_dir):
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    job_id = uuid.uuid4().hex[:12]
+
+    def _run():
+        from split_video import get_video_duration
+
+        deleted = []
+        wav_files = [f for f in sorted(os.listdir(clip_dir)) if _is_denoised_wav(f)]
+        total = len(wav_files)
+
+        job = pipeline.create_job(job_id, title="降噪审核-清除短音频: " + os.path.basename(clip_dir))
+        job.status = "running"
+        job.current_step = "scanning"
+        job.progress = 0
+
+        for i, f in enumerate(wav_files):
+            full = os.path.join(clip_dir, f)
+            try:
+                dur = _get_audio_info(full)["duration_s"]
+                if dur > 0 and dur <= min_duration:
+                    os.remove(full)
+                    deleted.append(f)
+            except OSError:
+                pass
+            job.progress = ((i + 1) / total) * 100
+
+        state = _get_denoise_review_state(clip_dir)
+        for name in deleted:
+            if name in state.get("approved", []):
+                state["approved"].remove(name)
+            if name in state.get("skipped", []):
+                state["skipped"].remove(name)
+        _save_denoise_review_state(clip_dir, state)
+
+        job.status = "completed"
+        job.progress = 100
+        job.current_step = "done"
+        from pipeline import StepResult, StepStatus
+        job.steps = [StepResult(
+            step="remove_short",
+            status=StepStatus.COMPLETED,
+            message=f"删除了 {len(deleted)} 个时长<={min_duration}s 的降噪音频",
+            data={"deleted": deleted},
+        )]
+        pipeline._save_jobs()
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    return {"status": "started", "job_id": job_id}
+
+
+@app.post("/api/denoise-review/remove-reverb")
+def denoise_review_remove_reverb(
+    clip_dir: str = Query(..., description="Path to denoised audio directory"),
+):
+    """Detect and remove denoised audio files with reverb. Runs in background."""
+    if not os.path.exists(clip_dir):
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    job_id = uuid.uuid4().hex[:12]
+
+    def _run():
+        from audio_pipeline import analyze_clip_bgm
+
+        wav_files = sorted([f for f in os.listdir(clip_dir) if f.endswith("_norm.wav")])
+        total = len(wav_files)
+        removed = []
+
+        job = pipeline.create_job(job_id, title="降噪审核-去除混响: " + os.path.basename(clip_dir))
+        job.status = "running"
+        job.current_step = "analyzing"
+        job.progress = 0
+
+        for i, f in enumerate(wav_files):
+            full = os.path.join(clip_dir, f)
+            try:
+                analysis = analyze_clip_bgm(full)
+                if analysis["has_reverb"]:
+                    os.remove(full)
+                    removed.append(f)
+            except Exception as e:
+                print(f"[denoise-review-remove-reverb] Error on {f}: {e}")
+
+            job.progress = ((i + 1) / total) * 100
+
+        state = _get_denoise_review_state(clip_dir)
+        for name in removed:
+            if name in state.get("approved", []):
+                state["approved"].remove(name)
+            if name in state.get("skipped", []):
+                state["skipped"].remove(name)
+        _save_denoise_review_state(clip_dir, state)
+
+        job.status = "completed"
+        job.progress = 100
+        job.current_step = "done"
+        from pipeline import StepResult, StepStatus
+        job.steps = [StepResult(
+            step="remove_reverb",
+            status=StepStatus.COMPLETED,
+            message=f"检测完成: {total} 个降噪音频中删除了 {len(removed)} 个含混响的片段",
+            data={"deleted": removed},
+        )]
+        pipeline._save_jobs()
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    return {"status": "started", "job_id": job_id}
+
+
+@app.post("/api/denoise-review/remove-male")
+def denoise_review_remove_male(
+    clip_dir: str = Query(..., description="Path to denoised audio directory"),
+):
+    """Detect and remove denoised audio files with male voices. Runs in background."""
+    if not os.path.exists(clip_dir):
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    job_id = uuid.uuid4().hex[:12]
+
+    def _run():
+        from audio_pipeline import analyze_clip_gender
+
+        wav_files = sorted([f for f in os.listdir(clip_dir) if f.endswith("_norm.wav")])
+        total = len(wav_files)
+        removed = []
+
+        job = pipeline.create_job(job_id, title="降噪审核-去除男声: " + os.path.basename(clip_dir))
+        job.status = "running"
+        job.current_step = "analyzing"
+        job.progress = 0
+
+        for i, f in enumerate(wav_files):
+            full = os.path.join(clip_dir, f)
+            try:
+                analysis = analyze_clip_gender(audio_path=full)
+                if analysis.get("is_male"):
+                    os.remove(full)
+                    removed.append(f)
+            except Exception as e:
+                print(f"[denoise-review-remove-male] Error on {f}: {e}")
+
+            job.progress = ((i + 1) / total) * 100
+
+        state = _get_denoise_review_state(clip_dir)
+        for name in removed:
+            if name in state.get("approved", []):
+                state["approved"].remove(name)
+            if name in state.get("skipped", []):
+                state["skipped"].remove(name)
+        _save_denoise_review_state(clip_dir, state)
+
+        job.status = "completed"
+        job.progress = 100
+        job.current_step = "done"
+        from pipeline import StepResult, StepStatus
+        job.steps = [StepResult(
+            step="remove_male",
+            status=StepStatus.COMPLETED,
+            message=f"检测完成: {total} 个降噪音频中删除了 {len(removed)} 个男声片段",
+            data={"deleted": removed},
+        )]
+        pipeline._save_jobs()
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    return {"status": "started", "job_id": job_id}
+
+
+@app.post("/api/denoise-review/remove-multi-voice")
+def denoise_review_remove_multi_voice(
+    clip_dir: str = Query(..., description="Path to denoised audio directory"),
+):
+    """Detect and remove denoised audio files with multiple human voices. Runs in background."""
+    if not os.path.exists(clip_dir):
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    job_id = uuid.uuid4().hex[:12]
+
+    def _run():
+        from audio_pipeline import analyze_clip_multi_voice
+
+        wav_files = sorted([f for f in os.listdir(clip_dir) if f.endswith("_norm.wav")])
+        total = len(wav_files)
+        removed = []
+
+        job = pipeline.create_job(job_id, title="降噪审核-去除多人声: " + os.path.basename(clip_dir))
+        job.status = "running"
+        job.current_step = "analyzing"
+        job.progress = 0
+
+        for i, f in enumerate(wav_files):
+            full = os.path.join(clip_dir, f)
+            try:
+                analysis = analyze_clip_multi_voice(audio_path=full)
+                if analysis["has_multi_voice"]:
+                    os.remove(full)
+                    removed.append(f)
+            except Exception as e:
+                print(f"[denoise-review-remove-multi-voice] Error on {f}: {e}")
+
+            job.progress = ((i + 1) / total) * 100
+
+        state = _get_denoise_review_state(clip_dir)
+        for name in removed:
+            if name in state.get("approved", []):
+                state["approved"].remove(name)
+            if name in state.get("skipped", []):
+                state["skipped"].remove(name)
+        _save_denoise_review_state(clip_dir, state)
+
+        job.status = "completed"
+        job.progress = 100
+        job.current_step = "done"
+        from pipeline import StepResult, StepStatus
+        job.steps = [StepResult(
+            step="remove_multi_voice",
+            status=StepStatus.COMPLETED,
+            message=f"检测完成: {total} 个降噪音频中删除了 {len(removed)} 个多人声片段",
+            data={"deleted": removed},
+        )]
+        pipeline._save_jobs()
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    return {"status": "started", "job_id": job_id}
+
+
+@app.get("/api/denoise-review/stream")
+def denoise_review_stream(path: str = Query(..., description="Full path to audio file")):
+    """Stream a denoised audio file for playback in the browser."""
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(path, media_type="audio/wav")
+
+
+@app.post("/api/open-folder")
+def open_folder_in_explorer(payload: dict = Body(...)):
+    """Open a folder in the system file explorer.
+
+    Accepts either a direct path, or a clip_dir + type to deduce the folder.
+    Types: "approved" (review tab), "denoised-approved" (denoise review tab).
+    """
+    path = payload.get("path", "")
+    if not path:
+        clip_dir = payload.get("clip_dir", "")
+        folder_type = payload.get("type", "approved")
+        if clip_dir and os.path.isdir(clip_dir):
+            dir_name = os.path.basename(clip_dir)
+            if folder_type == "denoised-approved":
+                if clip_dir.startswith(CLEANED_UNREVIEWED_DIR):
+                    rel = os.path.relpath(clip_dir, CLEANED_UNREVIEWED_DIR)
+                elif clip_dir.startswith(CLEANED_DIR):
+                    rel = os.path.relpath(clip_dir, CLEANED_DIR)
+                else:
+                    rel = dir_name
+                path = os.path.join(DENOISED_APPROVED_DIR, rel.replace("\\", "/"))
+            else:
+                path = os.path.join(APPROVED_DIR, dir_name)
+            os.makedirs(path, exist_ok=True)
+    if not path or not os.path.isdir(path):
+        raise HTTPException(status_code=404, detail="文件夹不存在")
+    try:
+        os.startfile(path)
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/results/video/{video_name}/cleaned")
@@ -1988,7 +2725,7 @@ def run_split(payload: dict = Body(...)):
 
                 padding = float(payload.get("padding", 0.1))
                 group_count = int(payload.get("group_count", 1))
-                deduplicate = bool(payload.get("deduplicate", False))
+                deduplicate = bool(payload.get("deduplicate", True))
 
                 from split_video import split_video_by_subtitle
                 job.current_step = "subtitle_split"
@@ -2088,6 +2825,293 @@ def run_split(payload: dict = Body(...)):
         "status": "started",
         "mode": mode,
     }
+
+
+# ============================================================
+# ASR (Speech Recognition) endpoints
+# ============================================================
+
+# ASR job tracking
+_asr_jobs: dict[str, dict] = {}
+_asr_lock = threading.Lock()
+
+
+def _find_videos_for_asr() -> list:
+    """Find all video files (MKV, MP4) in downloads and video directories."""
+    videos = []
+    search_dirs = [DOWNLOAD_DIR]
+
+    # Also check a video/ directory at repo root level
+    video_dir = os.path.join(os.path.dirname(PROJECT_ROOT), "video")
+    if os.path.isdir(video_dir):
+        search_dirs.append(video_dir)
+
+    for search_dir in search_dirs:
+        if not os.path.isdir(search_dir):
+            continue
+        for root, _dirs, filenames in os.walk(search_dir):
+            for f in filenames:
+                ext = f.lower()
+                if ext.endswith(".mp4"):
+                    full = os.path.join(root, f)
+                    size_mb = os.path.getsize(full) / 1024 / 1024
+                    mtime = os.path.getmtime(full)
+                    from datetime import datetime
+                    videos.append({
+                        "name": f,
+                        "path": full,
+                        "size_mb": round(size_mb, 1),
+                        "mtime": mtime,
+                        "time_str": datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M"),
+                    })
+
+    videos.sort(key=lambda x: x["mtime"], reverse=True)
+    return videos
+
+
+@app.get("/api/asr/videos")
+def list_asr_videos():
+    """List video files available for ASR extraction."""
+    return {"videos": _find_videos_for_asr()}
+
+
+@app.get("/api/asr/models")
+def list_asr_models():
+    """List available ASR models and their configurations."""
+    from asr_pipeline import ASR_MODELS
+    models = []
+    for key, info in ASR_MODELS.items():
+        models.append({
+            "key": key,
+            "name": info["name"],
+            "description": info["description"],
+            "languages": info["languages"],
+        })
+    return {"models": models}
+
+
+@app.post("/api/asr/run")
+def run_asr_extraction(
+    path: str = Query(..., description="Full path to video file"),
+    model: str = Query("sensevoice", description="ASR model key"),
+    language: str = Query("ja", description="Language code or 'auto'"),
+    device: str = Query("cuda", description="Device: cuda or cpu"),
+):
+    """Start an ASR extraction job on a video file.
+
+    Returns a job_id for polling via GET /api/asr/job/{job_id}.
+    """
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Video file not found")
+
+    job_id = uuid.uuid4().hex[:12]
+    video_name = os.path.basename(path)
+
+    with _asr_lock:
+        _asr_jobs[job_id] = {
+            "job_id": job_id,
+            "video_name": video_name,
+            "video_path": path,
+            "model": model,
+            "language": language,
+            "status": "pending",
+            "progress": 0,
+            "current_step": "",
+            "result": None,
+            "error": None,
+            "created_at": time.time(),
+        }
+
+    def _run():
+        from asr_pipeline import run_asr_pipeline, ASR_MODELS
+
+        with _asr_lock:
+            job = _asr_jobs.get(job_id)
+            if not job:
+                return
+            job["status"] = "running"
+
+        try:
+            model_info = ASR_MODELS.get(model, ASR_MODELS.get("qwen3-asr", {}))
+
+            def on_progress(step, pct):
+                with _asr_lock:
+                    j = _asr_jobs.get(job_id)
+                    if j:
+                        j["progress"] = pct
+                        step_labels = {
+                            "extracting_audio": "正在从视频提取音频...",
+                            "running_asr": f"正在使用 {model_info.get('name', model)} 进行语音识别...",
+                            "generating_srt": "正在生成字幕文件...",
+                            "completed": "处理完成",
+                        }
+                        j["current_step"] = step_labels.get(step, step)
+
+            result = run_asr_pipeline(
+                path, model_key=model, language=language, device=device,
+                progress_callback=on_progress,
+            )
+
+            with _asr_lock:
+                j = _asr_jobs.get(job_id)
+                if j:
+                    j["status"] = "completed"
+                    j["progress"] = 100
+                    j["current_step"] = "处理完成"
+                    j["result"] = result
+
+        except Exception as e:
+            with _asr_lock:
+                j = _asr_jobs.get(job_id)
+                if j:
+                    j["status"] = "failed"
+                    j["error"] = str(e)
+                    j["current_step"] = f"错误: {e}"
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    return {"job_id": job_id, "status": "started"}
+
+
+@app.get("/api/asr/job/{job_id}")
+def get_asr_job(job_id: str):
+    """Get the status and result of an ASR job."""
+    with _asr_lock:
+        job = _asr_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@app.get("/api/asr/jobs")
+def list_asr_jobs():
+    """List all ASR jobs (most recent first)."""
+    with _asr_lock:
+        jobs = list(_asr_jobs.values())
+    jobs.sort(key=lambda j: j.get("created_at", 0), reverse=True)
+    return {"jobs": jobs}
+
+
+@app.delete("/api/asr/jobs")
+def clear_asr_jobs():
+    """Clear completed and failed ASR jobs."""
+    with _asr_lock:
+        to_remove = [
+            jid for jid, j in _asr_jobs.items()
+            if j.get("status") in ("completed", "failed")
+        ]
+        for jid in to_remove:
+            del _asr_jobs[jid]
+    return {"cleared": len(to_remove)}
+
+
+@app.get("/api/asr/preview-audio")
+def preview_asr_audio(path: str = Query(..., description="Path to video file")):
+    """Stream audio from a video file (or cached WAV) for preview."""
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    base = os.path.splitext(os.path.basename(path))[0]
+    wav_path = os.path.join(ASR_AUDIO_DIR, f"{base}.wav")
+
+    if os.path.exists(wav_path) and os.path.getsize(wav_path) > 0:
+        return FileResponse(wav_path, media_type="audio/wav")
+
+    # Pipe audio directly from video via ffmpeg
+    def _generate():
+        proc = subprocess.Popen(
+            [FFMPEG, "-y", "-i", path, "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", "-f", "wav", "pipe:1"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        )
+        try:
+            while True:
+                chunk = proc.stdout.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            proc.stdout.close()
+            proc.wait()
+
+    return StreamingResponse(_generate(), media_type="audio/wav")
+
+
+@app.get("/api/asr/results")
+def list_asr_results(video_name: str = Query("", description="Optional filter by video name")):
+    """List ASR-generated subtitles and audio files."""
+    results = []
+    if os.path.isdir(ASR_SUBTITLE_DIR):
+        for f in sorted(os.listdir(ASR_SUBTITLE_DIR), reverse=True):
+            if not f.endswith(".srt"):
+                continue
+            full = os.path.join(ASR_SUBTITLE_DIR, f)
+            if video_name and video_name not in f:
+                continue
+            base = os.path.splitext(f)[0]
+            # Find matching audio file
+            audio_path = os.path.join(ASR_AUDIO_DIR, f"{base}.wav")
+            if not os.path.exists(audio_path):
+                # Try without model suffix
+                for candidate in sorted(os.listdir(ASR_AUDIO_DIR)):
+                    if candidate.startswith(base.split("_")[0]) and candidate.endswith(".wav"):
+                        audio_path = os.path.join(ASR_AUDIO_DIR, candidate)
+                        break
+
+            # Try to find the source video path from completed jobs
+            video_path = ""
+            with _asr_lock:
+                for job in _asr_jobs.values():
+                    if job.get("result", {}).get("srt_path") == full:
+                        video_path = job.get("video_path", "")
+                        break
+
+            results.append({
+                "name": f,
+                "path": full,
+                "size_kb": round(os.path.getsize(full) / 1024, 1),
+                "audio_path": audio_path if os.path.exists(audio_path) else "",
+                "audio_name": os.path.basename(audio_path) if os.path.exists(audio_path) else "",
+                "video_path": video_path,
+                "mtime": os.path.getmtime(full),
+            })
+
+    return {"results": results}
+
+
+@app.get("/api/asr/stream")
+def stream_asr_file(path: str = Query(..., description="Full path to SRT or audio file")):
+    """Stream an ASR result file (SRT subtitle or WAV audio)."""
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File not found")
+    media_type = "audio/wav" if path.lower().endswith(".wav") else "text/plain; charset=utf-8"
+    return FileResponse(path, media_type=media_type)
+
+
+@app.delete("/api/asr/delete")
+def delete_asr_result(path: str = Query(..., description="Path to SRT file to delete")):
+    """Delete an ASR result (SRT and optionally its audio)."""
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    deleted = []
+    try:
+        os.remove(path)
+        deleted.append(os.path.basename(path))
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    # Try to delete matching audio
+    base = os.path.splitext(path)[0]
+    for ext in (".wav",):
+        audio_path = base + ext
+        if os.path.exists(audio_path) and audio_path != path:
+            try:
+                os.remove(audio_path)
+                deleted.append(os.path.basename(audio_path))
+            except OSError:
+                pass
+
+    return {"deleted": deleted}
 
 
 # ============================================================

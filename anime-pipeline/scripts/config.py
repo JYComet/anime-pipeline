@@ -18,6 +18,7 @@ TEMP_DIR = os.path.join(DATA_DIR, "temp")
 APPROVED_DIR = os.path.join(DATA_DIR, "approved")  # clips that pass audio review
 CLEANED_DIR = os.path.join(DATA_DIR, "cleaned")    # denoised audio output (reviewed clips)
 CLEANED_UNREVIEWED_DIR = os.path.join(DATA_DIR, "cleaned_unreviewed")  # denoised from unreviewed
+DENOISED_APPROVED_DIR = os.path.join(DATA_DIR, "denoised_approved")    # final approved denoised audio
 
 # --- External tools ---
 MKVTOOLNIX_DIR = os.path.join(COMICUT_ROOT, "mkvtoolnix")
@@ -59,8 +60,13 @@ HEADERS = {
 
 STITCHED_DIR = os.path.join(DATA_DIR, "stitched")
 
+# ASR directories
+ASR_DIR = os.path.join(DATA_DIR, "asr")
+ASR_AUDIO_DIR = os.path.join(ASR_DIR, "audio")
+ASR_SUBTITLE_DIR = os.path.join(ASR_DIR, "subtitles")
+
 # Ensure all data directories exist
-for d in [DOWNLOAD_DIR, SUBTITLE_DIR, CLIPS_DIR, TEMP_DIR, APPROVED_DIR, CLEANED_DIR, CLEANED_UNREVIEWED_DIR, STITCHED_DIR]:
+for d in [DOWNLOAD_DIR, SUBTITLE_DIR, CLIPS_DIR, TEMP_DIR, APPROVED_DIR, CLEANED_DIR, CLEANED_UNREVIEWED_DIR, DENOISED_APPROVED_DIR, STITCHED_DIR, ASR_DIR, ASR_AUDIO_DIR, ASR_SUBTITLE_DIR]:
     os.makedirs(d, exist_ok=True)
 
 

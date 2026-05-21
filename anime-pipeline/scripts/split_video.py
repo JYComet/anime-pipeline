@@ -185,20 +185,32 @@ def _parse_srt(lines: list[str], path: str) -> SubtitleFile:
 
 
 def deduplicate_entries(entries: list[SubtitleEntry]) -> list[SubtitleEntry]:
-    """Remove or merge overlapping subtitle entries.
+    """Split overlapping subtitle entries into non-overlapping segments with unique text.
 
-    Handles three overlap patterns common in anime ASS subtitles:
-    1. Fully contained: entry B's time range is entirely within entry A's → skip B
-    2. Partial overlap: two entries overlap but neither fully contains the other → merge
-    3. Sequential with same text: entries share text and are adjacent → merge
+    Anime ASS subtitles often have accumulated on-screen text: each new
+    dialogue line repeats previous text plus new content, and their time
+    ranges overlap (e.g. entry A covers 0-2s with "A", entry B covers
+    0-4s with "A B"). Without dedup this produces overlapping clips
+    where clip 2's video includes clip 1's content.
+
+    This function splits them so each sentence appears in exactly one clip:
+
+    - Entries are sorted by start time, then by text length (shortest
+      first) so the "base" sentence precedes its accumulated extensions.
+    - When entry B's text starts with entry A's text, the shared prefix
+      is stripped from B and B's start time is moved to A's end.
+    - Fully contained entries (time and text both covered) are skipped.
+    - Unrelated overlapping entries get start-time adjustment to avoid
+      time overlap.
 
     The original entries are not modified — a new list is returned.
     """
     if not entries:
         return []
 
-    # Sort by start time; for same start, longer entry first (so contained check works)
-    sorted_entries = sorted(entries, key=lambda e: (e.start, -(e.end - e.start)))
+    # Sort by start time; for same start, shorter text first so that
+    # the base sentence (e.g. "A") comes before its extension ("A B").
+    sorted_entries = sorted(entries, key=lambda e: (e.start, len(e.text)))
 
     cleaned = []
     for entry in sorted_entries:
@@ -211,21 +223,35 @@ def deduplicate_entries(entries: list[SubtitleEntry]) -> list[SubtitleEntry]:
 
         prev = cleaned[-1]
 
-        # Case 1: This entry is fully contained within the previous one's time range
+        # No time overlap — add as independent entry
+        if entry.start >= prev.end:
+            cleaned.append(SubtitleEntry(
+                index=len(cleaned), start=entry.start, end=entry.end,
+                text=entry.text, style=entry.style,
+            ))
+            continue
+
+        # Fully contained within the previous entry's time range — skip
         if entry.start >= prev.start and entry.end <= prev.end:
             continue
 
-        # Case 2: Overlaps in time (strict <, not <= — adjacent entries are NOT merged)
-        if entry.start < prev.end:
-            prev.end = max(prev.end, entry.end)
-            if entry.text not in prev.text:
-                prev.text = prev.text + " | " + entry.text
+        # Overlap — entry extends beyond prev.end.
+        # Strip accumulated text prefix if present.
+        text = entry.text
+        if text.startswith(prev.text):
+            suffix = text[len(prev.text):].strip()
+            if not suffix:
+                continue  # identical text after stripping prefix
+            text = suffix
+
+        # Push start forward to avoid time overlap with previous entry
+        start = max(entry.start, prev.end)
+        if start >= entry.end:
             continue
 
-        # Case 3: No overlap — add as new entry
         cleaned.append(SubtitleEntry(
-            index=len(cleaned), start=entry.start, end=entry.end,
-            text=entry.text, style=entry.style,
+            index=len(cleaned), start=start, end=entry.end,
+            text=text, style=entry.style,
         ))
 
     return cleaned
@@ -289,7 +315,7 @@ def split_video_by_subtitle(
     padding: float = 0.1,  # seconds to pad before/after
     hw_accel: str = "auto",
     min_duration: float = 0.5,  # skip entries shorter than this
-    deduplicate: bool = False,  # merge/remove overlapping entries
+    deduplicate: bool = True,  # merge/remove overlapping entries
     on_progress=None,
     cancel_event=None,  # threading.Event to signal cancellation
 ) -> list[str]:
@@ -331,7 +357,7 @@ def _split_video_by_subtitle_impl(
     padding: float = 0.1,
     hw_accel: str = "auto",
     min_duration: float = 0.5,
-    deduplicate: bool = False,
+    deduplicate: bool = True,
     on_progress=None,
     cancel_event=None,
 ) -> list[str]:
