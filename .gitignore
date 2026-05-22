@@ -22,6 +22,10 @@ __pycache__/
 .vscode/
 .idea/
 
+# Media files
+*.wav
+*.mp4
+
 # OS
 .DS_Store
 Thumbs.db
