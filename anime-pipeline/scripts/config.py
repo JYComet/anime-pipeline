@@ -19,6 +19,8 @@ APPROVED_DIR = os.path.join(DATA_DIR, "approved")  # clips that pass audio revie
 CLEANED_DIR = os.path.join(DATA_DIR, "cleaned")    # denoised audio output (reviewed clips)
 CLEANED_UNREVIEWED_DIR = os.path.join(DATA_DIR, "cleaned_unreviewed")  # denoised from unreviewed
 DENOISED_APPROVED_DIR = os.path.join(DATA_DIR, "denoised_approved")    # final approved denoised audio
+EMOTION_DIR = os.path.join(COMICUT_ROOT, "data", "情绪")              # emotion classification output
+EMOTION_DENOISE_DIR = os.path.join(COMICUT_ROOT, "data", "情绪降噪")   # denoise emotion classification output
 
 # --- External tools ---
 MKVTOOLNIX_DIR = os.path.join(COMICUT_ROOT, "mkvtoolnix")
@@ -65,8 +67,15 @@ ASR_DIR = os.path.join(DATA_DIR, "asr")
 ASR_AUDIO_DIR = os.path.join(ASR_DIR, "audio")
 ASR_SUBTITLE_DIR = os.path.join(ASR_DIR, "subtitles")
 
+# ASR comparison directories
+ASR_COMPARE_DIR = os.path.join(DATA_DIR, "asr_compare")
+ASR_COMPARE_SUBTITLE_DIR = os.path.join(ASR_COMPARE_DIR, "subtitles")
+ASR_COMPARE_AUDIO_DIR = os.path.join(ASR_COMPARE_DIR, "audio")
+ASR_COMPARE_OUTPUT_DIR = os.path.join(DATA_DIR, "asr_compare_output")
+ASR_COMPARE_DISCARD_DIR = os.path.join(ASR_COMPARE_DIR, "discarded")
+
 # Ensure all data directories exist
-for d in [DOWNLOAD_DIR, SUBTITLE_DIR, CLIPS_DIR, TEMP_DIR, APPROVED_DIR, CLEANED_DIR, CLEANED_UNREVIEWED_DIR, DENOISED_APPROVED_DIR, STITCHED_DIR, ASR_DIR, ASR_AUDIO_DIR, ASR_SUBTITLE_DIR]:
+for d in [DOWNLOAD_DIR, SUBTITLE_DIR, CLIPS_DIR, TEMP_DIR, APPROVED_DIR, CLEANED_DIR, CLEANED_UNREVIEWED_DIR, DENOISED_APPROVED_DIR, STITCHED_DIR, ASR_DIR, ASR_AUDIO_DIR, ASR_SUBTITLE_DIR, ASR_COMPARE_DIR, ASR_COMPARE_SUBTITLE_DIR, ASR_COMPARE_AUDIO_DIR, ASR_COMPARE_OUTPUT_DIR, ASR_COMPARE_DISCARD_DIR, EMOTION_DIR, EMOTION_DENOISE_DIR]:
     os.makedirs(d, exist_ok=True)
 
 

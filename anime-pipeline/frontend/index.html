@@ -191,6 +191,34 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
   width: 1px; height: 20px; background: var(--border);
   margin: 0 4px;
 }
+.emotion-bar {
+  display: flex; gap: 6px; align-items: center; margin-top: 10px; flex-wrap: wrap;
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 14px;
+}
+.btn-emotion {
+  font-size: 12px; padding: 4px 10px; border-radius: 14px;
+  border: 1px solid var(--border); background: var(--bg3); color: var(--text);
+  cursor: pointer; transition: all 0.15s; white-space: nowrap;
+}
+.btn-emotion:hover {
+  background: #4a9eff; color: #fff; border-color: #4a9eff;
+}
+.btn-emotion.classified {
+  background: #2d5a3d; color: #4ecca3; border-color: #4ecca3;
+}
+.btn-emotion .emo-badge {
+  display: none; font-size: 10px; margin-left: 2px;
+}
+.btn-emotion.classified .emo-badge {
+  display: inline;
+}
+.emo-count {
+  font-size: 10px; color: var(--text2); margin-left: 1px;
+}
+.emo-count:empty {
+  display: none;
+}
 .review-stats { font-size: 13px; color: var(--text2); margin-bottom: 12px; }
 
 /* Extract tab */
@@ -218,6 +246,31 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
 }
 .mkv-file-item:hover { background: var(--bg2); }
 .mkv-file-item.active { background: var(--bg3); border-left: 3px solid var(--accent); }
+.mkv-file-item.checked { background: rgba(233, 69, 96, 0.08); }
+.mkv-file-item .item-check,
+.split-file-item .item-check {
+  flex-shrink: 0; width: 16px; height: 16px;
+  accent-color: var(--accent); cursor: pointer; margin: 0;
+}
+.split-file-item.checked { background: rgba(233, 69, 96, 0.08); }
+.mkv-file-item .queue-badge {
+  font-size: 10px; flex-shrink: 0; padding: 2px 6px; border-radius: 8px;
+}
+.queue-waiting { color: var(--text2); }
+.queue-processing { color: #4a9eff; background: #0f3460; }
+.queue-done { color: var(--success); }
+.queue-failed { color: var(--danger); }
+
+/* Batch toolbar */
+.batch-bar {
+  display: none; padding: 6px 10px; background: var(--bg2);
+  border-radius: 6px; margin-bottom: 8px; align-items: center; gap: 8px;
+  font-size: 12px; border: 1px solid var(--border);
+}
+.batch-bar.visible { display: flex; }
+.batch-bar input[type="checkbox"] {
+  width: auto; margin: 0; accent-color: var(--accent); cursor: pointer;
+}
 
 /* Split tab */
 .split-layout { display: flex; gap: 16px; flex-wrap: wrap; }
@@ -321,6 +374,33 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
 .lf-actions-cell { display: flex; gap: 4px; flex-shrink: 0; }
 .lf-empty { text-align: center; padding: 60px 20px; color: var(--text2); }
 .lf-empty-icon { font-size: 48px; margin-bottom: 12px; }
+/* ASR Compare */
+.cmp-dir-group { margin-bottom: 8px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.cmp-dir-header { padding: 8px 12px; background: var(--bg2); font-size: 13px; font-weight: 600; color: var(--accent); cursor: pointer; display: flex; align-items: center; gap: 8px; user-select: none; }
+.cmp-dir-header:hover { background: #1e2a3a; }
+.cmp-dir-header .dir-icon { transition: transform 0.2s; font-size: 10px; }
+.cmp-dir-header.collapsed .dir-icon { transform: rotate(-90deg); }
+.cmp-dir-files { padding: 4px 0; }
+.cmp-dir-files.collapsed { display: none; }
+.cmp-file-item { display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 28px; cursor: default; font-size: 12px; border-bottom: 1px solid rgba(255,255,255,0.03); }
+.cmp-file-item:hover { background: rgba(255,255,255,0.03); }
+.cmp-file-item .cmp-status { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.cmp-file-item .cmp-status.pending { background: var(--text2); }
+.cmp-file-item .cmp-status.processing { background: var(--warning); animation: pulse 0.8s infinite; }
+.cmp-file-item .cmp-status.done { background: var(--success); }
+.cmp-file-item .cmp-status.flagged { background: var(--danger); }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+.cmp-diff-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.cmp-diff-badge.normal { background: #1a3a2a; color: #4ecca3; }
+.cmp-diff-badge.flagged { background: #3a1a1a; color: #e94560; }
+.cmp-summary-bar { display: flex; gap: 16px; flex-wrap: wrap; padding: 12px 16px; border-radius: 8px; background: var(--bg2); border: 1px solid var(--border); margin-bottom: 12px; }
+.cmp-summary-item { text-align: center; }
+.cmp-summary-item .num { font-size: 24px; font-weight: 700; }
+.cmp-result-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.cmp-result-table th { text-align: left; padding: 8px 12px; background: var(--bg2); color: var(--text2); font-weight: 600; position: sticky; top: 0; z-index: 1; }
+.cmp-result-table td { padding: 6px 12px; border-bottom: 1px solid var(--border); }
+.cmp-result-table tr:hover td { background: rgba(255,255,255,0.02); }
+.cmp-result-table .actions-cell { display: flex; gap: 6px; }
 </style>
 </head>
 <body>
@@ -338,6 +418,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
     <button data-tab="denoise-review">降噪审核</button>
     <button data-tab="extract">字幕提取</button>
     <button data-tab="asr">ASR提取</button>
+    <button data-tab="asr-compare">ASR对比</button>
     <button data-tab="stitch">音频拼接</button>
     <button data-tab="split">视频切割</button>
   </nav>
@@ -475,6 +556,32 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
           <span class="function-bar-sep"></span>
           <button class="btn btn-secondary" id="btn-open-approved" style="font-size:11px;padding:4px 10px;" onclick="openApprovedFolder('approved')">📂 保留文件夹</button>
         </div>
+        <div class="emotion-bar" id="review-emotion-bar">
+          <span class="function-bar-label">情绪分类</span>
+          <button class="btn btn-emotion" data-emotion="中性" onclick="classifyEmotion('中性')">中性<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="激动" onclick="classifyEmotion('激动')">激动<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="自信" onclick="classifyEmotion('自信')">自信<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="好奇" onclick="classifyEmotion('好奇')">好奇<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="嫌弃" onclick="classifyEmotion('嫌弃')">嫌弃<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="生气" onclick="classifyEmotion('生气')">生气<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="温柔" onclick="classifyEmotion('温柔')">温柔<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="高兴" onclick="classifyEmotion('高兴')">高兴<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="傲娇" onclick="classifyEmotion('傲娇')">傲娇<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="无奈" onclick="classifyEmotion('无奈')">无奈<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="疲惫" onclick="classifyEmotion('疲惫')">疲惫<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="感动" onclick="classifyEmotion('感动')">感动<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="焦虑" onclick="classifyEmotion('焦虑')">焦虑<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="慌张" onclick="classifyEmotion('慌张')">慌张<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="俏皮" onclick="classifyEmotion('俏皮')">俏皮<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="委屈" onclick="classifyEmotion('委屈')">委屈<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="难过" onclick="classifyEmotion('难过')">难过<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="期待" onclick="classifyEmotion('期待')">期待<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="认真" onclick="classifyEmotion('认真')">认真<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="害羞" onclick="classifyEmotion('害羞')">害羞<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="严肃" onclick="classifyEmotion('严肃')">严肃<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="惊讶" onclick="classifyEmotion('惊讶')">惊讶<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="疑惑" onclick="classifyEmotion('疑惑')">疑惑<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+        </div>
       </div>
       <div style="flex:1;min-width:250px;max-height:400px;overflow-y:auto;" id="review-list"></div>
     </div>
@@ -611,7 +718,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
         <button id="btn-denoise-urev-select-all" class="btn btn-secondary" style="font-size:11px;padding:5px 10px;display:none;" onclick="selectAllUrevSources()">全选</button>
         <button id="btn-denoise-urev-all" class="btn btn-primary" style="font-size:12px;padding:5px 12px;display:none;" onclick="denoiseUrevAll()">全部降噪</button>
         <button id="btn-denoise-urev-select" class="btn btn-secondary" style="font-size:11px;padding:4px 10px;display:none;" onclick="toggleUrevSourceSelect()">选择</button>
-        <button id="btn-denoise-urev-refresh" class="btn btn-secondary" style="font-size:11px;padding:4px 10px;display:none;" onclick="loadUnreviewedClips()">刷新</button>
+        <button id="btn-denoise-urev-refresh" class="btn btn-secondary" style="font-size:11px;padding:4px 10px;display:none;" onclick="refreshUnreviewedDenoise()">刷新</button>
         <button id="btn-denoise-urev-open-file" class="btn btn-secondary" style="font-size:11px;padding:4px 10px;color:var(--success);" onclick="openDenoiseFileDialog()">打开文件</button>
       </div>
 
@@ -692,6 +799,32 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
           <button class="btn btn-secondary" id="btn-dreview-remove-multi-voice" style="font-size:11px;padding:4px 10px;background:#9b59b6;color:#fff;">去除多人声</button>
           <span class="function-bar-sep"></span>
           <button class="btn btn-secondary" id="btn-dreview-open-approved" style="font-size:11px;padding:4px 10px;" onclick="openApprovedFolder('denoised-approved')">📂 保留文件夹</button>
+        </div>
+        <div class="emotion-bar" id="dreview-emotion-bar">
+          <span class="function-bar-label">情绪分类</span>
+          <button class="btn btn-emotion" data-emotion="中性" onclick="classifyDreviewEmotion('中性')">中性<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="激动" onclick="classifyDreviewEmotion('激动')">激动<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="自信" onclick="classifyDreviewEmotion('自信')">自信<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="好奇" onclick="classifyDreviewEmotion('好奇')">好奇<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="嫌弃" onclick="classifyDreviewEmotion('嫌弃')">嫌弃<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="生气" onclick="classifyDreviewEmotion('生气')">生气<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="温柔" onclick="classifyDreviewEmotion('温柔')">温柔<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="高兴" onclick="classifyDreviewEmotion('高兴')">高兴<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="傲娇" onclick="classifyDreviewEmotion('傲娇')">傲娇<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="无奈" onclick="classifyDreviewEmotion('无奈')">无奈<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="疲惫" onclick="classifyDreviewEmotion('疲惫')">疲惫<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="感动" onclick="classifyDreviewEmotion('感动')">感动<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="焦虑" onclick="classifyDreviewEmotion('焦虑')">焦虑<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="慌张" onclick="classifyDreviewEmotion('慌张')">慌张<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="俏皮" onclick="classifyDreviewEmotion('俏皮')">俏皮<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="委屈" onclick="classifyDreviewEmotion('委屈')">委屈<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="难过" onclick="classifyDreviewEmotion('难过')">难过<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="期待" onclick="classifyDreviewEmotion('期待')">期待<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="认真" onclick="classifyDreviewEmotion('认真')">认真<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="害羞" onclick="classifyDreviewEmotion('害羞')">害羞<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="严肃" onclick="classifyDreviewEmotion('严肃')">严肃<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="惊讶" onclick="classifyDreviewEmotion('惊讶')">惊讶<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
+          <button class="btn btn-emotion" data-emotion="疑惑" onclick="classifyDreviewEmotion('疑惑')">疑惑<span class="emo-count"></span><span class="emo-badge"> ✓</span></button>
         </div>
       </div>
       <div style="flex:1;min-width:250px;max-height:400px;overflow-y:auto;" id="dreview-list"></div>
@@ -826,14 +959,78 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
   <!-- ASR 提取 -->
   <div id="tab-asr" class="tab">
     <div style="display:flex;gap:16px;flex-wrap:wrap;">
-      <!-- Left: Video list -->
+      <!-- Left: Video list + Folder mode -->
       <div style="flex:0 0 380px;min-width:300px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-          <h3 style="margin:0;">视频文件</h3>
-          <button class="btn btn-secondary" onclick="loadAsrVideos()" style="font-size:11px;padding:4px 10px;">刷新</button>
+        <!-- Mode toggle -->
+        <div style="display:flex;gap:6px;margin-bottom:10px;">
+          <button id="asr-mode-video-btn" class="btn btn-primary" onclick="switchAsrMode('video')" style="font-size:11px;padding:4px 12px;">视频模式</button>
+          <button id="asr-mode-folder-btn" class="btn btn-secondary" onclick="switchAsrMode('folder')" style="font-size:11px;padding:4px 12px;">📁 文件夹模式</button>
         </div>
-        <div id="asr-video-list" class="file-list" style="max-height:65vh;border:1px solid var(--border);border-radius:8px;">
-          <div class="empty-state"><p>加载中...</p></div>
+
+        <!-- Video mode panel -->
+        <div id="asr-video-panel">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+            <h3 style="margin:0;">视频文件</h3>
+            <button class="btn btn-secondary" onclick="loadAsrVideos()" style="font-size:11px;padding:4px 10px;">刷新</button>
+          </div>
+          <div id="asr-batch-bar" class="batch-bar">
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--text2);margin:0;">
+              <input type="checkbox" id="asr-select-all-cb" onchange="asrToggleSelectAll()">
+              全选
+            </label>
+            <span id="asr-selected-count" style="color:var(--accent);white-space:nowrap;">已选 0 个</span>
+            <button class="btn btn-primary" id="btn-asr-batch-run" onclick="runAsrBatch()" style="font-size:11px;padding:4px 12px;" disabled>批量执行</button>
+            <span id="asr-queue-status" style="display:none;color:var(--warning);font-weight:600;"></span>
+          </div>
+          <div id="asr-video-list" class="file-list" style="max-height:65vh;border:1px solid var(--border);border-radius:8px;">
+            <div class="empty-state"><p>加载中...</p></div>
+          </div>
+        </div>
+
+        <!-- Folder mode panel -->
+        <div id="asr-folder-panel" style="display:none;">
+          <div style="margin-bottom:12px;">
+            <label style="display:block;font-size:12px;color:var(--text2);margin-bottom:4px;">音频文件夹路径</label>
+            <div style="display:flex;gap:6px;">
+              <input id="asr-folder-path" type="text" placeholder="选择或输入文件夹路径..." style="flex:1;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:12px;">
+              <button class="btn btn-secondary" onclick="browseAsrFolder()" style="font-size:11px;padding:4px 10px;white-space:nowrap;">浏览...</button>
+            </div>
+            <div id="asr-folder-file-info" style="display:none;margin-top:6px;padding:6px 10px;border-radius:6px;background:var(--bg2);border:1px solid var(--border);font-size:12px;color:var(--text2);">
+            </div>
+            <div id="asr-folder-file-list" class="file-list" style="display:none;max-height:300px;overflow-y:auto;margin-top:4px;border:1px solid var(--border);border-radius:8px;"></div>
+          </div>
+
+          <div style="margin-bottom:12px;">
+            <label style="display:block;font-size:12px;color:var(--text2);margin-bottom:4px;">输出目录（字幕按文件夹名归类）</label>
+            <div style="display:flex;gap:6px;">
+              <input id="asr-folder-output" type="text" placeholder="默认: data/asr/folder_output/" style="flex:1;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:12px;">
+              <button class="btn btn-secondary" onclick="browseAsrOutputDir()" style="font-size:11px;padding:4px 10px;white-space:nowrap;">浏览...</button>
+            </div>
+          </div>
+
+          <button class="btn btn-primary" id="btn-asr-folder-run" onclick="runAsrFolder()" style="width:100%;padding:10px;font-size:14px;" disabled>
+            开始批量语音识别
+          </button>
+
+          <!-- Folder progress -->
+          <div id="asr-folder-progress" style="display:none;margin-top:10px;padding:10px 12px;border-radius:8px;background:var(--bg2);border:1px solid var(--border);">
+            <div class="progress-bar" style="margin-bottom:6px;">
+              <div id="asr-folder-progress-fill" class="progress-fill" style="width:0%;"></div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <div id="asr-folder-progress-text" style="font-size:11px;color:var(--text2);"></div>
+              <button id="btn-asr-folder-cancel" class="btn btn-secondary" onclick="cancelAsrFolder()" style="font-size:10px;padding:2px 10px;color:var(--danger);display:none;">中止</button>
+            </div>
+          </div>
+
+          <!-- Folder results -->
+          <div id="asr-folder-results" style="display:none;margin-top:8px;">
+            <div style="font-size:12px;color:var(--success);margin-bottom:6px;" id="asr-folder-result-summary"></div>
+            <div id="asr-folder-result-list" class="file-list" style="max-height:400px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;"></div>
+            <div id="asr-folder-error-list" style="font-size:11px;color:var(--danger);margin-top:4px;"></div>
+          </div>
+          <!-- Hidden audio element for folder ASR playback -->
+          <audio id="asr-folder-audio-player" style="display:none;" controls></audio>
         </div>
       </div>
 
@@ -926,6 +1123,134 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
     </div>
   </div>
 
+  <!-- ASR 对比 -->
+  <div id="tab-asr-compare" class="tab">
+    <div style="display:flex;gap:16px;flex-wrap:wrap;">
+      <!-- Left: Audio file list grouped by source dir -->
+      <div style="flex:0 0 380px;min-width:300px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <h3 style="margin:0;">未审核降噪音频</h3>
+          <button class="btn btn-secondary" onclick="loadAsrCompareFiles()" style="font-size:11px;padding:4px 10px;">刷新</button>
+        </div>
+        <div style="margin-bottom:8px;font-size:11px;color:var(--text2);">
+          来源: data/cleaned_unreviewed/
+        </div>
+        <div id="cmp-batch-bar" class="batch-bar">
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--text2);margin:0;">
+            <input type="checkbox" id="cmp-select-all-cb" onchange="cmpToggleSelectAll()">
+            全选文件夹
+          </label>
+          <span id="cmp-selected-count" style="color:var(--accent);white-space:nowrap;">已选 0 个</span>
+          <span id="cmp-selected-files" style="color:var(--text2);white-space:nowrap;font-size:11px;"></span>
+        </div>
+        <div id="cmp-file-list" class="file-list" style="max-height:55vh;border:1px solid var(--border);border-radius:8px;">
+          <div class="empty-state"><p>加载中...</p></div>
+        </div>
+      </div>
+
+      <!-- Right: Controls + Progress + Results -->
+      <div style="flex:1;min-width:400px;">
+        <!-- Settings -->
+        <div style="margin-bottom:16px;padding:12px 16px;border-radius:8px;background:var(--bg2);border:1px solid var(--border);">
+          <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;">
+            <div style="flex:1;min-width:160px;">
+              <label style="display:block;font-size:13px;color:var(--text2);margin-bottom:4px;">模型 A</label>
+              <select id="cmp-model-a-select" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;" onchange="onCmpModelChange()">
+              </select>
+            </div>
+            <div style="flex:1;min-width:160px;">
+              <label style="display:block;font-size:13px;color:var(--text2);margin-bottom:4px;">模型 B</label>
+              <select id="cmp-model-b-select" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;" onchange="onCmpModelChange()">
+              </select>
+            </div>
+            <div style="flex:1;min-width:140px;">
+              <label style="display:block;font-size:13px;color:var(--text2);margin-bottom:4px;">语言（交集）</label>
+              <select id="cmp-lang-select" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;">
+              </select>
+            </div>
+            <div style="flex:1;min-width:140px;">
+              <label style="display:block;font-size:13px;color:var(--text2);margin-bottom:4px;">推理设备</label>
+              <select id="cmp-device-select" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;">
+                <option value="cuda">GPU (CUDA)</option>
+                <option value="cpu">CPU</option>
+              </select>
+            </div>
+            <div>
+              <button class="btn btn-primary" id="btn-cmp-run" onclick="runAsrCompareAll()" style="padding:8px 24px;font-size:14px;white-space:nowrap;" disabled>
+                开始对比
+              </button>
+            </div>
+          </div>
+          <div style="margin-top:6px;font-size:11px;color:var(--text2);">
+            差异阈值: 10%
+          </div>
+        </div>
+
+        <!-- Progress -->
+        <div id="cmp-progress" style="display:none;margin-bottom:12px;padding:12px;border-radius:8px;background:var(--bg2);border:1px solid var(--border);">
+          <div class="progress-bar" style="margin-bottom:8px;">
+            <div id="cmp-progress-fill" class="progress-fill" style="width:0%;"></div>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <div id="cmp-progress-text" style="font-size:12px;color:var(--text2);"></div>
+            <button class="btn" id="btn-cmp-stop" onclick="stopAsrCompare()" style="display:none;font-size:11px;padding:4px 12px;background:var(--danger);color:#fff;">中止</button>
+          </div>
+        </div>
+
+        <!-- Summary -->
+        <div id="cmp-summary" style="display:none;">
+          <div class="cmp-summary-bar">
+            <div class="cmp-summary-item">
+              <div class="num" id="cmp-total-num" style="color:var(--text);">0</div>
+              <div style="font-size:11px;color:var(--text2);">总计</div>
+            </div>
+            <div class="cmp-summary-item">
+              <div class="num" id="cmp-normal-num" style="color:var(--success);">0</div>
+              <div style="font-size:11px;color:var(--text2);">正常（差异≤10%）</div>
+            </div>
+            <div class="cmp-summary-item">
+              <div class="num" id="cmp-flagged-num" style="color:var(--danger);">0</div>
+              <div style="font-size:11px;color:var(--text2);">异常（差异>10%）</div>
+            </div>
+            <div class="cmp-summary-item">
+              <div class="num" id="cmp-discarded-num" style="color:var(--warning);">0</div>
+              <div style="font-size:11px;color:var(--text2);">已舍弃</div>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <h4 style="margin:0;font-size:14px;">对比结果</h4>
+            <button class="btn btn-primary" id="btn-cmp-package" onclick="packageAsrCompareResults()" style="font-size:12px;padding:6px 16px;" disabled>打包结果</button>
+          </div>
+
+          <div style="max-height:45vh;overflow-y:auto;border:1px solid var(--border);border-radius:8px;">
+            <table class="cmp-result-table">
+              <thead>
+                <tr>
+                  <th style="width:40%;">文件名</th>
+                  <th style="width:12%;">来源</th>
+                  <th style="width:10%;">差异</th>
+                  <th style="width:10%;">状态</th>
+                  <th style="width:28%;">操作</th>
+                </tr>
+              </thead>
+              <tbody id="cmp-result-tbody">
+                <tr><td colspan="5" style="text-align:center;color:var(--text2);padding:20px;">等待处理完成...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Empty state -->
+        <div id="cmp-empty-state" style="text-align:center;padding:80px 20px;color:var(--text2);">
+          <p style="font-size:48px;margin-bottom:12px;">🔍</p>
+          <p>选择左侧音频文件夹，点击"开始对比"进行交叉检验</p>
+          <p style="font-size:12px;margin-top:8px;">两个 ASR 模型将同时处理每条音频并对比字幕文本差异</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- 视频切割 -->
   <div id="tab-split" class="tab">
     <div class="split-layout">
@@ -933,7 +1258,16 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
       <div class="split-left">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
           <h3 style="margin:0;">MKV/MP4 文件</h3>
-          <button class="btn btn-secondary" onclick="loadSplitVideos()" style="font-size:11px;padding:4px 10px;">刷新</button>
+          <button class="btn btn-secondary" onclick="refreshSplitVideos()" style="font-size:11px;padding:4px 10px;">刷新</button>
+        </div>
+        <div id="split-batch-bar" class="batch-bar">
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--text2);margin:0;">
+            <input type="checkbox" id="split-select-all-cb" onchange="splitToggleSelectAll()">
+            全选
+          </label>
+          <span id="split-selected-count" style="color:var(--accent);white-space:nowrap;">已选 0 个</span>
+          <button class="btn btn-primary" id="btn-split-batch-run" onclick="runSplitBatch()" style="font-size:11px;padding:4px 12px;" disabled>批量执行</button>
+          <span id="split-queue-status" style="display:none;color:var(--warning);font-weight:600;"></span>
         </div>
         <div id="split-video-list" class="file-list" style="max-height:60vh;border:1px solid var(--border);border-radius:8px;">
           <div class="empty-state"><p>加载中...</p></div>
@@ -963,6 +1297,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
             <button class="active" data-split-mode="subtitle" onclick="switchSplitMode('subtitle')">字幕分割</button>
             <button data-split-mode="duration" onclick="switchSplitMode('duration')">时长分割</button>
             <button data-split-mode="size" onclick="switchSplitMode('size')">大小分割</button>
+            <button data-split-mode="trim" onclick="switchSplitMode('trim')">裁剪</button>
           </div>
 
           <!-- Subtitle mode config -->
@@ -1009,6 +1344,21 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
             <label>目标文件大小 (MB)</label>
             <input type="number" id="split-target-size" value="100" step="1" min="1" max="10000">
             <div class="hint">每个切片大约为此大小。实际大小可能略有偏差。</div>
+          </div>
+
+          <!-- Trim mode config -->
+          <div id="split-cfg-trim" class="split-config" style="display:none;">
+            <div style="display:flex;gap:12px;">
+              <div style="flex:1;">
+                <label>开始时间 *</label>
+                <input type="text" id="split-trim-start" value="" placeholder="如 1:30 或 90">
+              </div>
+              <div style="flex:1;">
+                <label>结束时间 *</label>
+                <input type="text" id="split-trim-end" value="" placeholder="如 3:15 或 195">
+              </div>
+            </div>
+            <div class="hint">保留此时间段内的视频，时间段外的部分将被丢弃。支持格式: 秒数（90）或 mm:ss（1:30）或 h:mm:ss（0:01:30）</div>
           </div>
 
           <!-- Shared config -->
@@ -1289,11 +1639,12 @@ function switchTab(name) {
   if (name === 'local-files') loadLocalFilesBrowser();
   if (name === 'jobs') { loadJobs(); startJobPolling(); } else stopJobPolling();
   if (name === 'results') loadResults();
-  if (name === 'review') loadReviewDirs();
+  if (name === 'review') { loadReviewDirs(); loadEmotionCounts('review-emotion-bar', '/api/review/emotion-counts'); }
   if (name === 'denoise') { loadDenoiseDirs(); loadUnreviewedDirs(); }
-  if (name === 'denoise-review') loadDenoiseReviewDirs();
+  if (name === 'denoise-review') { loadDenoiseReviewDirs(); loadEmotionCounts('dreview-emotion-bar', '/api/denoise-review/emotion-counts'); }
   if (name === 'extract') { loadExtractFiles(); loadExtractedSubs(); }
   if (name === 'asr') { loadAsrVideos(); loadAsrModels(); loadAsrResults(); }
+  if (name === 'asr-compare' && !_cmpLoaded) { loadAsrCompareFiles(); loadAsrCompareModels(); _cmpLoaded = true; }
   if (name === 'stitch') loadStitchVideos();
   if (name === 'split') {
     if (!window._splitLoaded) { loadSplitVideos(); loadSplitClipDirs(); window._splitLoaded = true; }
@@ -1332,7 +1683,7 @@ function statusText(s) {
 }
 
 function stepName(s) {
-  var map = { download: '下载', extract_subtitles: '提取字幕', split_video: '分割视频', filter_clips: '时长筛选', queued: '排队等待中' };
+  var map = { download: '下载', extract_subtitles: '提取字幕', split_video: '分割视频', filter_clips: '时长筛选', filter_silence: '静音筛选', queued: '排队等待中', subtitle_split: '按字幕分割', duration_split: '按时长分割', size_split: '按大小分割', trim_video: '裁剪视频', done: '已完成', error: '出错' };
   return map[s] || s;
 }
 
@@ -2208,6 +2559,7 @@ function playReviewClip(idx, autoPlay) {
 
   // Lightweight highlight refresh — no innerHTML rebuild
   refreshReviewListHighlight();
+  refreshEmotionLabels('review-emotion-bar', c.name, window._reviewDir, '/api/review/clip-emotions');
 }
 
 // Delegate clicks on the review list (avoids inline onclick rebuilds)
@@ -2239,6 +2591,63 @@ async function reviewAction(action) {
     if (nextIdx >= window._reviewClips.length) nextIdx = 0;
     playReviewClip(nextIdx);
   } catch(e) { toast('操作失败: ' + e.message, 'error'); }
+}
+
+async function loadEmotionCounts(barId, apiPath) {
+  try {
+    var resp = await fetch(API + apiPath);
+    var data = await resp.json();
+    var counts = data.counts || {};
+    var bar = document.getElementById(barId);
+    if (!bar) return;
+    var btns = bar.querySelectorAll('.btn-emotion');
+    for (var i = 0; i < btns.length; i++) {
+      var emo = btns[i].getAttribute('data-emotion');
+      var cntSpan = btns[i].querySelector('.emo-count');
+      if (cntSpan) { cntSpan.textContent = counts[emo] || 0; }
+    }
+  } catch(e) { /* ignore */ }
+}
+
+async function refreshEmotionLabels(barId, clipName, clipDir, apiPath) {
+  if (!clipName || !clipDir) return;
+  try {
+    var url = API + apiPath + '?clip_dir=' + encodeURIComponent(clipDir) + '&clip_name=' + encodeURIComponent(clipName);
+    var resp = await fetch(url);
+    var data = await resp.json();
+    var emotions = data.emotions || [];
+    var bar = document.getElementById(barId);
+    if (!bar) return;
+    var btns = bar.querySelectorAll('.btn-emotion');
+    for (var i = 0; i < btns.length; i++) {
+      var emo = btns[i].getAttribute('data-emotion');
+      if (emotions.indexOf(emo) >= 0) {
+        btns[i].classList.add('classified');
+      } else {
+        btns[i].classList.remove('classified');
+      }
+    }
+  } catch(e) { /* silently ignore */ }
+}
+
+async function classifyEmotion(emotion) {
+  if (!window._reviewDir || !window._reviewClips || window._reviewIndex < 0 || window._reviewIndex >= window._reviewClips.length) {
+    toast('请先加载并选择要分类的视频片段', 'info');
+    return;
+  }
+  var c = window._reviewClips[window._reviewIndex];
+  try {
+    var url = API + '/api/review/classify-emotion?clip_dir=' + encodeURIComponent(window._reviewDir) + '&clip_name=' + encodeURIComponent(c.name) + '&emotion=' + encodeURIComponent(emotion);
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    if (data.status === 'ok') {
+      toast('已分类到「' + emotion + '」', 'success');
+      refreshEmotionLabels('review-emotion-bar', c.name, window._reviewDir, '/api/review/clip-emotions');
+      loadEmotionCounts('review-emotion-bar', '/api/review/emotion-counts');
+    } else {
+      toast('分类失败', 'error');
+    }
+  } catch(e) { toast('分类失败: ' + e.message, 'error'); }
 }
 
 function reviewPrev() {
@@ -2616,6 +3025,7 @@ function switchDenoiseSubtab(name) {
 
 async function loadUnreviewedDirs() {
   var select = document.getElementById('denoise-urev-dir-select');
+  var curVal = select.value;
   select.innerHTML = '<option value="">加载中...</option>';
   try {
     var resp = await fetch(API + '/api/denoise/unreviewed-dirs');
@@ -2629,12 +3039,24 @@ async function loadUnreviewedDirs() {
         escapeHtml(d.name) + ' — 待审核' + d.pending + ' | 已降噪' + (d.denoised || 0) + statusTag2 + '</option>';
     }
     select.innerHTML = html;
+    // Restore previously selected value
+    if (curVal) {
+      for (var i = 0; i < select.options.length; i++) {
+        if (select.options[i].value === curVal) { select.selectedIndex = i; break; }
+      }
+    }
     showUrevToolbar();
   } catch(e) { select.innerHTML = '<option value="">加载失败</option>'; }
 }
 
 function showUrevToolbar() {
   document.getElementById('btn-denoise-urev-refresh').style.display = 'inline-block';
+}
+
+async function refreshUnreviewedDenoise() {
+  await loadUnreviewedDirs();
+  loadUnreviewedClips();
+  toast('列表已刷新', 'info');
 }
 
 async function loadUnreviewedClips() {
@@ -2724,13 +3146,16 @@ async function denoiseUrevSelected() {
 async function startUrevDenoise(paths) {
   var enabledKeys = getEnabledStepKeys();
   if (!enabledKeys.length) { toast('请至少启用一个处理步骤', 'error'); return; }
+  if (!_denoiseUrevDir) { toast('请先选择视频', 'error'); return; }
 
   _denoiseUrevSelectMode = false; _denoiseUrevSelected = {};
   document.getElementById('btn-denoise-urev-selected').style.display = 'none';
   document.getElementById('btn-denoise-urev-select-all').style.display = 'none';
   buildUrevFileList();
 
-  var videoName = document.getElementById('denoise-urev-dir-select').selectedOptions[0].text.split(' (')[0] || '';
+  // Extract video name from stored dir path (more reliable than parsing dropdown text)
+  var parts = _denoiseUrevDir.replace(/\\/g, '/').split('/');
+  var videoName = parts[parts.length - 1] || '';
   var payload = { video_name: videoName, paths: paths, steps: enabledKeys };
   try {
     var resp = await fetch(API + '/api/denoise/unreviewed-batch', {
@@ -3408,6 +3833,7 @@ function playDreviewClip(idx, autoPlay) {
   document.getElementById('dreview-clip-name').textContent = c.name + ' (' + c.size_mb + ' MB)';
 
   refreshDreviewListHighlight();
+  refreshEmotionLabels('dreview-emotion-bar', c.name, window._dreviewDir, '/api/denoise-review/clip-emotions');
 }
 
 document.getElementById('dreview-list').addEventListener('click', function(e) {
@@ -3436,6 +3862,26 @@ async function dreviewAction(action) {
     if (nextIdx >= window._dreviewClips.length) nextIdx = 0;
     playDreviewClip(nextIdx);
   } catch(e) { toast('操作失败: ' + e.message, 'error'); }
+}
+
+async function classifyDreviewEmotion(emotion) {
+  if (!window._dreviewDir || !window._dreviewClips || window._dreviewIndex < 0 || window._dreviewIndex >= window._dreviewClips.length) {
+    toast('请先加载并选择要分类的音频', 'info');
+    return;
+  }
+  var c = window._dreviewClips[window._dreviewIndex];
+  try {
+    var url = API + '/api/denoise-review/classify-emotion?clip_dir=' + encodeURIComponent(window._dreviewDir) + '&clip_name=' + encodeURIComponent(c.name) + '&emotion=' + encodeURIComponent(emotion);
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    if (data.status === 'ok') {
+      toast('已分类到「' + emotion + '」（降噪）', 'success');
+      refreshEmotionLabels('dreview-emotion-bar', c.name, window._dreviewDir, '/api/denoise-review/clip-emotions');
+      loadEmotionCounts('dreview-emotion-bar', '/api/denoise-review/emotion-counts');
+    } else {
+      toast('分类失败', 'error');
+    }
+  } catch(e) { toast('分类失败: ' + e.message, 'error'); }
 }
 
 function dreviewPrev() {
@@ -4092,7 +4538,7 @@ function showDenoiseButtons() {
 }
 
 function refreshDenoise() {
-  loadDenoiseSources();
+  loadDenoiseDirs();
   toast('列表已刷新', 'info');
 }
 
@@ -4809,6 +5255,9 @@ var _asrActiveVideo = null;
 var _asrJobId = null;
 var _asrPollTimer = null;
 var _asrModels = [];
+var _asrSelected = {};       // { path: true } for multi-select
+var _asrQueue = [];          // ordered array of { name, path } to process
+var _asrQueueIndex = -1;     // current position in queue
 
 async function loadAsrVideos() {
   var cont = document.getElementById('asr-video-list');
@@ -4817,6 +5266,20 @@ async function loadAsrVideos() {
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     var data = await resp.json();
     _asrVideos = data.videos || [];
+
+    // Load existing subtitles for matching
+    var asrSubMap = {};
+    try {
+      var sResp = await fetch(API + '/api/extract/subtitle-files');
+      if (sResp.ok) {
+        var sData = await sResp.json();
+        var subs = sData.subtitles || [];
+        for (var si = 0; si < subs.length; si++) {
+          asrSubMap[subs[si].name] = true;
+        }
+      }
+    } catch(e) { console.error(e); }
+
     if (!_asrVideos.length) {
       cont.innerHTML = '<div class="empty-state"><p>没有找到视频文件</p><p style="font-size:11px;color:var(--text2);">请将视频放入 data/downloads/ 目录</p></div>';
       return;
@@ -4825,12 +5288,51 @@ async function loadAsrVideos() {
     for (var i = 0; i < _asrVideos.length; i++) {
       var v = _asrVideos[i];
       var activeClass = _asrActiveVideo === v.path ? ' active' : '';
-      html += '<div class="mkv-file-item' + activeClass + '" data-asr-path="' + safeAttr(v.path) + '">' +
+      var checkedClass = _asrSelected[v.path] ? ' checked' : '';
+      var asrBase = v.name.replace(/\.[^.]+$/, '').toLowerCase();
+      var asrExtractSub = null;   // extracted subtitle (_track pattern)
+      var asrAsrSub = null;       // ASR subtitle (_sensevoice etc.)
+      var asrSubNames = Object.keys(asrSubMap);
+      for (var si = 0; si < asrSubNames.length; si++) {
+        var subLower = asrSubNames[si].toLowerCase();
+        if (subLower.indexOf(asrBase + '_track') === 0) {
+          asrExtractSub = asrSubNames[si];
+        } else if (subLower.indexOf(asrBase + '_sensevoice') === 0 || subLower.indexOf(asrBase + '_asr') === 0) {
+          asrAsrSub = asrSubNames[si];
+        }
+      }
+      var asrSubInfo;
+      if (asrAsrSub) {
+        asrSubInfo = '<span style="color:#4a9eff;font-size:11px;">🎙️ ' + escapeHtml(asrAsrSub) + '</span>';
+      } else if (asrExtractSub) {
+        asrSubInfo = '<span style="color:var(--success);font-size:11px;">📝 ' + escapeHtml(asrExtractSub) + '</span>';
+      } else {
+        asrSubInfo = '<span style="color:var(--text2);font-size:11px;">无现成字幕</span>';
+      }
+      var queueBadge = '';
+      if (_asrQueue.length > 0) {
+        var qi = -1;
+        for (var qj = 0; qj < _asrQueue.length; qj++) {
+          if (_asrQueue[qj].path === v.path) { qi = qj; break; }
+        }
+        if (qi >= 0) {
+          if (qi < _asrQueueIndex) {
+            queueBadge = '<span class="queue-badge queue-done">✅</span>';
+          } else if (qi === _asrQueueIndex) {
+            queueBadge = '<span class="queue-badge queue-processing">🔄 处理中</span>';
+          } else {
+            queueBadge = '<span class="queue-badge queue-waiting">⏳ 等待</span>';
+          }
+        }
+      }
+      html += '<div class="mkv-file-item' + activeClass + checkedClass + '" data-asr-path="' + safeAttr(v.path) + '">' +
+        '<input type="checkbox" class="item-check" data-asr-path="' + safeAttr(v.path) + '" onclick="event.stopPropagation();asrToggleItem(this)">' +
         '<span style="font-size:16px;">🎬</span>' +
         '<div style="flex:1;min-width:0;">' +
           '<div style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(v.name) + '</div>' +
-          '<div style="font-size:11px;color:var(--text2);">' + v.size_mb + ' MB | ' + v.time_str + '</div>' +
+          '<div style="font-size:11px;color:var(--text2);">' + v.size_mb + ' MB | ' + v.time_str + ' | ' + asrSubInfo + '</div>' +
         '</div>' +
+        queueBadge +
       '</div>';
     }
     cont.innerHTML = html;
@@ -4843,6 +5345,7 @@ async function loadAsrVideos() {
         }
       }
     }
+    updateAsrBatchUI();
   } catch(e) {
     cont.innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
   }
@@ -4854,18 +5357,162 @@ async function loadAsrModels() {
     if (!resp.ok) return;
     var data = await resp.json();
     _asrModels = data.models || [];
-    var sel = document.getElementById('asr-model-select');
+    var selEl = document.getElementById('asr-model-select');
     var html = '';
     for (var i = 0; i < _asrModels.length; i++) {
       var m = _asrModels[i];
-      html += '<option value="' + safeAttr(m.key) + '">' + escapeHtml(m.name) + ' — ' + escapeHtml(m.description) + '</option>';
+      var selAttr = m.key === 'qwen3-asr' ? ' selected' : '';
+      html += '<option value="' + safeAttr(m.key) + '"' + selAttr + '>' + escapeHtml(m.name) + ' — ' + escapeHtml(m.description) + '</option>';
     }
     if (!html) html = '<option value="">无可用模型</option>';
-    sel.innerHTML = html;
+    selEl.innerHTML = html;
   } catch(e) { console.error('loadAsrModels:', e); }
 }
 
+// --- ASR batch selection ---
+function asrToggleItem(cb) {
+  var path = cb.getAttribute('data-asr-path');
+  if (!path) return;
+  if (cb.checked) { _asrSelected[path] = true; }
+  else { delete _asrSelected[path]; }
+  updateAsrBatchUI();
+  var item = cb.closest('.mkv-file-item');
+  if (item) item.classList.toggle('checked', cb.checked);
+}
+
+function asrToggleSelectAll() {
+  var masterCb = document.getElementById('asr-select-all-cb');
+  var checked = masterCb.checked;
+  _asrSelected = {};
+  var cbs = document.querySelectorAll('#asr-video-list .item-check');
+  for (var i = 0; i < cbs.length; i++) {
+    cbs[i].checked = checked;
+    var path = cbs[i].getAttribute('data-asr-path');
+    if (checked && path) _asrSelected[path] = true;
+    var item = cbs[i].closest('.mkv-file-item');
+    if (item) item.classList.toggle('checked', checked);
+  }
+  updateAsrBatchUI();
+}
+
+function updateAsrBatchUI() {
+  var bar = document.getElementById('asr-batch-bar');
+  var count = Object.keys(_asrSelected).length;
+  document.getElementById('asr-selected-count').textContent = '已选 ' + count + ' 个';
+  document.getElementById('btn-asr-batch-run').disabled = count === 0 || _asrQueue.length > 0;
+  bar.classList.toggle('visible', _asrVideos.length > 0);
+
+  // Sync master checkbox
+  var masterCb = document.getElementById('asr-select-all-cb');
+  var cbs = document.querySelectorAll('#asr-video-list .item-check');
+  if (cbs.length === 0) {
+    masterCb.checked = false;
+    masterCb.indeterminate = false;
+  } else if (count === cbs.length) {
+    masterCb.checked = true;
+    masterCb.indeterminate = false;
+  } else if (count > 0) {
+    masterCb.checked = false;
+    masterCb.indeterminate = true;
+  } else {
+    masterCb.checked = false;
+    masterCb.indeterminate = false;
+  }
+
+  // Restore item checkbox states
+  for (var i = 0; i < cbs.length; i++) {
+    var path = cbs[i].getAttribute('data-asr-path');
+    cbs[i].checked = !!_asrSelected[path];
+  }
+}
+
+function runAsrBatch() {
+  var keys = Object.keys(_asrSelected);
+  if (!keys.length) { toast('请先勾选文件', 'info'); return; }
+
+  // Build ordered queue from selected paths
+  _asrQueue = [];
+  for (var i = 0; i < _asrVideos.length; i++) {
+    if (_asrSelected[_asrVideos[i].path]) {
+      _asrQueue.push({ name: _asrVideos[i].name, path: _asrVideos[i].path });
+    }
+  }
+  _asrQueueIndex = 0;
+
+  // Clear selection UI
+  _asrSelected = {};
+  document.getElementById('asr-select-all-cb').checked = false;
+  document.getElementById('btn-asr-batch-run').disabled = true;
+
+  // Refresh list to show queue badges
+  loadAsrVideos();
+
+  // Start processing
+  processNextAsrInQueue();
+}
+
+function processNextAsrInQueue() {
+  if (_asrQueueIndex >= _asrQueue.length) {
+    // All done
+    _asrQueue = [];
+    _asrQueueIndex = -1;
+    document.getElementById('asr-queue-status').style.display = 'none';
+    document.getElementById('btn-asr-batch-run').disabled = Object.keys(_asrSelected).length === 0;
+    loadAsrVideos();
+    toast('全部 ASR 批量任务已完成', 'success');
+    return;
+  }
+
+  var item = _asrQueue[_asrQueueIndex];
+  document.getElementById('asr-queue-status').style.display = 'inline';
+  document.getElementById('asr-queue-status').textContent =
+    '队列: ' + (_asrQueueIndex + 1) + '/' + _asrQueue.length + ' — ' + item.name;
+
+  // Set as active and run
+  _asrActiveVideo = item.path;
+  var model = document.getElementById('asr-model-select').value;
+  var lang = document.getElementById('asr-lang-select').value;
+  var device = document.getElementById('asr-device-select').value;
+
+  // Update UI
+  document.getElementById('asr-empty-state').style.display = 'none';
+  document.getElementById('asr-config-panel').style.display = 'block';
+  document.getElementById('asr-current-video').textContent = 'ASR 语音识别 — ' + item.name;
+  document.getElementById('asr-status').style.display = 'block';
+  document.getElementById('asr-status-text').textContent = '启动队列任务 ' + (_asrQueueIndex + 1) + '/' + _asrQueue.length + '...';
+  document.getElementById('asr-progress-fill').style.width = '0%';
+  document.getElementById('btn-asr-run').disabled = true;
+  document.getElementById('btn-asr-run').textContent = '队列处理中...';
+
+  // Highlight current item
+  loadAsrVideos();
+
+  var url = API + '/api/asr/run?path=' + encodeURIComponent(item.path) +
+    '&model=' + encodeURIComponent(model) +
+    '&language=' + encodeURIComponent(lang) +
+    '&device=' + encodeURIComponent(device);
+
+  fetch(url, { method: 'POST' }).then(function(resp) { return resp.json(); }).then(function(data) {
+    if (data.status !== 'started') {
+      toast('启动 ASR 失败: ' + item.name, 'error');
+      _asrQueueIndex++;
+      processNextAsrInQueue();
+      return;
+    }
+    _asrJobId = data.job_id;
+    toast('队列 ' + (_asrQueueIndex + 1) + '/' + _asrQueue.length + ': ' + item.name, 'success');
+    startAsrPolling();
+  }).catch(function(e) {
+    toast('启动失败: ' + e.message, 'error');
+    _asrQueueIndex++;
+    processNextAsrInQueue();
+  });
+}
+
 async function selectAsrVideo(path) {
+  // Don't interrupt active batch queue
+  if (_asrQueue.length > 0 && _asrQueueIndex >= 0 && _asrQueueIndex < _asrQueue.length) return;
+
   _asrActiveVideo = path;
   _asrJobId = null;
   if (_asrPollTimer) { clearInterval(_asrPollTimer); _asrPollTimer = null; }
@@ -4980,8 +5627,6 @@ async function pollAsrJob() {
 
     if (job.status === 'completed') {
       stopAsrPolling();
-      document.getElementById('btn-asr-run').disabled = false;
-      document.getElementById('btn-asr-run').textContent = '开始语音识别';
       var result = job.result || {};
       document.getElementById('asr-status-text').textContent =
         '识别完成！共 ' + (result.segments_count || 0) + ' 个段落，' +
@@ -4989,12 +5634,28 @@ async function pollAsrJob() {
         '耗时 ' + ((result.extract_time_sec || 0) + (result.asr_time_sec || 0)).toFixed(1) + ' 秒';
       toast('ASR 识别完成', 'success');
       loadAsrResults();
+
+      // Queue continuation
+      if (_asrQueue.length > 0 && _asrQueueIndex < _asrQueue.length) {
+        _asrQueueIndex++;
+        processNextAsrInQueue();
+      } else {
+        document.getElementById('btn-asr-run').disabled = false;
+        document.getElementById('btn-asr-run').textContent = '开始语音识别';
+      }
     } else if (job.status === 'failed') {
       stopAsrPolling();
-      document.getElementById('btn-asr-run').disabled = false;
-      document.getElementById('btn-asr-run').textContent = '开始语音识别';
       document.getElementById('asr-status-text').textContent = '失败: ' + (job.error || '未知错误');
       toast('ASR 失败: ' + (job.error || '未知错误'), 'error');
+
+      // Queue continuation (skip failed, continue to next)
+      if (_asrQueue.length > 0 && _asrQueueIndex < _asrQueue.length) {
+        _asrQueueIndex++;
+        processNextAsrInQueue();
+      } else {
+        document.getElementById('btn-asr-run').disabled = false;
+        document.getElementById('btn-asr-run').textContent = '开始语音识别';
+      }
     }
   } catch(e) { console.error(e); }
 }
@@ -5020,7 +5681,6 @@ async function loadAsrResults() {
             r.audio_name.replace(/'/g, "\\'") + '\',\'' +
             r.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">🔊</button>'
         : '';
-      html += '<div class="file-item" data-asr-path="' + safeAttr(r.path) + '">' +
       var splitBtn = r.video_path
         ? '<button class="btn btn-primary" style="font-size:10px;padding:2px 8px;margin-left:4px;" onclick="jumpToSplitFromAsr(\'' +
             r.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\',\'' +
@@ -5116,6 +5776,780 @@ function initAsrIfNeeded() {
     _asrInitialized = true;
     // Models load on tab switch
   }
+}
+
+// ============================================================
+// Folder ASR mode
+// ============================================================
+var _asrFolderJobId = null;
+var _asrFolderPollTimer = null;
+var _asrFolderFiles = [];   // detected audio files in selected folder
+var _asrFolderPath = '';    // selected folder path
+
+function switchAsrMode(mode) {
+  var isFolder = mode === 'folder';
+  document.getElementById('asr-video-panel').style.display = isFolder ? 'none' : 'block';
+  document.getElementById('asr-folder-panel').style.display = isFolder ? 'block' : 'none';
+  document.getElementById('asr-mode-video-btn').className = isFolder ? 'btn btn-secondary' : 'btn btn-primary';
+  document.getElementById('asr-mode-folder-btn').className = isFolder ? 'btn btn-primary' : 'btn btn-secondary';
+  if (isFolder) {
+    document.getElementById('asr-config-panel').style.display = 'block';
+    document.getElementById('asr-current-video').textContent = 'ASR 语音识别 — 文件夹模式';
+    document.getElementById('asr-empty-state').style.display = 'none';
+    document.getElementById('btn-asr-run').style.display = 'none';
+    document.getElementById('asr-audio-status').textContent = '批量处理音频文件';
+    loadAsrModels();
+  } else {
+    document.getElementById('asr-config-panel').style.display = 'none';
+    document.getElementById('asr-empty-state').style.display = '';
+    document.getElementById('btn-asr-run').style.display = '';
+    document.getElementById('asr-current-video').textContent = 'ASR 语音识别';
+  }
+}
+
+async function browseAsrFolder() {
+  try {
+    var resp = await fetch(API + '/api/asr/browse-folder');
+    var data = await resp.json();
+    if (data.path) {
+      document.getElementById('asr-folder-path').value = data.path;
+      detectAsrFolderFiles(data.path);
+    }
+  } catch(e) { toast('打开文件夹失败: ' + e.message, 'error'); }
+}
+
+async function browseAsrOutputDir() {
+  try {
+    var resp = await fetch(API + '/api/asr/browse-folder');
+    var data = await resp.json();
+    if (data.path) {
+      document.getElementById('asr-folder-output').value = data.path;
+    }
+  } catch(e) { toast('打开文件夹失败: ' + e.message, 'error'); }
+}
+
+async function detectAsrFolderFiles(folderPath) {
+  if (!folderPath) {
+    document.getElementById('asr-folder-file-info').style.display = 'none';
+    document.getElementById('btn-asr-folder-run').disabled = true;
+    return;
+  }
+  try {
+    var resp = await fetch(API + '/api/asr/folder-detect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: folderPath }),
+    });
+    var data = await resp.json();
+    _asrFolderFiles = data.files || [];
+    _asrFolderPath = folderPath;
+    var infoEl = document.getElementById('asr-folder-file-info');
+    var listEl = document.getElementById('asr-folder-file-list');
+    if (data._debug) { console.log('folder-detect debug:', JSON.stringify(data._debug)); }
+
+    if (_asrFolderFiles.length) {
+      infoEl.style.display = 'block';
+      infoEl.textContent = '发现 ' + _asrFolderFiles.length + ' 个音频文件 (' + data.total_size_mb + ' MB)';
+      document.getElementById('btn-asr-folder-run').disabled = false;
+
+      // Render file list with play buttons
+      var html = '';
+      for (var i = 0; i < _asrFolderFiles.length; i++) {
+        var f = _asrFolderFiles[i];
+        var audioPath = folderPath.replace(/\\/g, '/').replace(/\/$/, '') + '/' + f.name;
+        html += '<div class="file-item" style="display:flex;align-items:center;gap:6px;padding:4px 8px;border-bottom:1px solid var(--border);">';
+        html += '<span style="font-size:12px;color:var(--text2);flex-shrink:0;width:20px;text-align:center;">' + (i + 1) + '</span>';
+        html += '<span style="flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(f.name) + '">' + escapeHtml(f.name) + '</span>';
+        html += '<span style="font-size:10px;color:var(--text2);flex-shrink:0;">' + f.size_mb + ' MB</span>';
+        html += '<button class="btn btn-secondary" onclick="playAsrFolderAudio(\'' + safeAttr(audioPath) + '\',\'' + escapeHtml(f.name).replace(/'/g, "\\\\'") + '\')" style="font-size:10px;padding:2px 8px;flex-shrink:0;" title="播放">▶</button>';
+        html += '</div>';
+      }
+      listEl.innerHTML = html;
+      listEl.style.display = 'block';
+    } else {
+      infoEl.style.display = 'block';
+      var msg = '未找到音频文件（支持 wav, mp3, flac, m4a, aac, ogg, wma, opus）';
+      if (data._debug) {
+        if (data._debug.error) {
+          msg = '错误: ' + data._debug.error + ' | 路径: ' + (data._debug.path_received || '');
+        } else if (data._debug.raw_entry_count > 0) {
+          msg = '文件夹中有 ' + data._debug.raw_entry_count + ' 个项目，但无匹配的音频文件。前几项: ' + (data._debug.raw_sample || []).join(', ');
+        }
+      }
+      infoEl.textContent = msg;
+      listEl.style.display = 'none';
+      document.getElementById('btn-asr-folder-run').disabled = true;
+    }
+  } catch(e) { console.error(e); }
+}
+
+// Auto-detect when user types/pastes a path
+function initAsrFolderPathInput() {
+  var input = document.getElementById('asr-folder-path');
+  var timer = null;
+  input.addEventListener('input', function() {
+    clearTimeout(timer);
+    var val = this.value.trim();
+    if (val) {
+      timer = setTimeout(function() { detectAsrFolderFiles(val); }, 500);
+    } else {
+      document.getElementById('asr-folder-file-info').style.display = 'none';
+      document.getElementById('btn-asr-folder-run').disabled = true;
+    }
+  });
+}
+
+async function runAsrFolder() {
+  var folderPath = document.getElementById('asr-folder-path').value.trim();
+  if (!folderPath) { toast('请选择音频文件夹', 'error'); return; }
+
+  var model = document.getElementById('asr-model-select').value;
+  var language = document.getElementById('asr-lang-select').value;
+  var device = document.getElementById('asr-device-select').value;
+  var outputDir = document.getElementById('asr-folder-output').value.trim();
+
+  if (!model) { toast('请选择ASR模型', 'error'); return; }
+
+  document.getElementById('btn-asr-folder-run').disabled = true;
+  document.getElementById('btn-asr-folder-run').textContent = '启动中...';
+  document.getElementById('asr-folder-results').style.display = 'none';
+
+  try {
+    var resp = await fetch(API + '/api/asr/folder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        folder_path: folderPath,
+        model: model,
+        language: language,
+        device: device,
+        output_dir: outputDir,
+      }),
+    });
+    if (!resp.ok) {
+      var err = await resp.json();
+      throw new Error(err.detail || '启动失败');
+    }
+    var data = await resp.json();
+    _asrFolderJobId = data.job_id;
+    document.getElementById('asr-folder-progress').style.display = 'block';
+    document.getElementById('asr-folder-progress-fill').style.width = '0%';
+    document.getElementById('asr-folder-progress-text').textContent = '开始处理 ' + data.file_count + ' 个文件...';
+    document.getElementById('btn-asr-folder-cancel').style.display = 'inline-block';
+    toast('开始批量ASR: ' + data.file_count + ' 个文件', 'info');
+    startAsrFolderPolling();
+  } catch(e) {
+    toast('启动失败: ' + e.message, 'error');
+    document.getElementById('btn-asr-folder-run').disabled = false;
+    document.getElementById('btn-asr-folder-run').textContent = '开始批量语音识别';
+  }
+}
+
+function startAsrFolderPolling() {
+  stopAsrFolderPolling();
+  _asrFolderPollTimer = setInterval(pollAsrFolderJob, 1500);
+  pollAsrFolderJob(); // immediate first poll
+}
+
+function stopAsrFolderPolling() {
+  if (_asrFolderPollTimer) { clearInterval(_asrFolderPollTimer); _asrFolderPollTimer = null; }
+}
+
+async function pollAsrFolderJob() {
+  if (!_asrFolderJobId) return;
+  try {
+    var resp = await fetch(API + '/api/asr/job/' + _asrFolderJobId);
+    if (!resp.ok) return;
+    var job = await resp.json();
+    var pct = job.progress || 0;
+    document.getElementById('asr-folder-progress-fill').style.width = pct + '%';
+    var statusText = job.current_file ? '正在处理: ' + job.current_file : job.current_step || '';
+    document.getElementById('asr-folder-progress-text').textContent =
+      '进度: ' + job.completed + '/' + job.total + (statusText ? ' | ' + statusText : '');
+
+    if (job.status === 'completed') {
+      stopAsrFolderPolling();
+      document.getElementById('btn-asr-folder-cancel').style.display = 'none';
+      document.getElementById('asr-folder-progress-fill').style.width = '100%';
+      document.getElementById('asr-folder-progress-text').textContent = '处理完成！';
+      document.getElementById('btn-asr-folder-run').disabled = false;
+      document.getElementById('btn-asr-folder-run').textContent = '开始批量语音识别';
+
+      // Show results
+      var resultsEl = document.getElementById('asr-folder-results');
+      resultsEl.style.display = 'block';
+
+      var resultCount = (job.results || []).length;
+      var errorCount = (job.errors || []).length;
+      var total = job.total || 0;
+      var summary = '完成 ' + resultCount + '/' + total + ' 个文件';
+      if (errorCount > 0) summary += '，' + errorCount + ' 个失败';
+      summary += ' | 输出: ' + (job.output_dir || '');
+      document.getElementById('asr-folder-result-summary').textContent = summary;
+
+      // Build result/error maps
+      var resultMap = {};
+      for (var i = 0; i < (job.results || []).length; i++) {
+        resultMap[job.results[i].audio_name] = job.results[i];
+      }
+      var errorMap = {};
+      for (var i = 0; i < (job.errors || []).length; i++) {
+        errorMap[job.errors[i].file] = job.errors[i].error;
+      }
+
+      // Build detailed file list
+      var allFiles = job.files || [];
+      var folderPath = job.folder_path || '';
+      var html = '';
+      for (var i = 0; i < allFiles.length; i++) {
+        var f = allFiles[i];
+        var audioPath = f.path || (folderPath ? folderPath.replace(/\\/g, '/') + '/' + f.name : '');
+        var result = resultMap[f.name];
+        var error = errorMap[f.name];
+        var icon = result ? '✅' : (error ? '❌' : '⏳');
+        var rowClass = result ? '' : (error ? 'style=\"opacity:0.7;\"' : '');
+
+        html += '<div class=\"file-item\" ' + rowClass + ' style=\"display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);\">';
+        html += '<span style=\"font-size:14px;flex-shrink:0;\">' + icon + '</span>';
+        html += '<div style=\"flex:1;min-width:0;\">';
+        html += '<div style=\"font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;\">' + escapeHtml(f.name) + '</div>';
+        if (result) {
+          html += '<div style=\"font-size:10px;color:var(--text2);\">' + result.segments_count + ' 段字幕 | ' + (result.model_name || '') + '</div>';
+        } else if (error) {
+          html += '<div style=\"font-size:10px;color:var(--danger);\">' + escapeHtml(error) + '</div>';
+        }
+        html += '</div>';
+        // Play button
+        html += '<button class="btn btn-secondary" onclick="playAsrFolderAudio(\'' + safeAttr(audioPath) + '\',\'' + escapeHtml(f.name).replace(/'/g, "\\'") + '\')" style="font-size:10px;padding:2px 8px;flex-shrink:0;" title="播放">▶</button>';
+        // View SRT button
+        if (result) {
+          html += '<button class="btn btn-secondary" onclick="window.open(\'' + API + '/api/asr/stream?path=' + encodeURIComponent(result.srt_path) + '\')" style="font-size:10px;padding:2px 8px;flex-shrink:0;" title="查看字幕">📝</button>';
+        }
+        html += '</div>';
+      }
+      document.getElementById('asr-folder-result-list').innerHTML = html;
+
+      // Show errors summary
+      var errEl = document.getElementById('asr-folder-error-list');
+      if (errorCount > 0) {
+        errEl.innerHTML = '<div style=\"margin-top:4px;\">⚠️ ' + errorCount + ' 个文件处理失败，详见上方红色标记</div>';
+      } else {
+        errEl.innerHTML = '';
+      }
+    } else if (job.status === 'failed') {
+      stopAsrFolderPolling();
+      document.getElementById('btn-asr-folder-cancel').style.display = 'none';
+      document.getElementById('asr-folder-progress-text').textContent = '处理失败: ' + (job.error || '未知错误');
+      document.getElementById('btn-asr-folder-run').disabled = false;
+      document.getElementById('btn-asr-folder-run').textContent = '开始批量语音识别';
+    } else if (job.status === 'cancelled') {
+      stopAsrFolderPolling();
+      document.getElementById('btn-asr-folder-cancel').style.display = 'none';
+      document.getElementById('asr-folder-progress-text').textContent = '已中止（完成 ' + (job.completed || 0) + '/' + (job.total || 0) + ' 个）';
+      document.getElementById('btn-asr-folder-run').disabled = false;
+      document.getElementById('btn-asr-folder-run').textContent = '开始批量语音识别';
+      // Show partial results
+      if ((job.results || []).length || (job.errors || []).length) {
+        // re-render partial results same as completed
+        document.getElementById('asr-folder-results').style.display = 'block';
+        document.getElementById('asr-folder-result-summary').textContent = '已中止 | 完成 ' + (job.completed || 0) + '/' + (job.total || 0) + ' | 输出: ' + (job.output_dir || '');
+      }
+    }
+  } catch(e) { console.error(e); }
+}
+
+async function cancelAsrFolder() {
+  if (!_asrFolderJobId) return;
+  try {
+    var resp = await fetch(API + '/api/asr/job/' + _asrFolderJobId, { method: 'DELETE' });
+    if (!resp.ok) { var err = await resp.json(); toast('取消失败: ' + (err.detail || ''), 'error'); return; }
+    document.getElementById('btn-asr-folder-cancel').style.display = 'none';
+    toast('已发送中止请求', 'info');
+  } catch(e) { toast('取消失败: ' + e.message, 'error'); }
+}
+
+function playAsrFolderAudio(path, name) {
+  if (!path) return;
+  var player = document.getElementById('asr-folder-audio-player');
+  player.src = API + '/api/asr/stream?path=' + encodeURIComponent(path);
+  player.style.display = 'block';
+  player.play().catch(function(e) { console.error('Play failed:', e); });
+  toast('正在播放: ' + name, 'info');
+}
+
+// Initialize folder path input listener on page load
+document.addEventListener('DOMContentLoaded', function() {
+  setTimeout(initAsrFolderPathInput, 100);
+});
+
+// ============================================================
+// ASR Comparison
+// ============================================================
+var _cmpLoaded = false;
+var _cmpDirs = [];
+var _cmpJobId = null;
+var _cmpPollTimer = null;
+var _cmpResults = {};
+var _cmpCollapsed = {};
+var _cmpSelectedDirs = {};
+var _cmpModels = [];
+
+async function loadAsrCompareFiles() {
+  var cont = document.getElementById('cmp-file-list');
+  // Show loading state immediately so user knows refresh is happening
+  cont.innerHTML = '<div class="empty-state"><p>加载中...</p></div>';
+  try {
+    var resp = await fetch(API + '/api/asr-compare/audio-files');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var data = await resp.json();
+    _cmpDirs = data.dirs || [];
+
+    if (!_cmpDirs.length) {
+      cont.innerHTML = '<div class="empty-state"><p>没有找到音频文件</p><p style="font-size:11px;color:var(--text2);">请先将降噪后的音频放入 data/cleaned_unreviewed/</p></div>';
+      document.getElementById('cmp-batch-bar').classList.remove('visible');
+      return;
+    }
+
+    document.getElementById('cmp-batch-bar').classList.add('visible');
+
+    // Default to collapsed for any dir the user hasn't explicitly toggled
+    for (var i = 0; i < _cmpDirs.length; i++) {
+      if (!(_cmpDirs[i].name in _cmpCollapsed)) _cmpCollapsed[_cmpDirs[i].name] = true;
+    }
+
+    var html = '';
+    for (var i = 0; i < _cmpDirs.length; i++) {
+      var d = _cmpDirs[i];
+      var col = _cmpCollapsed[d.name] ? ' collapsed' : '';
+      var checked = _cmpSelectedDirs[d.name] ? ' checked' : '';
+      var filesHtml = '';
+      for (var j = 0; j < d.files.length; j++) {
+        var f = d.files[j];
+        var statusClass = 'pending';
+        var res = _cmpResults[f.path];
+        if (res) {
+          if (res.error) { statusClass = 'flagged'; }
+          else if (res.user_action === 'discarded') { statusClass = 'flagged'; }
+          else if (res.flagged && res.user_action !== 'kept') { statusClass = 'flagged'; }
+          else { statusClass = 'done'; }
+        }
+        filesHtml += '<div class="cmp-file-item">' +
+          '<span class="cmp-status ' + statusClass + '"></span>' +
+          '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(f.name) + '</span>' +
+          '<span style="color:var(--text2);flex-shrink:0;">' + f.size_kb + ' KB</span>' +
+        '</div>';
+      }
+      html += '<div class="cmp-dir-group' + checked + '">' +
+        '<div class="cmp-dir-header' + col + '" onclick="toggleCmpDir(event, \'' + safeAttr(d.name) + '\')">' +
+          '<input type="checkbox" class="item-check" onchange="event.stopPropagation();cmpToggleDirSelect(this)" data-cmp-dir="' + safeAttr(d.name) + '"' + (checked ? ' checked' : '') + '>' +
+          '<span class="dir-icon">&#9660;</span>' +
+          '<span style="flex:1;">' + escapeHtml(d.name) + '</span>' +
+          '<span style="color:var(--text2);font-weight:400;font-size:11px;">' + d.file_count + ' 个文件</span>' +
+        '</div>' +
+        '<div class="cmp-dir-files' + col + '">' + filesHtml + '</div>' +
+      '</div>';
+    }
+    cont.innerHTML = html;
+    document.getElementById('cmp-empty-state').style.display = 'none';
+    updateCmpBatchUI();
+  } catch(e) {
+    cont.innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
+  }
+}
+
+function toggleCmpDir(evt, name) {
+  // Don't toggle if clicking on checkbox
+  if (evt && evt.target && evt.target.type === 'checkbox') return;
+  _cmpCollapsed[name] = !_cmpCollapsed[name];
+  loadAsrCompareFiles();
+}
+
+function cmpToggleDirSelect(cb) {
+  var name = cb.getAttribute('data-cmp-dir');
+  if (!name) return;
+  if (cb.checked) { _cmpSelectedDirs[name] = true; }
+  else { delete _cmpSelectedDirs[name]; }
+  var group = cb.closest('.cmp-dir-group');
+  if (group) group.classList.toggle('checked', cb.checked);
+  updateCmpBatchUI();
+}
+
+function cmpToggleSelectAll() {
+  var masterCb = document.getElementById('cmp-select-all-cb');
+  var checked = masterCb.checked;
+  _cmpSelectedDirs = {};
+  var cbs = document.querySelectorAll('#cmp-file-list .item-check');
+  for (var i = 0; i < cbs.length; i++) {
+    cbs[i].checked = checked;
+    var name = cbs[i].getAttribute('data-cmp-dir');
+    if (checked && name) _cmpSelectedDirs[name] = true;
+    var group = cbs[i].closest('.cmp-dir-group');
+    if (group) group.classList.toggle('checked', checked);
+  }
+  updateCmpBatchUI();
+}
+
+function updateCmpBatchUI() {
+  var countEl = document.getElementById('cmp-selected-count');
+  var filesEl = document.getElementById('cmp-selected-files');
+  var runBtn = document.getElementById('btn-cmp-run');
+  if (!countEl || !runBtn) return;
+
+  var count = Object.keys(_cmpSelectedDirs).length;
+  var totalFiles = 0;
+  for (var i = 0; i < _cmpDirs.length; i++) {
+    if (_cmpSelectedDirs[_cmpDirs[i].name]) totalFiles += _cmpDirs[i].file_count;
+  }
+  countEl.textContent = '已选 ' + count + ' 个文件夹';
+  if (filesEl) filesEl.textContent = totalFiles > 0 ? '(' + totalFiles + ' 个音频)' : '';
+  runBtn.disabled = count === 0;
+
+  // Sync master checkbox
+  var masterCb = document.getElementById('cmp-select-all-cb');
+  if (!masterCb) return;
+  var cbs = document.querySelectorAll('#cmp-file-list .item-check');
+  if (cbs.length === 0) {
+    masterCb.checked = false;
+    masterCb.indeterminate = false;
+  } else if (count === cbs.length) {
+    masterCb.checked = true;
+    masterCb.indeterminate = false;
+  } else if (count > 0) {
+    masterCb.checked = false;
+    masterCb.indeterminate = true;
+  } else {
+    masterCb.checked = false;
+    masterCb.indeterminate = false;
+  }
+}
+
+async function loadAsrCompareModels() {
+  try {
+    var resp = await fetch(API + '/api/asr-compare/models');
+    if (!resp.ok) return;
+    var data = await resp.json();
+    _cmpModels = data.models || [];
+
+    // Populate model A and B selectors
+    var selA = document.getElementById('cmp-model-a-select');
+    var selB = document.getElementById('cmp-model-b-select');
+    var optsHtml = '';
+    for (var i = 0; i < _cmpModels.length; i++) {
+      var m = _cmpModels[i];
+      optsHtml += '<option value="' + safeAttr(m.key) + '">' + escapeHtml(m.name) + '</option>';
+    }
+    selA.innerHTML = optsHtml;
+    selB.innerHTML = optsHtml;
+
+    // Default: qwen3-asr for A, cohere-transcribe for B
+    if (_cmpModels.length >= 2) {
+      selA.value = 'qwen3-asr';
+      selB.value = 'cohere-transcribe';
+    }
+
+    updateCmpLangs();
+  } catch(e) { console.error('loadAsrCompareModels:', e); }
+}
+
+function getCmpSelectedModels() {
+  var a = document.getElementById('cmp-model-a-select');
+  var b = document.getElementById('cmp-model-b-select');
+  return { a: a ? a.value : 'qwen3-asr', b: b ? b.value : 'cohere-transcribe' };
+}
+
+function onCmpModelChange() {
+  updateCmpLangs();
+}
+
+function updateCmpLangs() {
+  var sel = getCmpSelectedModels();
+  var modelA = null, modelB = null;
+  for (var i = 0; i < _cmpModels.length; i++) {
+    if (_cmpModels[i].key === sel.a) modelA = _cmpModels[i];
+    if (_cmpModels[i].key === sel.b) modelB = _cmpModels[i];
+  }
+  if (!modelA || !modelB) return;
+
+  var setA = {}, setB = {};
+  (modelA.languages || []).forEach(function(l) { setA[l] = true; });
+  (modelB.languages || []).forEach(function(l) { setB[l] = true; });
+
+  var langNames = { ja: '日本語', zh: '中文', en: 'English', ko: '한국어', yue: '粤语', auto: '自动检测' };
+  var langSel = document.getElementById('cmp-lang-select');
+  var html = '';
+  var langsA = Object.keys(setA);
+  for (var k = 0; k < langsA.length; k++) {
+    if (setB[langsA[k]]) {
+      var label = langNames[langsA[k]] || langsA[k];
+      var selAttr = langsA[k] === 'ja' ? ' selected' : '';
+      html += '<option value="' + safeAttr(langsA[k]) + '"' + selAttr + '>' + escapeHtml(label) + '</option>';
+    }
+  }
+  if (!html) html = '<option value="ja">日本語</option>';
+  langSel.innerHTML = html;
+}
+
+function runAsrCompareAll() {
+  var selDirs = Object.keys(_cmpSelectedDirs);
+  if (!selDirs.length) { toast('请先勾选要处理的文件夹', 'info'); return; }
+
+  var models = getCmpSelectedModels();
+  var lang = document.getElementById('cmp-lang-select').value || 'ja';
+  var device = document.getElementById('cmp-device-select').value || 'cuda';
+
+  document.getElementById('cmp-progress').style.display = 'block';
+  document.getElementById('cmp-progress-fill').style.width = '0%';
+  document.getElementById('cmp-progress-text').textContent = '启动中...';
+  document.getElementById('btn-cmp-stop').style.display = 'inline-block';
+  document.getElementById('cmp-summary').style.display = 'none';
+  document.getElementById('cmp-empty-state').style.display = 'none';
+  document.getElementById('btn-cmp-run').disabled = true;
+  document.getElementById('btn-cmp-run').textContent = '处理中...';
+  _cmpResults = {};
+
+  var url = API + '/api/asr-compare/run-all?model_a=' + encodeURIComponent(models.a) +
+    '&model_b=' + encodeURIComponent(models.b) +
+    '&language=' + encodeURIComponent(lang) +
+    '&device=' + encodeURIComponent(device);
+  for (var i = 0; i < selDirs.length; i++) {
+    url += '&dirs=' + encodeURIComponent(selDirs[i]);
+  }
+
+  fetch(url, { method: 'POST' }).then(function(resp) { return resp.json(); }).then(function(data) {
+    if (data.status !== 'started') {
+      toast('启动对比失败', 'error');
+      document.getElementById('btn-cmp-run').disabled = false;
+      document.getElementById('btn-cmp-run').textContent = '开始对比';
+      return;
+    }
+    _cmpJobId = data.job_id;
+    toast('ASR 对比任务已启动，共 ' + data.total + ' 个文件', 'success');
+    startCmpPolling();
+  }).catch(function(e) {
+    toast('启动失败: ' + e.message, 'error');
+    document.getElementById('btn-cmp-run').disabled = false;
+    document.getElementById('btn-cmp-run').textContent = '开始对比';
+  });
+}
+
+function startCmpPolling() {
+  if (_cmpPollTimer) clearInterval(_cmpPollTimer);
+  _cmpPollTimer = setInterval(pollCmpJob, 1500);
+  pollCmpJob();
+}
+
+function stopCmpPolling() {
+  if (_cmpPollTimer) { clearInterval(_cmpPollTimer); _cmpPollTimer = null; }
+}
+
+async function pollCmpJob() {
+  if (!_cmpJobId) { stopCmpPolling(); return; }
+  try {
+    var resp = await fetch(API + '/api/asr-compare/job/' + _cmpJobId);
+    var job = await resp.json();
+    var fill = document.getElementById('cmp-progress-fill');
+    var textEl = document.getElementById('cmp-progress-text');
+    fill.style.width = (job.progress || 0) + '%';
+    textEl.textContent = job.current_step || '处理中...';
+
+    if (job.status === 'completed') {
+      _cmpResetUI();
+      _cmpResults = job.results || {};
+      document.getElementById('cmp-progress-text').textContent =
+        '处理完成！共 ' + job.total + ' 个文件，' + (job.flagged_count || 0) + ' 个异常';
+      document.getElementById('btn-cmp-run').disabled = false;
+      document.getElementById('btn-cmp-run').textContent = '重新对比';
+      document.getElementById('btn-cmp-package').disabled = false;
+      renderCmpSummary();
+      renderCmpResults();
+      loadAsrCompareFiles();
+      toast('ASR 对比完成 — ' + (job.flagged_count || 0) + ' 个异常', job.flagged_count > 0 ? 'info' : 'success');
+    } else if (job.status === 'failed') {
+      _cmpResetUI();
+      textEl.textContent = '失败: ' + (job.error || '未知错误');
+      document.getElementById('btn-cmp-run').disabled = false;
+      document.getElementById('btn-cmp-run').textContent = '重新对比';
+      toast('ASR 对比失败', 'error');
+    } else if (job.status === 'cancelled') {
+      _cmpResetUI();
+      _cmpResults = job.results || {};
+      textEl.textContent = '已中止 — 完成 ' + (job.completed || 0) + '/' + job.total + ' 个文件';
+      document.getElementById('btn-cmp-run').disabled = false;
+      document.getElementById('btn-cmp-run').textContent = '重新对比';
+      renderCmpSummary();
+      renderCmpResults();
+      loadAsrCompareFiles();
+      toast('ASR 对比已中止', 'info');
+    }
+  } catch(e) { console.error(e); }
+}
+
+function _cmpResetUI() {
+  stopCmpPolling();
+  document.getElementById('btn-cmp-stop').style.display = 'none';
+}
+
+function stopAsrCompare() {
+  if (!_cmpJobId) return;
+  if (!confirm('确认中止当前的 ASR 对比任务？')) return;
+  fetch(API + '/api/asr-compare/cancel', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ job_id: _cmpJobId })
+  }).then(function(resp) { return resp.json(); }).then(function(data) {
+    if (data.status === 'ok') {
+      toast('正在中止...', 'info');
+    }
+  }).catch(function(e) { toast('中止失败: ' + e.message, 'error'); });
+}
+
+function renderCmpSummary() {
+  var paths = Object.keys(_cmpResults);
+  var total = paths.length;
+  var normal = 0, flagged = 0, discarded = 0;
+  for (var i = 0; i < paths.length; i++) {
+    var r = _cmpResults[paths[i]];
+    if (r.user_action === 'discarded') { discarded++; }
+    else if (r.flagged && r.user_action !== 'kept') { flagged++; }
+    else { normal++; }
+  }
+  document.getElementById('cmp-total-num').textContent = total;
+  document.getElementById('cmp-normal-num').textContent = normal;
+  document.getElementById('cmp-flagged-num').textContent = flagged;
+  document.getElementById('cmp-discarded-num').textContent = discarded;
+  document.getElementById('cmp-summary').style.display = 'block';
+}
+
+function renderCmpResults() {
+  var results = [];
+  var paths = Object.keys(_cmpResults);
+  for (var i = 0; i < paths.length; i++) {
+    results.push(_cmpResults[paths[i]]);
+  }
+  results.sort(function(a, b) {
+    return (a.source_dir || '').localeCompare(b.source_dir || '') || (a.audio_name || '').localeCompare(b.audio_name || '');
+  });
+
+  var tbody = document.getElementById('cmp-result-tbody');
+  if (!results.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:20px;">无结果</td></tr>';
+    return;
+  }
+
+  var html = '';
+  for (var i = 0; i < results.length; i++) {
+    var r = results[i];
+    var diff = r.diff_percent;
+    var diffStr = (diff != null) ? diff + '%' : '—';
+    var diffClass = (diff != null && diff > 10) ? 'flagged' : 'normal';
+    var emptyModels = r.empty_models || [];
+    var hasEmpty = emptyModels.length > 0;
+    if (hasEmpty) diffClass = 'flagged';
+    var statusHtml, actionsHtml = '';
+
+    if (r.error) {
+      statusHtml = '<span style="color:var(--danger);">错误</span>';
+      actionsHtml = '<span style="color:var(--text2);font-size:11px;">' + escapeHtml(r.error) + '</span>';
+    } else if (r.user_action === 'discarded') {
+      statusHtml = '<span style="color:var(--warning);">已舍弃</span>';
+      diffClass = 'flagged';
+      actionsHtml = '<span style="color:var(--text2);font-size:11px;">已移至废弃目录</span>';
+    } else if (hasEmpty) {
+      diffStr = '空结果';
+      statusHtml = '<span style="color:var(--danger);font-weight:600;">⚠ 空结果</span>';
+      actionsHtml = '<div style="font-size:10px;color:var(--text2);margin-bottom:4px;">' + escapeHtml(emptyModels.join(', ')) + ' 无输出</div>' +
+        '<div class="actions-cell">' +
+        '<button class="btn btn-primary" style="font-size:10px;padding:3px 10px;" onclick="cmpKeepAudio(\'' + safeAttr(r.audio_path) + '\')">保留</button>' +
+        '<button class="btn" style="font-size:10px;padding:3px 10px;background:var(--danger);color:#fff;" onclick="cmpDiscardAudio(\'' + safeAttr(r.audio_path) + '\')">舍弃</button>' +
+        '<button class="btn btn-secondary" style="font-size:10px;padding:3px 8px;" onclick="cmpViewSrts(\'' + safeAttr(JSON.stringify(r.srt_paths || {})) + '\')">查看字幕</button>' +
+      '</div>';
+    } else if (r.flagged && r.user_action !== 'kept') {
+      statusHtml = '<span style="color:var(--danger);font-weight:600;">⚠ 异常</span>';
+      actionsHtml = '<div class="actions-cell">' +
+        '<button class="btn btn-primary" style="font-size:10px;padding:3px 10px;" onclick="cmpKeepAudio(\'' + safeAttr(r.audio_path) + '\')">保留</button>' +
+        '<button class="btn" style="font-size:10px;padding:3px 10px;background:var(--danger);color:#fff;" onclick="cmpDiscardAudio(\'' + safeAttr(r.audio_path) + '\')">舍弃</button>' +
+        '<button class="btn btn-secondary" style="font-size:10px;padding:3px 8px;" onclick="cmpViewSrts(\'' + safeAttr(JSON.stringify(r.srt_paths || {})) + '\')">查看字幕</button>' +
+      '</div>';
+    } else {
+      statusHtml = '<span style="color:var(--success);">✓ 正常</span>';
+      actionsHtml = '<button class="btn btn-secondary" style="font-size:10px;padding:3px 8px;" onclick="cmpViewSrts(\'' + safeAttr(JSON.stringify(r.srt_paths || {})) + '\')">查看字幕</button>';
+    }
+
+    html += '<tr>' +
+      '<td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px;" title="' + escapeHtml(r.audio_name || '') + '">' + escapeHtml(r.audio_name || '—') + '</td>' +
+      '<td style="color:var(--text2);font-size:11px;">' + escapeHtml(r.source_dir || '—') + '</td>' +
+      '<td><span class="cmp-diff-badge ' + diffClass + '">' + diffStr + '</span></td>' +
+      '<td>' + statusHtml + '</td>' +
+      '<td>' + actionsHtml + '</td>' +
+    '</tr>';
+  }
+  tbody.innerHTML = html;
+}
+
+function cmpKeepAudio(path) {
+  fetch(API + '/api/asr-compare/keep', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: path })
+  }).then(function(resp) { return resp.json(); }).then(function(data) {
+    if (data.status === 'ok') {
+      if (_cmpResults[path]) { _cmpResults[path].user_action = 'kept'; _cmpResults[path].flagged = false; }
+      renderCmpSummary();
+      renderCmpResults();
+      loadAsrCompareFiles();
+      toast('已保留', 'success');
+    }
+  }).catch(function(e) { toast('操作失败: ' + e.message, 'error'); });
+}
+
+function cmpDiscardAudio(path) {
+  if (!confirm('确认舍弃此音频？音频将移至废弃目录，关联的字幕文件也会被移动。')) return;
+  fetch(API + '/api/asr-compare/discard', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: path })
+  }).then(function(resp) { return resp.json(); }).then(function(data) {
+    if (data.status === 'ok') {
+      if (_cmpResults[path]) { _cmpResults[path].user_action = 'discarded'; _cmpResults[path].flagged = false; }
+      renderCmpSummary();
+      renderCmpResults();
+      loadAsrCompareFiles();
+      toast('已舍弃', 'success');
+    }
+  }).catch(function(e) { toast('操作失败: ' + e.message, 'error'); });
+}
+
+function cmpViewSrts(pathsJson) {
+  try {
+    var paths = JSON.parse(pathsJson);
+    var keys = Object.keys(paths);
+    for (var i = 0; i < keys.length; i++) {
+      window.open(API + '/api/asr-compare/stream?path=' + encodeURIComponent(paths[keys[i]]), '_blank');
+    }
+  } catch(e) { console.error(e); }
+}
+
+function packageAsrCompareResults() {
+  if (!confirm('确认打包所有保留的结果？\n\n将复制音频和字幕到 asr_compare_output/ 目录，按来源分类组织。')) return;
+
+  var toPackage = [];
+  var paths = Object.keys(_cmpResults);
+  for (var i = 0; i < paths.length; i++) {
+    var r = _cmpResults[paths[i]];
+    if (r.user_action !== 'discarded' && !r.error) {
+      toPackage.push(r);
+    }
+  }
+
+  fetch(API + '/api/asr-compare/package', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ results: toPackage })
+  }).then(function(resp) { return resp.json(); }).then(function(data) {
+    if (data.status === 'ok') {
+      toast('打包完成！已复制 ' + data.packaged + ' 组到 ' + data.output_dir, 'success');
+    }
+  }).catch(function(e) { toast('打包失败: ' + e.message, 'error'); });
 }
 
 // ============================================================
@@ -5335,6 +6769,10 @@ var _splitJobId = null;
 window._splitLoaded = false;
 var _splitPollTimer = null;
 var _splitSubFiles = [];
+var _splitSelected = {};       // { path: true } for multi-select
+var _splitQueue = [];          // ordered array of { name, path } to process
+var _splitQueueIndex = -1;     // current position in queue
+var _splitVideosCache = [];    // cached video list for batch use
 
 async function loadSplitVideos() {
   var container = document.getElementById('split-video-list');
@@ -5366,28 +6804,50 @@ async function loadSplitVideos() {
         filtered.push(videos[i]);
       }
     }
+    _splitVideosCache = filtered;
     if (!filtered.length) {
       container.innerHTML = '<div class="empty-state"><p>未找到 MKV/MP4 文件<br><small>请将文件放入 data/downloads/ 目录</small></p></div>';
+      updateSplitBatchUI();
     } else {
       var html = '';
       for (var i = 0; i < filtered.length; i++) {
         var v = filtered[i];
         var sel = (v.path === _splitVideoPath) ? ' selected' : '';
+        var checkedClass = _splitSelected[v.path] ? ' checked' : '';
         var vBase = v.name.replace(/\.[^.]+$/, '').toLowerCase();
         var clipCount = clipDirMap[vBase] || 0;
         var splitTag = clipCount > 0
           ? '<span style="color:var(--success);font-size:10px;">已切片 (' + clipCount + '个)</span>'
           : '<span style="color:var(--text2);font-size:10px;">未切片</span>';
-        html += '<div class="split-file-item' + sel + '" onclick="selectSplitVideo(\'' +
-          escapeHtml(v.name).replace(/'/g, "\\'") + '\',\'' +
-          v.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')" style="flex-wrap:wrap;">' +
-          '<div style="flex:1;min-width:0;">' +
+        var queueBadge = '';
+        if (_splitQueue.length > 0) {
+          var qi = -1;
+          for (var qj = 0; qj < _splitQueue.length; qj++) {
+            if (_splitQueue[qj].path === v.path) { qi = qj; break; }
+          }
+          if (qi >= 0) {
+            if (qi < _splitQueueIndex) {
+              queueBadge = '<span class="queue-badge queue-done">✅</span>';
+            } else if (qi === _splitQueueIndex) {
+              queueBadge = '<span class="queue-badge queue-processing">🔄 处理中</span>';
+            } else {
+              queueBadge = '<span class="queue-badge queue-waiting">⏳ 等待</span>';
+            }
+          }
+        }
+        html += '<div class="split-file-item' + sel + checkedClass + '" data-split-path="' + safeAttr(v.path) + '" style="flex-wrap:wrap;">' +
+          '<input type="checkbox" class="item-check" data-split-path="' + safeAttr(v.path) + '" onclick="event.stopPropagation();splitToggleItem(this)">' +
+          '<div style="flex:1;min-width:0;" onclick="selectSplitVideo(\'' +
+            escapeHtml(v.name).replace(/'/g, "\\'") + '\',\'' +
+            v.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">' +
             '<div class="file-name">' + escapeHtml(v.name) + '</div>' +
-            '<div style="font-size:11px;color:var(--text2);margin-top:2px;">' + v.size_mb + ' MB | ' + (v.time_str || '') + ' | ' + splitTag + '</div>' +
+            '<div class="file-info" style="font-size:11px;color:var(--text2);margin-top:2px;">' + v.size_mb + ' MB | ' + (v.time_str || '') + ' | <span class="split-status">' + splitTag + '</span></div>' +
           '</div>' +
+          queueBadge +
           '</div>';
       }
       container.innerHTML = html;
+      updateSplitBatchUI();
     }
     // Auto-select pending MKV from extract→split jump
     if (_pendingSplitMkvPath && filtered.length) {
@@ -5404,7 +6864,128 @@ async function loadSplitVideos() {
   }
 }
 
+async function refreshSplitVideos() {
+  var container = document.getElementById('split-video-list');
+  // If list hasn't been loaded yet, do a full load
+  if (!container.querySelectorAll('.split-file-item').length) {
+    loadSplitVideos();
+    return;
+  }
+  try {
+    var resp = await fetch(API + '/api/local/videos');
+    if (!resp.ok) throw new Error(await resp.text());
+    var data = await resp.json();
+    var videos = data.videos || [];
+
+    var clipDirMap = {};
+    try {
+      var cdResp = await fetch(API + '/api/split/clip-dirs');
+      if (cdResp.ok) {
+        var cdData = await cdResp.json();
+        var dirs = cdData.dirs || [];
+        for (var di = 0; di < dirs.length; di++) {
+          clipDirMap[dirs[di].name.toLowerCase()] = dirs[di].clip_count;
+        }
+      }
+    } catch(e) { console.error(e); }
+
+    var filtered = [];
+    var newPathSet = {};
+    for (var i = 0; i < videos.length; i++) {
+      var ext = videos[i].name.toLowerCase().slice(-4);
+      if (ext === '.mkv' || ext === '.mp4') {
+        filtered.push(videos[i]);
+        newPathSet[videos[i].path] = true;
+      }
+    }
+    _splitVideosCache = filtered;
+
+    if (!filtered.length) {
+      container.innerHTML = '<div class="empty-state"><p>未找到 MKV/MP4 文件<br><small>请将文件放入 data/downloads/ 目录</small></p></div>';
+      updateSplitBatchUI();
+      return;
+    }
+
+    // Map existing DOM items by path
+    var existingItems = container.querySelectorAll('.split-file-item');
+    var existingByPath = {};
+    for (var i = 0; i < existingItems.length; i++) {
+      var p = existingItems[i].getAttribute('data-split-path');
+      if (p) existingByPath[p] = existingItems[i];
+    }
+
+    // Update existing items' status badges
+    for (var i = 0; i < existingItems.length; i++) {
+      var item = existingItems[i];
+      var path = item.getAttribute('data-split-path');
+      if (!path) continue;
+      if (!newPathSet[path]) {
+        item.remove();
+        continue;
+      }
+      // Find matching video in filtered list
+      var v = null;
+      for (var fi = 0; fi < filtered.length; fi++) {
+        if (filtered[fi].path === path) { v = filtered[fi]; break; }
+      }
+      if (!v) { item.remove(); continue; }
+      var vBase = v.name.replace(/\.[^.]+$/, '').toLowerCase();
+      var clipCount = clipDirMap[vBase] || 0;
+      var splitTag = clipCount > 0
+        ? '<span style="color:var(--success);font-size:10px;">已切片 (' + clipCount + '个)</span>'
+        : '<span style="color:var(--text2);font-size:10px;">未切片</span>';
+      var infoDiv = item.querySelector('.file-info');
+      if (infoDiv) {
+        var statusSpan = infoDiv.querySelector('.split-status');
+        var statusHtml = statusSpan ? '<span class="split-status">' + splitTag + '</span>' : splitTag;
+        infoDiv.innerHTML = v.size_mb + ' MB | ' + (v.time_str || '') + ' | ' + statusHtml;
+      }
+      // Update selection class
+      item.classList.toggle('selected', path === _splitVideoPath);
+      // Update checked class
+      item.classList.toggle('checked', _splitSelected[path]);
+      var cb = item.querySelector('.item-check');
+      if (cb) cb.checked = !!_splitSelected[path];
+    }
+
+    // Add new items in server order (newest first = prepend)
+    var firstItem = container.querySelector('.split-file-item');
+    for (var i = filtered.length - 1; i >= 0; i--) {
+      var v = filtered[i];
+      if (existingByPath[v.path]) continue;
+      var sel = (v.path === _splitVideoPath) ? ' selected' : '';
+      var checkedClass = _splitSelected[v.path] ? ' checked' : '';
+      var vBase = v.name.replace(/\.[^.]+$/, '').toLowerCase();
+      var clipCount = clipDirMap[vBase] || 0;
+      var splitTag = clipCount > 0
+        ? '<span style="color:var(--success);font-size:10px;">已切片 (' + clipCount + '个)</span>'
+        : '<span style="color:var(--text2);font-size:10px;">未切片</span>';
+      var div = document.createElement('div');
+      div.className = 'split-file-item' + sel + checkedClass;
+      div.setAttribute('data-split-path', v.path);
+      div.style.flexWrap = 'wrap';
+      div.innerHTML = '<input type="checkbox" class="item-check" data-split-path="' + safeAttr(v.path) + '" onclick="event.stopPropagation();splitToggleItem(this)"' + (_splitSelected[v.path] ? ' checked' : '') + '>' +
+        '<div style="flex:1;min-width:0;" onclick="selectSplitVideo(\'' +
+          escapeHtml(v.name).replace(/'/g, "\\'") + '\',\'' +
+          v.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">' +
+          '<div class="file-name">' + escapeHtml(v.name) + '</div>' +
+          '<div class="file-info" style="font-size:11px;color:var(--text2);margin-top:2px;">' + v.size_mb + ' MB | ' + (v.time_str || '') + ' | <span class="split-status">' + splitTag + '</span></div>' +
+        '</div>' +
+        '</div>';
+      container.insertBefore(div, firstItem);
+      firstItem = div;
+    }
+
+    updateSplitBatchUI();
+  } catch(e) {
+    container.innerHTML = '<div class="empty-state"><p>刷新失败: ' + escapeHtml(e.message) + '</p></div>';
+  }
+}
+
 function selectSplitVideo(name, path) {
+  // Don't interrupt active batch queue
+  if (_splitQueue.length > 0 && _splitQueueIndex >= 0 && _splitQueueIndex < _splitQueue.length) return;
+
   // Unescape backslashes in path
   var realPath = path.replace(/\\\\/g, '\\');
   _splitVideoPath = realPath;
@@ -5414,13 +6995,8 @@ function selectSplitVideo(name, path) {
   var items = document.querySelectorAll('#split-video-list .split-file-item');
   for (var i = 0; i < items.length; i++) {
     items[i].classList.remove('selected');
-  }
-  // Find and select the matching item
-  for (var i = 0; i < items.length; i++) {
-    var onclick = items[i].getAttribute('onclick') || '';
-    if (onclick.indexOf(name.replace(/'/g, "\\'")) >= 0) {
+    if (items[i].getAttribute('data-split-path') === realPath) {
       items[i].classList.add('selected');
-      break;
     }
   }
 
@@ -5438,6 +7014,206 @@ function selectSplitVideo(name, path) {
   // Load existing clips for this video
   loadSplitClips();
   document.getElementById('split-results-section').style.display = 'block';
+}
+
+// --- Split batch selection ---
+function splitToggleItem(cb) {
+  var path = cb.getAttribute('data-split-path');
+  if (!path) return;
+  if (cb.checked) { _splitSelected[path] = true; }
+  else { delete _splitSelected[path]; }
+  updateSplitBatchUI();
+  var item = cb.closest('.split-file-item');
+  if (item) item.classList.toggle('checked', cb.checked);
+}
+
+function splitToggleSelectAll() {
+  var masterCb = document.getElementById('split-select-all-cb');
+  var checked = masterCb.checked;
+  _splitSelected = {};
+  var cbs = document.querySelectorAll('#split-video-list .item-check');
+  for (var i = 0; i < cbs.length; i++) {
+    cbs[i].checked = checked;
+    var path = cbs[i].getAttribute('data-split-path');
+    if (checked && path) _splitSelected[path] = true;
+    var item = cbs[i].closest('.split-file-item');
+    if (item) item.classList.toggle('checked', checked);
+  }
+  updateSplitBatchUI();
+}
+
+function updateSplitBatchUI() {
+  var bar = document.getElementById('split-batch-bar');
+  var count = Object.keys(_splitSelected).length;
+  document.getElementById('split-selected-count').textContent = '已选 ' + count + ' 个';
+  document.getElementById('btn-split-batch-run').disabled = count === 0 || _splitQueue.length > 0;
+  bar.classList.toggle('visible', _splitVideosCache.length > 0);
+
+  var masterCb = document.getElementById('split-select-all-cb');
+  var cbs = document.querySelectorAll('#split-video-list .item-check');
+  if (cbs.length === 0) {
+    masterCb.checked = false;
+    masterCb.indeterminate = false;
+  } else if (count === cbs.length) {
+    masterCb.checked = true;
+    masterCb.indeterminate = false;
+  } else if (count > 0) {
+    masterCb.checked = false;
+    masterCb.indeterminate = true;
+  } else {
+    masterCb.checked = false;
+    masterCb.indeterminate = false;
+  }
+
+  for (var i = 0; i < cbs.length; i++) {
+    var path = cbs[i].getAttribute('data-split-path');
+    cbs[i].checked = !!_splitSelected[path];
+  }
+}
+
+function runSplitBatch() {
+  var keys = Object.keys(_splitSelected);
+  if (!keys.length) { toast('请先勾选文件', 'info'); return; }
+
+  _splitQueue = [];
+  for (var i = 0; i < _splitVideosCache.length; i++) {
+    if (_splitSelected[_splitVideosCache[i].path]) {
+      _splitQueue.push({ name: _splitVideosCache[i].name, path: _splitVideosCache[i].path });
+    }
+  }
+  _splitQueueIndex = 0;
+
+  _splitSelected = {};
+  document.getElementById('split-select-all-cb').checked = false;
+  document.getElementById('btn-split-batch-run').disabled = true;
+
+  // Preload subtitles for subtitle mode
+  if (_splitMode === 'subtitle') {
+    loadSplitSubs().then(function() { processNextSplitInQueue(); });
+  } else {
+    processNextSplitInQueue();
+  }
+  loadSplitVideos();
+}
+
+function processNextSplitInQueue() {
+  if (_splitQueueIndex >= _splitQueue.length) {
+    _splitQueue = [];
+    _splitQueueIndex = -1;
+    document.getElementById('split-queue-status').style.display = 'none';
+    document.getElementById('btn-split-batch-run').disabled = Object.keys(_splitSelected).length === 0;
+    resetSplitUI();
+    loadSplitVideos();
+    loadSplitClipDirs();
+    toast('全部切割批量任务已完成', 'success');
+    return;
+  }
+
+  var item = _splitQueue[_splitQueueIndex];
+  document.getElementById('split-queue-status').style.display = 'inline';
+  document.getElementById('split-queue-status').textContent =
+    '队列: ' + (_splitQueueIndex + 1) + '/' + _splitQueue.length + ' — ' + item.name;
+
+  _splitVideoPath = item.path;
+  _splitVideoName = item.name;
+
+  // Build payload (same as runSplit but for current queue item)
+  var payload = {
+    mode: _splitMode,
+    video_path: item.path,
+    hw_accel: document.getElementById('split-hw-accel').value,
+    output_ext: document.getElementById('split-output-ext').value,
+  };
+
+  if (_splitMode === 'subtitle') {
+    // Auto-match subtitle for this video
+    if (!_splitSubFiles.length) {
+      toast('无可用字幕文件，跳过: ' + item.name, 'error');
+      _splitQueueIndex++;
+      processNextSplitInQueue();
+      return;
+    }
+    autoMatchSubtitle();
+    var subIdx = parseInt(document.getElementById('split-sub-select').value);
+    if (isNaN(subIdx) || subIdx < 0 || subIdx >= _splitSubFiles.length) {
+      toast('无法匹配字幕，跳过: ' + item.name, 'error');
+      _splitQueueIndex++;
+      processNextSplitInQueue();
+      return;
+    }
+    payload.subtitle_path = _splitSubFiles[subIdx].path;
+    payload.padding = parseFloat(document.getElementById('split-padding').value) || 0.1;
+    payload.group_count = parseInt(document.getElementById('split-group-count').value) || 1;
+    payload.deduplicate = document.getElementById('split-deduplicate').checked;
+  } else if (_splitMode === 'duration') {
+    var segDur = parseTimeInput(document.getElementById('split-seg-duration').value);
+    if (!segDur || segDur <= 0) {
+      toast('无效的片段时长，停止队列', 'error');
+      resetSplitUI();
+      _splitQueue = []; _splitQueueIndex = -1;
+      loadSplitVideos();
+      return;
+    }
+    payload.segment_duration = segDur;
+    var st = parseTimeInput(document.getElementById('split-start-time').value);
+    if (st !== null) payload.start_time = st;
+    var et = parseTimeInput(document.getElementById('split-end-time').value);
+    if (et !== null) payload.end_time = et;
+  } else if (_splitMode === 'size') {
+    var tsize = parseFloat(document.getElementById('split-target-size').value);
+    if (!tsize || tsize <= 0) {
+      toast('无效的目标大小，停止队列', 'error');
+      resetSplitUI();
+      _splitQueue = []; _splitQueueIndex = -1;
+      loadSplitVideos();
+      return;
+    }
+    payload.target_size_mb = tsize;
+  } else if (_splitMode === 'trim') {
+    var trimStart = parseTimeInput(document.getElementById('split-trim-start').value);
+    var trimEnd = parseTimeInput(document.getElementById('split-trim-end').value);
+    if (trimStart === null || trimEnd === null || trimEnd <= trimStart) {
+      toast('无效的裁剪时间，停止队列', 'error');
+      resetSplitUI();
+      _splitQueue = []; _splitQueueIndex = -1;
+      loadSplitVideos();
+      return;
+    }
+    payload.start_time = trimStart;
+    payload.end_time = trimEnd;
+  }
+
+  // Update UI
+  document.getElementById('split-no-video').style.display = 'none';
+  document.getElementById('split-config-panel').style.display = 'block';
+  document.getElementById('split-current-video').textContent = item.name;
+  document.getElementById('split-output-dir').textContent = 'data/clips/' + item.name.replace(/\.[^.]+$/, '') + '/';
+  document.getElementById('btn-split-run').style.display = 'none';
+  document.getElementById('btn-split-cancel').style.display = 'inline-block';
+  document.getElementById('split-progress-bar').style.display = 'block';
+  document.getElementById('split-progress-fill').style.width = '2%';
+  document.getElementById('split-progress-text').textContent = '队列 ' + (_splitQueueIndex + 1) + '/' + _splitQueue.length + ' — 提交任务...';
+  document.getElementById('split-status-text').textContent = '';
+
+  loadSplitVideos();
+
+  fetch(API + '/api/split/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }).then(function(resp) {
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    return resp.json();
+  }).then(function(data) {
+    _splitJobId = data.job_id;
+    document.getElementById('split-status-text').textContent = '任务 ' + _splitJobId + ' 运行中...';
+    toast('队列 ' + (_splitQueueIndex + 1) + '/' + _splitQueue.length + ': ' + item.name, 'success');
+    startSplitPolling();
+  }).catch(function(e) {
+    toast('启动失败: ' + e.message + ' — ' + item.name, 'error');
+    _splitQueueIndex++;
+    processNextSplitInQueue();
+  });
 }
 
 async function loadSplitSubs() {
@@ -5605,6 +7381,7 @@ function switchSplitMode(mode) {
   document.getElementById('split-cfg-subtitle').style.display = (mode === 'subtitle') ? 'block' : 'none';
   document.getElementById('split-cfg-duration').style.display = (mode === 'duration') ? 'block' : 'none';
   document.getElementById('split-cfg-size').style.display = (mode === 'size') ? 'block' : 'none';
+  document.getElementById('split-cfg-trim').style.display = (mode === 'trim') ? 'block' : 'none';
 }
 
 function parseTimeInput(val) {
@@ -5663,6 +7440,19 @@ async function runSplit() {
       return;
     }
     payload.target_size_mb = tsize;
+  } else if (_splitMode === 'trim') {
+    var trimStart = parseTimeInput(document.getElementById('split-trim-start').value);
+    var trimEnd = parseTimeInput(document.getElementById('split-trim-end').value);
+    if (trimStart === null || trimEnd === null) {
+      toast('请输入有效的开始和结束时间', 'error');
+      return;
+    }
+    if (trimEnd <= trimStart) {
+      toast('结束时间必须大于开始时间', 'error');
+      return;
+    }
+    payload.start_time = trimStart;
+    payload.end_time = trimEnd;
   }
 
   try {
@@ -5693,6 +7483,12 @@ async function runSplit() {
 
 function cancelSplit() {
   if (!_splitJobId) return;
+  // Cancel queue if active
+  if (_splitQueue.length > 0) {
+    _splitQueue = [];
+    _splitQueueIndex = -1;
+    document.getElementById('split-queue-status').style.display = 'none';
+  }
   fetch(API + '/api/jobs/' + _splitJobId + '/cancel', { method: 'POST' }).catch(function(){});
   toast('正在取消...', 'info');
 }
@@ -5720,23 +7516,45 @@ async function pollSplitJob() {
 
     if (job.status === 'completed') {
       stopSplitPolling();
-      resetSplitUI();
       toast('切割完成! 共生成 ' + (job.clip_count || 0) + ' 个片段', 'success');
       loadSplitClips();
       loadSplitClipDirs();
+
+      // Queue continuation
+      if (_splitQueue.length > 0 && _splitQueueIndex < _splitQueue.length) {
+        _splitQueueIndex++;
+        processNextSplitInQueue();
+      } else {
+        resetSplitUI();
+      }
     } else if (job.status === 'failed') {
       stopSplitPolling();
-      resetSplitUI();
       var errMsg = '切割失败';
       if (job.steps && job.steps.length) {
         errMsg += ': ' + (job.steps[job.steps.length - 1].message || '');
       }
       toast(errMsg, 'error');
+
+      // Queue continuation (skip failed)
+      if (_splitQueue.length > 0 && _splitQueueIndex < _splitQueue.length) {
+        _splitQueueIndex++;
+        processNextSplitInQueue();
+      } else {
+        resetSplitUI();
+      }
     } else if (job.status === 'cancelled') {
       stopSplitPolling();
-      resetSplitUI();
       toast('已取消', 'info');
       loadSplitClips();
+
+      // Cancel entire queue
+      if (_splitQueue.length > 0) {
+        _splitQueue = [];
+        _splitQueueIndex = -1;
+        document.getElementById('split-queue-status').style.display = 'none';
+        loadSplitVideos();
+      }
+      resetSplitUI();
     }
   } catch(e) {
     // Job may have been deleted

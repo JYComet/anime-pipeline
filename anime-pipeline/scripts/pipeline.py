@@ -152,15 +152,18 @@ class Pipeline:
     def get_all_jobs(self) -> list[dict]:
         return [j.to_dict() for j in self.jobs.values()]
 
-    def cancel_job(self, job_id: str) -> bool:
-        """Cancel a running job — kills subprocess, stops all work, marks as failed."""
+    def cancel_job(self, job_id: str) -> dict:
+        """Cancel a running job — kills subprocess, cleans up files, marks as cancelled."""
+        import shutil
         job = self.get_job(job_id)
         if not job:
-            return False
+            return {"status": "error", "message": "Job not found"}
+        if job.status not in ("running", "pending"):
+            return {"status": "error", "message": f"Job is {job.status}, cannot cancel"}
         # Kill running subprocess (ffmpeg extraction/splitting)
         job.kill_process()
         job.cancelled = True
-        job.status = "failed"
+        job.status = "cancelled"
         job.current_step = "cancelled"
         job.progress = 0
         job.steps.append(StepResult(
@@ -168,12 +171,43 @@ class Pipeline:
             status=StepStatus.FAILED,
             message="手动取消 — 所有处理已中止",
         ))
-        # Clear partial outputs
+        cleaned = []
+
+        # Clean clip directory
+        if job.clip_dir and os.path.exists(job.clip_dir):
+            try:
+                shutil.rmtree(job.clip_dir)
+                cleaned.append(f"clips: {os.path.basename(job.clip_dir)}")
+            except Exception:
+                pass
+
+        # Clean extracted subtitle files
+        for sp in job.subtitle_paths:
+            if os.path.exists(sp):
+                try:
+                    os.remove(sp)
+                    cleaned.append(f"subtitle: {os.path.basename(sp)}")
+                except Exception:
+                    pass
+
+        # Clean download if it came from magnet
+        if job.magnet and job.mkv_path and os.path.exists(job.mkv_path):
+            download_dir = os.path.dirname(job.mkv_path)
+            if download_dir.startswith(DOWNLOAD_DIR):
+                try:
+                    for f in os.listdir(download_dir):
+                        fpath = os.path.join(download_dir, f)
+                        if os.path.isfile(fpath):
+                            os.remove(fpath)
+                    cleaned.append(f"download: {os.path.basename(job.mkv_path)}")
+                except Exception:
+                    pass
+
         job.subtitle_paths = []
         job.clip_paths = []
         job.clip_dir = ""
         self._save_jobs()
-        return True
+        return {"status": "ok", "message": f"Cancelled, cleaned: {', '.join(cleaned) if cleaned else 'nothing to clean'}"}
 
     def delete_job(self, job_id: str) -> bool:
         """Delete a job from history."""
@@ -595,57 +629,6 @@ class Pipeline:
             "remaining": len(remaining),
             "message": f"Removed {deleted} clips with silence ratio > {max_silence_ratio}, freed {freed_mb:.1f} MB, {len(remaining)} remaining",
         }
-
-
-    def cancel_job(self, job_id: str) -> dict:
-        """Cancel a running job and clean up its data."""
-        import shutil
-        job = self.get_job(job_id)
-        if not job:
-            return {"status": "error", "message": "Job not found"}
-        if job.status not in ("running", "pending"):
-            return {"status": "error", "message": f"Job is {job.status}, cannot cancel"}
-
-        job.cancelled = True
-        job.status = "cancelled"
-        cleaned = []
-
-        # Clean clip directory
-        if job.clip_dir and os.path.exists(job.clip_dir):
-            try:
-                shutil.rmtree(job.clip_dir)
-                cleaned.append(f"clips: {os.path.basename(job.clip_dir)}")
-            except Exception:
-                pass
-
-        # Clean extracted subtitle files
-        for sp in job.subtitle_paths:
-            if os.path.exists(sp):
-                try:
-                    os.remove(sp)
-                    cleaned.append(f"subtitle: {os.path.basename(sp)}")
-                except Exception:
-                    pass
-
-        # Clean download if it came from magnet
-        if job.magnet and job.mkv_path and os.path.exists(job.mkv_path):
-            download_dir = os.path.dirname(job.mkv_path)
-            # Only remove if it's under our DOWNLOAD_DIR
-            if download_dir.startswith(DOWNLOAD_DIR):
-                try:
-                    # Remove the MKV file and any associated files in the same folder
-                    for f in os.listdir(download_dir):
-                        fpath = os.path.join(download_dir, f)
-                        if os.path.isfile(fpath):
-                            os.remove(fpath)
-                    cleaned.append(f"download: {os.path.basename(job.mkv_path)}")
-                except Exception:
-                    pass
-
-        with self._lock:
-            self.jobs[job_id] = job
-
-        return {"status": "ok", "message": f"Cancelled, cleaned: {', '.join(cleaned) if cleaned else 'nothing to clean'}"}
 
 
     def run_extract_and_split(

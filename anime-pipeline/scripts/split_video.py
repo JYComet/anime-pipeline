@@ -522,6 +522,50 @@ def split_video_single_range(
     return result.returncode == 0 and os.path.exists(output_path)
 
 
+def trim_video(
+    video_path: str,
+    start: float,
+    end: float,
+    output_dir: str = "",
+    hw_accel: str = "auto",
+) -> list[str]:
+    """Trim a video to a specific time range, discarding everything outside.
+
+    Args:
+        video_path: Path to the source video file
+        start: Start time in seconds (keep from this point)
+        end: End time in seconds (keep until this point)
+        output_dir: Where to write the trimmed clip
+        hw_accel: Hardware acceleration type
+
+    Returns:
+        List containing the path to the trimmed clip, or empty list on failure.
+    """
+    _split_semaphore.acquire()
+    try:
+        if not output_dir:
+            base_name = os.path.splitext(os.path.basename(video_path))[0]
+            output_dir = os.path.join(CLIPS_DIR, base_name)
+        os.makedirs(output_dir, exist_ok=True)
+
+        base_name = os.path.splitext(os.path.basename(video_path))[0]
+        # Format times for filename: 1m30s → 1m30s
+        def _fmt(t):
+            m = int(t // 60)
+            s = t % 60
+            if m > 0:
+                return f"{m}m{int(s)}s" if s == int(s) else f"{m}m{s:.1f}s"
+            return f"{int(s)}s" if s == int(s) else f"{s:.1f}s"
+
+        output_name = f"{base_name}_trim_{_fmt(start)}-{_fmt(end)}.mp4"
+        output_path = os.path.join(output_dir, output_name)
+
+        ok = split_video_single_range(video_path, start, end, output_path, hw_accel)
+        return [output_path] if ok else []
+    finally:
+        _split_semaphore.release()
+
+
 def filter_short_clips(
     clip_paths: list[str],
     min_duration: float = 2.0,

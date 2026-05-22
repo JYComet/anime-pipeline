@@ -19,6 +19,9 @@ from config import (
     PROJECT_ROOT, DATA_DIR, DOWNLOAD_DIR, SUBTITLE_DIR, CLIPS_DIR, APPROVED_DIR, CLEANED_DIR,
     CLEANED_UNREVIEWED_DIR, DENOISED_APPROVED_DIR, STITCHED_DIR,
     ASR_DIR, ASR_AUDIO_DIR, ASR_SUBTITLE_DIR,
+    ASR_COMPARE_DIR, ASR_COMPARE_SUBTITLE_DIR, ASR_COMPARE_AUDIO_DIR,
+    ASR_COMPARE_OUTPUT_DIR, ASR_COMPARE_DISCARD_DIR,
+    EMOTION_DIR, EMOTION_DENOISE_DIR,
     FFPROBE, FFMPEG
 )
 from pipeline import pipeline, PipelineJob, StepStatus
@@ -751,15 +754,6 @@ def list_jobs():
     return {"jobs": jobs}
 
 
-@app.post("/api/jobs/{job_id}/cancel")
-def cancel_job(job_id: str):
-    """Cancel a running job."""
-    ok = pipeline.cancel_job(job_id)
-    if not ok:
-        raise HTTPException(status_code=404, detail="Job not found or not running")
-    return {"status": "ok"}
-
-
 @app.delete("/api/jobs/clear")
 def clear_jobs_by_status(status: str = Query("completed", description="Status to clear: completed or failed")):
     """Delete all jobs with a given status."""
@@ -1058,7 +1052,7 @@ def approve_clip(
     clip_dir: str = Query(..., description="Path to clip directory"),
     clip_name: str = Query(..., description="Clip filename to approve"),
 ):
-    """Approve a clip: move it to the approved folder."""
+    """Approve a clip: copy it to the approved folder."""
     src = os.path.join(clip_dir, clip_name)
     if not os.path.exists(src):
         raise HTTPException(status_code=404, detail="Clip not found")
@@ -1078,7 +1072,7 @@ def approve_clip(
         return {"status": "ok", "action": "already_approved"}
 
     import shutil
-    shutil.move(src, dst)
+    shutil.copy2(src, dst)
 
     # Update review state immediately
     state = _get_review_state(clip_dir)
@@ -1097,7 +1091,7 @@ def approve_clip(
 
     threading.Thread(target=_convert, daemon=True).start()
 
-    return {"status": "ok", "action": "approved", "moved_to": dst}
+    return {"status": "ok", "action": "approved", "copied_to": dst}
 
 
 @app.post("/api/review/skip")
@@ -1118,6 +1112,79 @@ def skip_clip(
     _save_review_state(clip_dir, state)
 
     return {"status": "ok", "action": "skipped"}
+
+
+@app.post("/api/review/classify-emotion")
+def classify_emotion(
+    clip_dir: str = Query(..., description="Path to clip directory"),
+    clip_name: str = Query(..., description="Clip filename to classify"),
+    emotion: str = Query(..., description="Emotion category name"),
+):
+    """Copy the current clip to the corresponding emotion folder.
+    If the clip already exists in another emotion folder, remove it from there first."""
+    src = os.path.join(clip_dir, clip_name)
+    if not os.path.exists(src):
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    import shutil
+
+    # Remove clip from any other emotion folder (single-choice)
+    for e in EMOTIONS:
+        if e == emotion:
+            continue
+        existing = os.path.join(EMOTION_DIR, e, clip_name)
+        if os.path.exists(existing):
+            os.remove(existing)
+
+    dst_dir = os.path.join(EMOTION_DIR, emotion)
+    os.makedirs(dst_dir, exist_ok=True)
+    dst = os.path.join(dst_dir, clip_name)
+    if not os.path.exists(dst):
+        shutil.copy2(src, dst)
+
+    return {"status": "ok", "emotion": emotion, "copied_to": dst}
+
+
+EMOTIONS = ["中性", "激动", "自信", "好奇", "嫌弃", "生气", "温柔", "高兴", "傲娇", "无奈", "疲惫", "感动", "焦虑", "慌张", "俏皮", "委屈", "难过", "期待", "认真", "害羞", "严肃", "惊讶", "疑惑"]
+
+
+def _get_clip_emotions(clip_name: str, base_dir: str) -> list:
+    """Return list of emotion folders that contain a file named clip_name."""
+    found = []
+    for e in EMOTIONS:
+        if os.path.exists(os.path.join(base_dir, e, clip_name)):
+            found.append(e)
+    return found
+
+
+def _get_emotion_counts(base_dir: str) -> dict:
+    """Return file counts for each emotion folder."""
+    counts = {}
+    for e in EMOTIONS:
+        d = os.path.join(base_dir, e)
+        counts[e] = len([f for f in os.listdir(d) if not f.startswith(".")]) if os.path.exists(d) else 0
+    return counts
+
+
+@app.get("/api/review/emotion-counts")
+def get_emotion_counts():
+    """Return file counts for each emotion folder (review)."""
+    return {"counts": _get_emotion_counts(EMOTION_DIR)}
+
+
+@app.get("/api/denoise-review/emotion-counts")
+def get_denoise_emotion_counts():
+    """Return file counts for each emotion folder (denoise review)."""
+    return {"counts": _get_emotion_counts(EMOTION_DENOISE_DIR)}
+
+
+@app.get("/api/review/clip-emotions")
+def get_clip_emotions(
+    clip_dir: str = Query(..., description="Path to clip directory"),
+    clip_name: str = Query(..., description="Clip filename"),
+):
+    """Check which emotion folders already contain this clip."""
+    return {"emotions": _get_clip_emotions(clip_name, EMOTION_DIR)}
 
 
 @app.post("/api/review/clear-short")
@@ -1954,6 +2021,46 @@ def denoise_review_skip(
     return {"status": "ok", "action": "skipped"}
 
 
+@app.post("/api/denoise-review/classify-emotion")
+def denoise_review_classify_emotion(
+    clip_dir: str = Query(..., description="Path to denoised audio directory"),
+    clip_name: str = Query(..., description="Audio filename to classify"),
+    emotion: str = Query(..., description="Emotion category name"),
+):
+    """Copy the current denoised audio to the corresponding emotion-denoise folder.
+    If the audio already exists in another emotion folder, remove it from there first."""
+    src = os.path.join(clip_dir, clip_name)
+    if not os.path.exists(src):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    import shutil
+
+    # Remove clip from any other emotion folder (single-choice)
+    for e in EMOTIONS:
+        if e == emotion:
+            continue
+        existing = os.path.join(EMOTION_DENOISE_DIR, e, clip_name)
+        if os.path.exists(existing):
+            os.remove(existing)
+
+    dst_dir = os.path.join(EMOTION_DENOISE_DIR, emotion)
+    os.makedirs(dst_dir, exist_ok=True)
+    dst = os.path.join(dst_dir, clip_name)
+    if not os.path.exists(dst):
+        shutil.copy2(src, dst)
+
+    return {"status": "ok", "emotion": emotion, "copied_to": dst}
+
+
+@app.get("/api/denoise-review/clip-emotions")
+def get_denoise_clip_emotions(
+    clip_dir: str = Query(..., description="Path to denoised audio directory"),
+    clip_name: str = Query(..., description="Audio filename"),
+):
+    """Check which emotion-denoise folders already contain this audio."""
+    return {"emotions": _get_clip_emotions(clip_name, EMOTION_DENOISE_DIR)}
+
+
 @app.post("/api/denoise-review/remove-short")
 def denoise_review_remove_short(
     clip_dir: str = Query(..., description="Path to denoised audio directory"),
@@ -2679,13 +2786,15 @@ def run_split(payload: dict = Body(...)):
     """Run a video split job in any of 3 modes.
 
     Body:
-        mode: "subtitle" | "duration" | "size"
+        mode: "subtitle" | "duration" | "size" | "trim"
         video_path: str (required)
         subtitle_path: str (for subtitle mode)
         padding: float (subtitle mode, default 0.1)
         group_count: int (subtitle mode, default 1)
         segment_duration: float (duration mode, seconds)
         target_size_mb: float (size mode, MB)
+        start_time: float (trim mode required; duration/size optional)
+        end_time: float (trim mode required; duration/size optional)
         hw_accel: str (default "auto")
         output_ext: str (default ".mp4")
         start_time: float (duration/size modes, default 0)
@@ -2701,12 +2810,14 @@ def run_split(payload: dict = Body(...)):
     job_id = uuid.uuid4().hex[:12]
     title = os.path.splitext(os.path.basename(video_path))[0]
 
+    # Create job synchronously so it's immediately visible in the task list
+    job = pipeline.create_job(job_id, title=title)
+    job.mkv_path = video_path
+    job.status = "running"
+    job.current_step = mode
+    job.progress = 5
+
     def run():
-        job = pipeline.create_job(job_id, title=title)
-        job.mkv_path = video_path
-        job.status = "running"
-        job.current_step = mode
-        job.progress = 5
 
         try:
             if mode == "subtitle":
@@ -2781,6 +2892,32 @@ def run_split(payload: dict = Body(...)):
                     on_progress=lambda c, t: setattr(
                         job, 'progress', 10 + (c / max(t, 1)) * 80),
                     cancel_event=job.cancel_event,
+                )
+                job.clip_paths = clips
+                if clips:
+                    job.clip_dir = os.path.dirname(clips[0])
+
+            elif mode == "trim":
+                start_time = float(payload.get("start_time", 0))
+                end_time = float(payload.get("end_time", 0))
+                if end_time <= start_time:
+                    job.status = "failed"
+                    job.progress = 0
+                    from pipeline import StepResult, StepStatus
+                    job.steps = [StepResult(
+                        step="split_video", status=StepStatus.FAILED,
+                        message="结束时间必须大于开始时间",
+                    )]
+                    pipeline._save_jobs()
+                    return
+
+                from split_video import trim_video
+                job.current_step = "trim_video"
+                job.progress = 10
+
+                clips = trim_video(
+                    video_path, start_time, end_time,
+                    hw_accel=hw_accel,
                 )
                 job.clip_paths = clips
                 if clips:
@@ -2893,7 +3030,7 @@ def list_asr_models():
 @app.post("/api/asr/run")
 def run_asr_extraction(
     path: str = Query(..., description="Full path to video file"),
-    model: str = Query("sensevoice", description="ASR model key"),
+    model: str = Query("qwen3-asr", description="ASR model key"),
     language: str = Query("ja", description="Language code or 'auto'"),
     device: str = Query("cuda", description="Device: cuda or cpu"),
 ):
@@ -2992,13 +3129,27 @@ def list_asr_jobs():
     return {"jobs": jobs}
 
 
+@app.delete("/api/asr/job/{job_id}")
+def cancel_asr_job(job_id: str):
+    """Cancel a running ASR job."""
+    with _asr_lock:
+        job = _asr_jobs.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        if job.get("status") not in ("running", "pending"):
+            raise HTTPException(status_code=400, detail="Job is not running")
+        job["status"] = "cancelled"
+        job["current_step"] = "已取消"
+    return {"status": "cancelled"}
+
+
 @app.delete("/api/asr/jobs")
 def clear_asr_jobs():
-    """Clear completed and failed ASR jobs."""
+    """Clear completed, failed, and cancelled ASR jobs."""
     with _asr_lock:
         to_remove = [
             jid for jid, j in _asr_jobs.items()
-            if j.get("status") in ("completed", "failed")
+            if j.get("status") in ("completed", "failed", "cancelled")
         ]
         for jid in to_remove:
             del _asr_jobs[jid]
@@ -3112,6 +3263,596 @@ def delete_asr_result(path: str = Query(..., description="Path to SRT file to de
                 pass
 
     return {"deleted": deleted}
+
+
+@app.post("/api/asr/folder-detect")
+def detect_asr_folder_files(payload: dict = Body(...)):
+    """Scan a folder for audio files and return the list. Uses POST to avoid URL encoding issues with paths."""
+    path = payload.get("path", "").strip()
+    debug_info = {"path_received": path, "exists": os.path.exists(path) if path else False,
+                  "isdir": os.path.isdir(path) if path else False}
+
+    if not path or not os.path.isdir(path):
+        debug_info["error"] = "路径不存在或不是文件夹"
+        return {"files": [], "total_size_mb": 0, "count": 0, "_debug": debug_info}
+
+    try:
+        raw_entries = sorted(os.listdir(path))
+    except PermissionError:
+        debug_info["error"] = "没有访问权限"
+        return {"files": [], "total_size_mb": 0, "count": 0, "_debug": debug_info}
+
+    debug_info["raw_entry_count"] = len(raw_entries)
+    debug_info["raw_sample"] = raw_entries[:10]
+
+    audio_exts = {".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg", ".wma", ".opus", ".wv"}
+    files = []
+    total_bytes = 0
+    for f in raw_entries:
+        ext = os.path.splitext(f)[1].lower()
+        if ext in audio_exts:
+            full = os.path.join(path, f)
+            if os.path.isfile(full):
+                size = os.path.getsize(full)
+                total_bytes += size
+                files.append({
+                    "name": f,
+                    "ext": ext,
+                    "size_mb": round(size / 1024 / 1024, 1),
+                })
+
+    return {
+        "files": files,
+        "total_size_mb": round(total_bytes / 1024 / 1024, 1),
+        "count": len(files),
+        "_debug": debug_info,
+    }
+
+
+@app.get("/api/asr/browse-folder")
+def browse_folder():
+    """Open a native folder picker dialog and return the selected path.
+
+    Launches a separate Python process with tkinter to show the dialog,
+    because the background server thread cannot reliably display Windows UI.
+    The chosen path is written to a temp file and read back.
+    """
+    import subprocess, tempfile, os, sys
+
+    # Write result path to a temp file (dialog runs in a separate process)
+    result_file = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8")
+    result_path = result_file.name
+    result_file.close()
+
+    default_dir = DATA_DIR if os.path.isdir(DATA_DIR) else "C:\\"
+    picker_code = f'''
+import tkinter as tk
+from tkinter import filedialog
+import sys, os, ctypes
+root = tk.Tk()
+root.withdraw()
+root.attributes("-topmost", True)
+root.lift()
+root.focus_force()
+root.update()
+# Force the tkinter window to the foreground via Windows API
+hwnd = root.winfo_id() if root.winfo_exists() else 0
+if hwnd:
+    ctypes.windll.user32.SetForegroundWindow(hwnd)
+    ctypes.windll.user32.BringWindowToTop(hwnd)
+try:
+    path = filedialog.askdirectory(title="选择包含音频文件的文件夹", initialdir=r"{default_dir}")
+    if path:
+        with open(r"{result_path}", "w", encoding="utf-8") as f:
+            f.write(path)
+except Exception:
+    pass
+try:
+    root.destroy()
+except Exception:
+    pass
+'''
+
+    picker_file = tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8")
+    picker_file.write(picker_code)
+    picker_path = picker_file.name
+    picker_file.close()
+
+    try:
+        subprocess.run(
+            [sys.executable, picker_path],
+            timeout=300,
+        )
+        if os.path.exists(result_path):
+            with open(result_path, "r", encoding="utf-8") as f:
+                path = f.read().strip()
+            return {"path": path}
+        return {"path": ""}
+    except subprocess.TimeoutExpired:
+        return {"path": "", "error": "操作超时"}
+    except Exception as e:
+        return {"path": "", "error": str(e)}
+    finally:
+        for f in (picker_path, result_path):
+            if os.path.exists(f):
+                os.unlink(f)
+
+
+@app.post("/api/asr/folder")
+def run_asr_folder(payload: dict = Body(...)):
+    """Process all audio files in a folder with ASR.
+
+    Body: {folder_path, model?, language?, device?, output_dir?}
+    Saves SRT files to output_dir/<folder_name>/ named after each audio file.
+    """
+    folder_path = payload.get("folder_path", "").strip()
+    model_key = payload.get("model", "qwen3-asr")
+    language = payload.get("language", "ja")
+    device = payload.get("device", "cuda")
+    output_base = payload.get("output_dir", "").strip()
+
+    if not folder_path or not os.path.isdir(folder_path):
+        raise HTTPException(status_code=400, detail="无效的文件夹路径")
+
+    # Find audio files in the folder
+    audio_exts = {".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg", ".wma", ".opus", ".wv"}
+    audio_files = []
+    for f in sorted(os.listdir(folder_path)):
+        ext = os.path.splitext(f)[1].lower()
+        if ext in audio_exts:
+            full = os.path.join(folder_path, f)
+            if os.path.isfile(full):
+                audio_files.append({
+                    "name": f,
+                    "path": full,
+                    "ext": ext,
+                    "size_mb": round(os.path.getsize(full) / 1024 / 1024, 1),
+                })
+
+    if not audio_files:
+        raise HTTPException(status_code=400, detail="文件夹中没有找到音频文件")
+
+    # Determine output directory
+    folder_name = os.path.basename(folder_path.rstrip("/\\"))
+    if not output_base:
+        output_base = os.path.join(ASR_DIR, "folder_output")
+    output_dir = os.path.join(output_base, folder_name)
+    os.makedirs(output_dir, exist_ok=True)
+
+    job_id = uuid.uuid4().hex[:12]
+
+    job = {
+        "job_id": job_id,
+        "status": "pending",
+        "type": "folder",
+        "folder_path": folder_path,
+        "folder_name": folder_name,
+        "output_dir": output_dir,
+        "files": audio_files,
+        "total": len(audio_files),
+        "completed": 0,
+        "progress": 0,
+        "current_file": "",
+        "current_step": "",
+        "model": model_key,
+        "language": language,
+        "device": device,
+        "results": [],
+        "errors": [],
+    }
+
+    with _asr_lock:
+        _asr_jobs[job_id] = job
+
+    def _run():
+        from asr_pipeline import run_asr_on_audio
+
+        with _asr_lock:
+            j = _asr_jobs.get(job_id)
+            if not j:
+                return
+            j["status"] = "running"
+
+        for idx, af in enumerate(audio_files):
+            with _asr_lock:
+                j = _asr_jobs.get(job_id)
+                if not j or j.get("status") == "cancelled":
+                    return
+                j["current_file"] = af["name"]
+                j["progress"] = round((idx / len(audio_files)) * 100)
+
+            def on_progress(step, msg):
+                with _asr_lock:
+                    jj = _asr_jobs.get(job_id)
+                    if jj and jj.get("status") != "cancelled":
+                        jj["current_step"] = step
+
+            try:
+                result = run_asr_on_audio(
+                    af["path"], output_dir,
+                    model_key=model_key, language=language, device=device,
+                    progress_callback=on_progress,
+                )
+                with _asr_lock:
+                    jj = _asr_jobs.get(job_id)
+                    if jj:
+                        jj["results"].append(result)
+                        jj["completed"] = idx + 1
+            except Exception as e:
+                with _asr_lock:
+                    jj = _asr_jobs.get(job_id)
+                    if jj:
+                        jj["errors"].append({"file": af["name"], "error": str(e)})
+
+        with _asr_lock:
+            j = _asr_jobs.get(job_id)
+            if j and j.get("status") != "cancelled":
+                j["status"] = "completed"
+                j["progress"] = 100
+                j["current_file"] = ""
+                j["current_step"] = "处理完成"
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    return {
+        "status": "ok",
+        "job_id": job_id,
+        "file_count": len(audio_files),
+        "output_dir": output_dir,
+    }
+
+
+@app.get("/api/asr/folder-output-dir")
+def get_asr_folder_output_dir():
+    """Return the default output directory for folder ASR results."""
+    output_base = os.path.join(ASR_DIR, "folder_output")
+    return {"path": output_base}
+
+
+# ============================================================
+# ASR Comparison endpoints
+# ============================================================
+
+_asr_compare_jobs: dict[str, dict] = {}
+_asr_compare_lock = threading.Lock()
+_asr_compare_results: dict[str, dict] = {}  # keyed by audio path
+
+
+def _find_unreviewed_wav_files() -> list:
+    """Find all denoised WAV files in cleaned_unreviewed/, grouped by source dir."""
+    dirs = []
+    base = CLEANED_UNREVIEWED_DIR
+    if not os.path.exists(base):
+        return dirs
+
+    for entry in sorted(os.listdir(base)):
+        dir_path = os.path.join(base, entry)
+        if not os.path.isdir(dir_path):
+            continue
+        wav_files = []
+        for f in sorted(os.listdir(dir_path)):
+            if f.endswith(".wav"):
+                full = os.path.join(dir_path, f)
+                wav_files.append({
+                    "name": f,
+                    "path": full.replace("\\", "/"),
+                    "size_kb": round(os.path.getsize(full) / 1024, 1),
+                })
+        if wav_files:
+            dirs.append({
+                "name": entry,
+                "path": dir_path.replace("\\", "/"),
+                "files": wav_files,
+                "file_count": len(wav_files),
+            })
+    return dirs
+
+
+@app.get("/api/asr-compare/audio-files")
+def list_asr_compare_files():
+    """List all WAV files from cleaned_unreviewed/, grouped by source directory."""
+    return {"dirs": _find_unreviewed_wav_files()}
+
+
+@app.get("/api/asr-compare/models")
+def list_asr_compare_models():
+    """Return the two comparison models with their language support."""
+    from asr_pipeline import ASR_MODELS, COMPARE_MODELS
+    models = []
+    for key in COMPARE_MODELS:
+        info = ASR_MODELS.get(key)
+        if info:
+            models.append({
+                "key": key,
+                "name": info["name"],
+                "description": info["description"],
+                "languages": info["languages"],
+                "abbr": info.get("abbr", key),
+            })
+    return {"models": models}
+
+
+@app.post("/api/asr-compare/run-all")
+def run_asr_compare_all(
+    language: str = Query("ja"),
+    device: str = Query("cuda"),
+    dirs: list[str] = Query([], description="Optional list of source directory names to process"),
+    model_a: str = Query("qwen3-asr"),
+    model_b: str = Query("cohere-transcribe"),
+):
+    """Queue WAV files from cleaned_unreviewed/ and process sequentially.
+
+    If dirs is provided, only files from those source directories are processed.
+    """
+    from asr_pipeline import compare_asr_pipeline, ASR_MODELS
+
+    all_dirs = _find_unreviewed_wav_files()
+    dir_filter = set(dirs) if dirs else None
+
+    all_files = []
+    for d in all_dirs:
+        if dir_filter and d["name"] not in dir_filter:
+            continue
+        for f in d["files"]:
+            all_files.append({
+                "name": f["name"],
+                "path": f["path"],
+                "source_dir": d["name"],
+            })
+
+    if not all_files:
+        msg = "No WAV files found"
+        if dir_filter:
+            msg += f" in selected directories: {', '.join(sorted(dir_filter))}"
+        raise HTTPException(status_code=404, detail=msg)
+
+    job_id = uuid.uuid4().hex[:12]
+
+    with _asr_compare_lock:
+        _asr_compare_jobs[job_id] = {
+            "job_id": job_id,
+            "status": "pending",
+            "progress": 0,
+            "current_step": "",
+            "total": len(all_files),
+            "completed": 0,
+            "flagged_count": 0,
+            "files": all_files,
+            "results": {},
+            "error": None,
+            "created_at": time.time(),
+        }
+
+    def _run():
+        from asr_pipeline import compare_asr_pipeline, ASR_MODELS, COMPARE_MODELS
+
+        with _asr_compare_lock:
+            job = _asr_compare_jobs.get(job_id)
+            if not job:
+                return
+            job["status"] = "running"
+
+        files = all_files
+        total = len(files)
+
+        for idx, f in enumerate(files):
+            with _asr_compare_lock:
+                job = _asr_compare_jobs.get(job_id)
+                if not job or job.get("_cancelled"):
+                    if job:
+                        job["status"] = "cancelled"
+                        job["current_step"] = "已中止"
+                    return
+
+            audio_path = f["path"]
+            audio_name = f["name"]
+
+            def on_progress(step, pct):
+                with _asr_compare_lock:
+                    j = _asr_compare_jobs.get(job_id)
+                    if j:
+                        j["current_step"] = f"[{idx + 1}/{total}] {audio_name} — {step}"
+
+            try:
+                result = compare_asr_pipeline(
+                    audio_path,
+                    language=language,
+                    device=device,
+                    progress_callback=on_progress,
+                    source_dir=f["source_dir"],
+                    model_a=model_a,
+                    model_b=model_b,
+                )
+                result["source_dir"] = f["source_dir"]
+
+                with _asr_compare_lock:
+                    j = _asr_compare_jobs.get(job_id)
+                    if j:
+                        j["completed"] = idx + 1
+                        j["progress"] = int(((idx + 1) / total) * 100)
+                        j["results"][audio_path] = result
+                        if result.get("flagged"):
+                            j["flagged_count"] += 1
+
+            except Exception as e:
+                with _asr_compare_lock:
+                    j = _asr_compare_jobs.get(job_id)
+                    if j:
+                        j["completed"] = idx + 1
+                        j["progress"] = int(((idx + 1) / total) * 100)
+                        j["results"][audio_path] = {
+                            "audio_path": audio_path,
+                            "audio_name": audio_name,
+                            "source_dir": f["source_dir"],
+                            "error": str(e),
+                            "flagged": True,
+                        }
+                        j["flagged_count"] += 1
+
+        with _asr_compare_lock:
+            j = _asr_compare_jobs.get(job_id)
+            if j:
+                j["status"] = "completed"
+                j["progress"] = 100
+                j["current_step"] = f"处理完成 — {total} 个文件, {j['flagged_count']} 个异常"
+
+        # Persist results for later queries
+        with _asr_compare_lock:
+            j = _asr_compare_jobs.get(job_id)
+            if j:
+                for path, result in j["results"].items():
+                    _asr_compare_results[path] = result
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    return {"job_id": job_id, "status": "started", "total": len(all_files)}
+
+
+@app.get("/api/asr-compare/job/{job_id}")
+def get_asr_compare_job(job_id: str):
+    """Poll comparison job status."""
+    with _asr_compare_lock:
+        job = _asr_compare_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@app.post("/api/asr-compare/cancel")
+def cancel_asr_compare_job(payload: dict = Body(...)):
+    """Cancel a running comparison job."""
+    job_id = payload.get("job_id", "")
+    if not job_id:
+        raise HTTPException(status_code=400, detail="Missing job_id")
+
+    with _asr_compare_lock:
+        job = _asr_compare_jobs.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        if job.get("status") not in ("running", "pending"):
+            return {"status": "error", "detail": f"Job is {job.get('status')}, cannot cancel"}
+        job["_cancelled"] = True
+        job["current_step"] = "正在中止..."
+    return {"status": "ok", "detail": "Cancelling..."}
+
+
+@app.get("/api/asr-compare/results")
+def list_asr_compare_results():
+    """Get all comparison results."""
+    with _asr_compare_lock:
+        results = list(_asr_compare_results.values())
+
+    # Also pull from latest completed job
+    with _asr_compare_lock:
+        for j in _asr_compare_jobs.values():
+            if j.get("status") == "completed":
+                for path, result in j.get("results", {}).items():
+                    if path not in _asr_compare_results:
+                        _asr_compare_results[path] = result
+
+    results = list(_asr_compare_results.values())
+    results.sort(key=lambda r: r.get("source_dir", "") + r.get("audio_name", ""))
+    return {"results": results}
+
+
+@app.post("/api/asr-compare/keep")
+def keep_asr_compare_audio(payload: dict = Body(...)):
+    """Mark a flagged audio as kept."""
+    audio_path = payload.get("path", "")
+    if not audio_path:
+        raise HTTPException(status_code=400, detail="Missing path")
+
+    with _asr_compare_lock:
+        if audio_path in _asr_compare_results:
+            _asr_compare_results[audio_path]["flagged"] = False
+            _asr_compare_results[audio_path]["user_action"] = "kept"
+
+    return {"status": "ok", "action": "kept"}
+
+
+@app.post("/api/asr-compare/discard")
+def discard_asr_compare_audio(payload: dict = Body(...)):
+    """Move a flagged audio to the discard folder."""
+    import shutil as _shutil
+    audio_path = payload.get("path", "")
+    if not audio_path or not os.path.exists(audio_path):
+        raise HTTPException(status_code=400, detail="Missing or invalid path")
+
+    os.makedirs(ASR_COMPARE_DISCARD_DIR, exist_ok=True)
+    dest = os.path.join(ASR_COMPARE_DISCARD_DIR, os.path.basename(audio_path))
+    _shutil.move(audio_path, dest)
+
+    # Also move associated SRT files
+    with _asr_compare_lock:
+        result = _asr_compare_results.get(audio_path, {})
+    srt_paths = result.get("srt_paths", {})
+    for model_key, srt_path in srt_paths.items():
+        if os.path.exists(srt_path):
+            srt_dest = os.path.join(ASR_COMPARE_DISCARD_DIR, os.path.basename(srt_path))
+            _shutil.move(srt_path, srt_dest)
+
+    with _asr_compare_lock:
+        if audio_path in _asr_compare_results:
+            _asr_compare_results[audio_path]["flagged"] = False
+            _asr_compare_results[audio_path]["user_action"] = "discarded"
+
+    return {"status": "ok", "action": "discarded"}
+
+
+@app.post("/api/asr-compare/package")
+def package_asr_compare_results(payload: dict = Body(...)):
+    """Copy kept audio + SRTs to organized output folder grouped by source dir.
+
+    Expects JSON body with optional 'results' list; if omitted, packages all kept results.
+    """
+    import shutil as _shutil
+
+    results_to_package = payload.get("results")
+    if results_to_package:
+        results = results_to_package
+    else:
+        with _asr_compare_lock:
+            results = list(_asr_compare_results.values())
+
+    packaged = 0
+    for r in results:
+        if r.get("user_action") == "discarded":
+            continue
+        if r.get("error"):
+            continue
+
+        source_dir = r.get("source_dir", "unknown")
+        audio_name = r.get("audio_name", "unknown")
+        audio_path = r.get("audio_path", "")
+
+        out_dir = os.path.join(ASR_COMPARE_OUTPUT_DIR, source_dir)
+        out_sub_dir = os.path.join(out_dir, "subtitles")
+        out_audio_dir = os.path.join(out_dir, "audio")
+        os.makedirs(out_sub_dir, exist_ok=True)
+        os.makedirs(out_audio_dir, exist_ok=True)
+
+        # Copy audio
+        if audio_path and os.path.exists(audio_path):
+            _shutil.copy2(audio_path, os.path.join(out_audio_dir, os.path.basename(audio_path)))
+
+        # Copy SRTs
+        srt_paths = r.get("srt_paths", {})
+        for model_key, srt_path in srt_paths.items():
+            if os.path.exists(srt_path):
+                _shutil.copy2(srt_path, os.path.join(out_sub_dir, os.path.basename(srt_path)))
+
+        packaged += 1
+
+    return {"status": "ok", "packaged": packaged, "output_dir": ASR_COMPARE_OUTPUT_DIR.replace("\\", "/")}
+
+
+@app.get("/api/asr-compare/stream")
+def stream_asr_compare_file(path: str = Query(..., description="Full path to SRT or audio file")):
+    """Stream a comparison result file."""
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File not found")
+    media_type = "audio/wav" if path.lower().endswith(".wav") else "text/plain; charset=utf-8"
+    return FileResponse(path, media_type=media_type)
 
 
 # ============================================================
