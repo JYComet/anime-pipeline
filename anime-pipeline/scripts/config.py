@@ -8,6 +8,7 @@ import sys
 # --- Project root ---
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 COMICUT_ROOT = os.path.dirname(PROJECT_ROOT)
+VIDEO_DIR = os.path.join(COMICUT_ROOT, "video")
 
 # --- Data directories ---
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
@@ -19,8 +20,8 @@ APPROVED_DIR = os.path.join(DATA_DIR, "approved")  # clips that pass audio revie
 CLEANED_DIR = os.path.join(DATA_DIR, "cleaned")    # denoised audio output (reviewed clips)
 CLEANED_UNREVIEWED_DIR = os.path.join(DATA_DIR, "cleaned_unreviewed")  # denoised from unreviewed
 DENOISED_APPROVED_DIR = os.path.join(DATA_DIR, "denoised_approved")    # final approved denoised audio
-EMOTION_DIR = os.path.join(COMICUT_ROOT, "data", "情绪")              # emotion classification output
-EMOTION_DENOISE_DIR = os.path.join(COMICUT_ROOT, "data", "情绪降噪")   # denoise emotion classification output
+EMOTION_DIR = os.path.join(DATA_DIR, "情绪")              # emotion classification output
+EMOTION_DENOISE_DIR = os.path.join(DATA_DIR, "情绪降噪")   # denoise emotion classification output
 
 # --- External tools ---
 MKVTOOLNIX_DIR = os.path.join(COMICUT_ROOT, "mkvtoolnix")

@@ -657,8 +657,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
     <!-- Toolbar -->
     <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
       <h3 style="margin:0;font-size:15px;">已审核音频降噪</h3>
-      <select id="denoise-video-select" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;min-width:420px;max-width:620px;" onchange="loadDenoiseSources()">
-        <option value="">选择视频...</option>
+      <select id="denoise-video-select" multiple size="8" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;min-width:500px;max-width:750px;" onchange="loadDenoiseSources()">
+        <option value="" disabled>选择视频...（按住Ctrl多选）</option>
       </select>
       <span id="denoise-stats" style="font-size:12px;color:var(--text2);"></span>
       <button id="btn-denoise-selected" class="btn btn-primary" style="font-size:12px;padding:5px 12px;display:none;" onclick="denoiseSelected()">降噪选中</button>
@@ -710,8 +710,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
       <!-- Toolbar -->
       <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
         <h3 style="margin:0;font-size:15px;">未审核音频降噪</h3>
-        <select id="denoise-urev-dir-select" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;min-width:420px;max-width:620px;" onchange="loadUnreviewedClips()">
-          <option value="">选择视频...</option>
+        <select id="denoise-urev-dir-select" multiple size="8" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;min-width:500px;max-width:750px;" onchange="loadUnreviewedClips()">
+          <option value="" disabled>选择视频...（按住Ctrl多选）</option>
         </select>
         <span id="denoise-urev-stats" style="font-size:12px;color:var(--text2);"></span>
         <button id="btn-denoise-urev-selected" class="btn btn-primary" style="font-size:12px;padding:5px 12px;display:none;" onclick="denoiseUrevSelected()">降噪选中</button>
@@ -3025,13 +3025,17 @@ function switchDenoiseSubtab(name) {
 
 async function loadUnreviewedDirs() {
   var select = document.getElementById('denoise-urev-dir-select');
-  var curVal = select.value;
+  // Save currently selected values
+  var selectedValues = [];
+  for (var i = 0; i < select.selectedOptions.length; i++) {
+    selectedValues.push(select.selectedOptions[i].value);
+  }
   select.innerHTML = '<option value="">加载中...</option>';
   try {
     var resp = await fetch(API + '/api/denoise/unreviewed-dirs');
     var data = await resp.json();
     var dirs = data.dirs || [];
-    var html = '<option value="">选择视频...</option>';
+    var html = '<option value="" disabled>选择视频...（按住Ctrl多选）</option>';
     for (var i = 0; i < dirs.length; i++) {
       var d = dirs[i];
       var statusTag2 = d.denoised_all ? ' ✅已全部降噪' : (d.denoised > 0 ? ' ⏳部分降噪(' + d.denoised + '/' + d.pending + ')' : ' ❌未降噪');
@@ -3039,10 +3043,12 @@ async function loadUnreviewedDirs() {
         escapeHtml(d.name) + ' — 待审核' + d.pending + ' | 已降噪' + (d.denoised || 0) + statusTag2 + '</option>';
     }
     select.innerHTML = html;
-    // Restore previously selected value
-    if (curVal) {
+    // Restore previously selected values
+    if (selectedValues.length > 0) {
       for (var i = 0; i < select.options.length; i++) {
-        if (select.options[i].value === curVal) { select.selectedIndex = i; break; }
+        if (selectedValues.indexOf(select.options[i].value) >= 0) {
+          select.options[i].selected = true;
+        }
       }
     }
     showUrevToolbar();
@@ -3060,32 +3066,49 @@ async function refreshUnreviewedDenoise() {
 }
 
 async function loadUnreviewedClips() {
-  var dir = document.getElementById('denoise-urev-dir-select').value;
-  if (!dir) { return; }
-  _denoiseUrevDir = dir;
+  var sel = document.getElementById('denoise-urev-dir-select');
+  var dirs = [];
+  for (var i = 0; i < sel.selectedOptions.length; i++) {
+    if (sel.selectedOptions[i].value) dirs.push(sel.selectedOptions[i].value);
+  }
+  if (!dirs.length) { return; }
+  _denoiseUrevDir = dirs[0]; // Keep for backward compatibility
   _denoiseUrevSelectMode = false;
   _denoiseUrevSelected = {};
+  _denoiseUrevClips = [];
   var list = document.getElementById('denoise-urev-file-list');
   list.innerHTML = '<div class="empty-state"><p>加载中...</p></div>';
-  try {
-    var resp = await fetch(API + '/api/denoise/unreviewed-clips?clip_dir=' + encodeURIComponent(dir));
-    var data = await resp.json();
-    _denoiseUrevClips = data.clips || [];
-    if (!_denoiseUrevClips.length) {
-      list.innerHTML = '<div class="empty-state"><p>该视频没有未审核片段</p></div>';
-      document.getElementById('btn-denoise-urev-all').style.display = 'none';
-      document.getElementById('btn-denoise-urev-select').style.display = 'none';
-      document.getElementById('btn-denoise-urev-selected').style.display = 'none';
-      document.getElementById('btn-denoise-urev-select-all').style.display = 'none';
-    } else {
-      buildUrevFileList();
-      document.getElementById('btn-denoise-urev-all').style.display = 'inline-block';
-      document.getElementById('btn-denoise-urev-select').style.display = 'inline-block';
-    }
-    document.getElementById('denoise-urev-stats').textContent = '共 ' + _denoiseUrevClips.length + ' 个未审核片段';
-    // Load existing results for this video
-    loadUrevDenoiseResults();
-  } catch(e) { list.innerHTML = '<div class="empty-state"><p>加载失败</p></div>'; }
+
+  // Load clips from all selected directories
+  for (var d = 0; d < dirs.length; d++) {
+    var dir = dirs[d];
+    try {
+      var resp = await fetch(API + '/api/denoise/unreviewed-clips?clip_dir=' + encodeURIComponent(dir));
+      var data = await resp.json();
+      var clips = data.clips || [];
+      var dirName = dir.replace(/\\/g, '/').split('/').pop() || '';
+      for (var c = 0; c < clips.length; c++) {
+        clips[c].video = dirName;
+        clips[c].clip_dir = dir;
+      }
+      _denoiseUrevClips = _denoiseUrevClips.concat(clips);
+    } catch(e) { console.error(e); }
+  }
+
+  if (!_denoiseUrevClips.length) {
+    list.innerHTML = '<div class="empty-state"><p>所选视频没有未审核片段</p></div>';
+    document.getElementById('btn-denoise-urev-all').style.display = 'none';
+    document.getElementById('btn-denoise-urev-select').style.display = 'none';
+    document.getElementById('btn-denoise-urev-selected').style.display = 'none';
+    document.getElementById('btn-denoise-urev-select-all').style.display = 'none';
+  } else {
+    buildUrevFileList();
+    document.getElementById('btn-denoise-urev-all').style.display = 'inline-block';
+    document.getElementById('btn-denoise-urev-select').style.display = 'inline-block';
+  }
+  document.getElementById('denoise-urev-stats').textContent = '共 ' + _denoiseUrevClips.length + ' 个未审核片段';
+  // Load existing results for selected videos
+  loadUrevDenoiseResults();
 }
 
 function buildUrevFileList() {
@@ -3098,6 +3121,7 @@ function buildUrevFileList() {
     html += '<div class="file-item" data-urev-path="' + safeAttr(c.path) + '">' +
       '<input type="checkbox"' + checked + cbStyle + ' onchange="onUrevCheckbox(this,\'' +
         escapeHtml(c.path).replace(/'/g, "\\'") + '\')">' +
+      (c.video ? '<span style="font-size:10px;color:var(--warning);padding:1px 5px;border-radius:3px;background:var(--bg3);margin-right:4px;">' + escapeHtml(c.video) + '</span>' : '') +
       '<span class="file-name" style="font-size:12px;cursor:pointer;" data-play="' + safeAttr(c.path) + '" data-playname="' + safeAttr('[未审核] ' + c.name) + '">' + escapeHtml(c.name) + '</span>' +
       '<span class="file-size">' + c.size_mb + ' MB</span>' +
       '</div>';
@@ -3146,16 +3170,16 @@ async function denoiseUrevSelected() {
 async function startUrevDenoise(paths) {
   var enabledKeys = getEnabledStepKeys();
   if (!enabledKeys.length) { toast('请至少启用一个处理步骤', 'error'); return; }
-  if (!_denoiseUrevDir) { toast('请先选择视频', 'error'); return; }
+
+  var sel = document.getElementById('denoise-urev-dir-select');
+  if (!sel.selectedOptions.length) { toast('请先选择视频', 'error'); return; }
 
   _denoiseUrevSelectMode = false; _denoiseUrevSelected = {};
   document.getElementById('btn-denoise-urev-selected').style.display = 'none';
   document.getElementById('btn-denoise-urev-select-all').style.display = 'none';
   buildUrevFileList();
 
-  // Extract video name from stored dir path (more reliable than parsing dropdown text)
-  var parts = _denoiseUrevDir.replace(/\\/g, '/').split('/');
-  var videoName = parts[parts.length - 1] || '';
+  var videoName = ''; // Let backend determine output dir per-file for multi-select support
   var payload = { video_name: videoName, paths: paths, steps: enabledKeys };
   try {
     var resp = await fetch(API + '/api/denoise/unreviewed-batch', {
@@ -3255,34 +3279,46 @@ function renderUrevJobResults(job) {
 
 async function loadUrevDenoiseResults() {
   var sel = document.getElementById('denoise-urev-dir-select');
-  var dirPath = sel.value;
-  if (!dirPath) return;
-  var videoName = dirPath.replace(/\\/g, '/').split('/').pop() || '';
+  var dirs = [];
+  for (var i = 0; i < sel.selectedOptions.length; i++) {
+    if (sel.selectedOptions[i].value) dirs.push(sel.selectedOptions[i].value);
+  }
+  if (!dirs.length) return;
   var section = document.getElementById('denoise-urev-results-section');
   var list = document.getElementById('denoise-urev-result-list');
   var countEl = document.getElementById('denoise-urev-passed-count');
 
-  try {
-    var resp = await fetch(API + '/api/denoise/unreviewed-results?video_name=' + encodeURIComponent(videoName));
-    var data = await resp.json();
-    var results = data.results || [];
-    countEl.textContent = results.length;
-    if (!results.length) {
-      list.innerHTML = '<div class="empty-state"><p>该视频暂无降噪通过的音频</p></div>';
-      section.style.display = 'block';
-      return;
-    }
-    var html = '';
-    for (var i = 0; i < results.length; i++) {
-      var r = results[i];
-      html += '<div class="file-item">' +
-        '<span class="file-name" style="font-size:12px;cursor:pointer;" data-play="' + safeAttr(r.path) + '" data-playname="' + safeAttr(r.name) + '">🎵 ' + escapeHtml(r.name) + '</span>' +
-        '<span class="file-size">' + r.size_mb + ' MB</span>' +
-        '</div>';
-    }
-    list.innerHTML = html;
+  var allResults = [];
+  for (var d = 0; d < dirs.length; d++) {
+    var videoName = dirs[d].replace(/\\/g, '/').split('/').pop() || '';
+    try {
+      var resp = await fetch(API + '/api/denoise/unreviewed-results?video_name=' + encodeURIComponent(videoName));
+      var data = await resp.json();
+      var results = data.results || [];
+      for (var r = 0; r < results.length; r++) {
+        results[r].video = videoName;
+      }
+      allResults = allResults.concat(results);
+    } catch(e) { console.error(e); }
+  }
+
+  countEl.textContent = allResults.length;
+  if (!allResults.length) {
+    list.innerHTML = '<div class="empty-state"><p>所选视频暂无降噪通过的音频</p></div>';
     section.style.display = 'block';
-  } catch(e) { console.error(e); }
+    return;
+  }
+  var html = '';
+  for (var i = 0; i < allResults.length; i++) {
+    var r = allResults[i];
+    html += '<div class="file-item">' +
+      (r.video ? '<span style="font-size:10px;color:var(--warning);padding:1px 5px;border-radius:3px;background:var(--bg3);margin-right:4px;">' + escapeHtml(r.video) + '</span>' : '') +
+      '<span class="file-name" style="font-size:12px;cursor:pointer;" data-play="' + safeAttr(r.path) + '" data-playname="' + safeAttr(r.name) + '">🎵 ' + escapeHtml(r.name) + '</span>' +
+      '<span class="file-size">' + r.size_mb + ' MB</span>' +
+      '</div>';
+  }
+  list.innerHTML = html;
+  section.style.display = 'block';
 }
 
 var _maleResults = [];
@@ -4456,32 +4492,44 @@ async function loadDenoiseDirs() {
     var resp = await fetch(API + '/api/results/videos');
     var data = await resp.json();
     var sel = document.getElementById('denoise-video-select');
-    var curVal = sel.value;
-    var dhHtml = '<option value="">选择视频...</option>';
+    // Save currently selected values
+    var selectedValues = [];
+    for (var i = 0; i < sel.selectedOptions.length; i++) {
+      selectedValues.push(sel.selectedOptions[i].value);
+    }
+    var dhHtml = '<option value="" disabled>选择视频...（按住Ctrl多选）</option>';
     for (var i = 0; i < data.videos.length; i++) {
       var v = data.videos[i];
       var statusTag = v.denoised_all ? ' ✅已全部降噪' : (v.cleaned > 0 ? ' ⏳部分降噪(' + v.cleaned + '/' + v.approved + ')' : ' ❌未降噪');
       dhHtml += '<option value="' + escapeHtml(v.name) + '">' + escapeHtml(v.name) + ' — 已审核' + v.approved + ' | 已降噪' + (v.cleaned || 0) + statusTag + '</option>';
     }
     sel.innerHTML = dhHtml;
-    if (curVal) {
+    // Restore previously selected values
+    if (selectedValues.length > 0) {
       for (var j = 0; j < sel.options.length; j++) {
-        if (sel.options[j].value === curVal) { sel.selectedIndex = j; break; }
+        if (selectedValues.indexOf(sel.options[j].value) >= 0) {
+          sel.options[j].selected = true;
+        }
       }
+    } else if (data.videos.length > 0) {
+      sel.options[1].selected = true; // auto-select first on initial load
     }
-    if (data.videos.length > 0 && !curVal) { sel.selectedIndex = 1; loadDenoiseSources(); }
-    else if (curVal) loadDenoiseSources();
+    loadDenoiseSources();
   } catch(e) { console.error(e); }
 }
 
 async function loadDenoiseSources() {
-  var name = document.getElementById('denoise-video-select').value;
+  var sel = document.getElementById('denoise-video-select');
+  var names = [];
+  for (var i = 0; i < sel.selectedOptions.length; i++) {
+    if (sel.selectedOptions[i].value) names.push(sel.selectedOptions[i].value);
+  }
   _denoiseSources = []; _denoiseResults = []; _denoiseDiscarded = [];
   _denoiseSourceSelectMode = false; _denoiseSourceSelected = {};
   _denoiseResultSelectMode = false; _denoiseResultSelected = {};
   stopPolling();
 
-  if (!name) {
+  if (!names.length) {
     document.getElementById('denoise-file-list').innerHTML = '<div class="empty-state"><p>选择视频后显示待处理音频</p></div>';
     document.getElementById('denoise-results-section').style.display = 'none';
     document.getElementById('denoise-discarded-section').style.display = 'none';
@@ -4489,28 +4537,38 @@ async function loadDenoiseSources() {
     return;
   }
 
-  // Load approved sources
-  try {
-    var aResp = await fetch(API + '/api/results/video/' + encodeURIComponent(name) + '/approved');
-    var aData = await aResp.json();
-    _denoiseSources = aData.approved || [];
-  } catch(e) { console.error(e); }
+  // Load approved sources and cleaned results for each selected video
+  for (var n = 0; n < names.length; n++) {
+    var name = names[n];
+    // Load approved sources
+    var approved = [];
+    try {
+      var aResp = await fetch(API + '/api/results/video/' + encodeURIComponent(name) + '/approved');
+      var aData = await aResp.json();
+      approved = aData.approved || [];
+      for (var a = 0; a < approved.length; a++) {
+        approved[a].video = name;
+      }
+    } catch(e) { console.error(e); }
 
-  // Load already-cleaned results
-  try {
-    var cResp = await fetch(API + '/api/results/video/' + encodeURIComponent(name) + '/cleaned');
-    var cData = await cResp.json();
-    _denoiseResults = cData.cleaned || [];
-  } catch(e) { console.error(e); }
+    // Load cleaned results for this video
+    var cleanedNames = {};
+    try {
+      var cResp = await fetch(API + '/api/results/video/' + encodeURIComponent(name) + '/cleaned');
+      var cData = await cResp.json();
+      var cleaned = cData.cleaned || [];
+      for (var c = 0; c < cleaned.length; c++) {
+        cleanedNames[cleaned[c].name] = true;
+      }
+      _denoiseResults = _denoiseResults.concat(cleaned);
+    } catch(e) {}
 
-  // Filter out already-denoised sources
-  var cleanedNames = {};
-  for (var i = 0; i < _denoiseResults.length; i++) {
-    cleanedNames[_denoiseResults[i].name] = true;
+    // Filter out already-denoised sources
+    var filtered = approved.filter(function(s) {
+      return !cleanedNames[s.name.replace('.wav', '_norm.wav')] && !cleanedNames[s.name];
+    });
+    _denoiseSources = _denoiseSources.concat(filtered);
   }
-  _denoiseSources = _denoiseSources.filter(function(s) {
-    return !cleanedNames[s.name.replace('.wav', '_norm.wav')] && !cleanedNames[s.name];
-  });
 
   renderDenoiseFileList();
   renderDenoiseResults();
@@ -4621,6 +4679,9 @@ function renderDenoiseFileList() {
       html += '<input type="checkbox" value="' + safeAttr(a.path) + '" style="flex-shrink:0;"' + checked + ' data-src-check="1">';
     }
     html += '<span style="font-size:14px;cursor:pointer;" data-play="' + safeAttr(a.path) + '" data-playname="' + safeAttr(a.name) + '">🎵</span>';
+    if (a.video) {
+      html += '<span style="font-size:10px;color:var(--warning);padding:1px 5px;border-radius:3px;background:var(--bg3);">' + escapeHtml(a.video) + '</span>';
+    }
     html += '<span style="flex:1;font-size:12px;cursor:pointer;" data-play="' + safeAttr(a.path) + '" data-playname="' + safeAttr(a.name) + '">' + escapeHtml(a.name) + '</span>';
     html += '<span style="font-size:11px;color:var(--text2);">' + durStr + ' | ' + a.size_mb + 'MB</span>';
     html += '<span style="display:flex;gap:3px;" data-denoise-steps="' + safeAttr(a.path) + '">';
@@ -4669,7 +4730,7 @@ async function startDenoiseJob(paths) {
   document.getElementById('btn-denoise-select-all').style.display = 'none';
   document.getElementById('btn-denoise-delete-src').style.display = 'none';
 
-  var videoName = document.getElementById('denoise-video-select').value;
+  var videoName = ''; // Let backend determine output dir per-file for multi-select support
   try {
     var resp = await fetch(API + '/api/denoise/batch', {
       method: 'POST',

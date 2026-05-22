@@ -111,12 +111,6 @@ def extract_subtitle_track(
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-    if cancel_event and cancel_event.is_set():
-        return None
-
-    if cancel_event and cancel_event.is_set():
-        return None
-
     # Try mkvextract first (instant for subtitles)
     proc = subprocess.run(
         [MKVEXTRACT, "tracks", mkv_path, f"{track_id}:{output_path}"],

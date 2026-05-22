@@ -4,43 +4,38 @@ Searches animes.garden API and downloads via magnet links.
 """
 import os
 import re
-import time
-import json
 import subprocess
-import requests
 import urllib3
-from typing import Optional
 from dataclasses import dataclass, field
 
 # api.animes.garden has SSL cert issues on some systems
 urllib3.disable_warnings()
 _VERIFY_SSL = False
 
-# Create a shared session with retry logic
-import requests as _requests
+import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-_SESSION = _requests.Session()
+_SESSION = requests.Session()
 _retry = Retry(total=3, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
 _adapter = HTTPAdapter(max_retries=_retry)
 _SESSION.mount('https://', _adapter)
 _SESSION.mount('http://', _adapter)
 
-def _api_get(url: str, **kwargs) -> _requests.Response:
+def _api_get(url: str, **kwargs) -> requests.Response:
     """Make an API request with retry and timeout handling."""
     kwargs.setdefault('timeout', (5, 30))  # (connect timeout, read timeout)
     kwargs.setdefault('verify', _VERIFY_SSL)
     kwargs.setdefault('headers', HEADERS)
     try:
         return _SESSION.get(url, **kwargs)
-    except _requests.exceptions.ConnectionError as e:
+    except requests.exceptions.ConnectionError as e:
         raise RuntimeError(
             f"无法连接到动漫资源网 (animes.garden)。\n"
             f"请检查网络连接或稍后重试。\n"
             f"详情: {e}"
         )
-    except _requests.exceptions.ReadTimeout as e:
+    except requests.exceptions.ReadTimeout as e:
         raise RuntimeError(
             f"动漫资源网响应超时，可能服务器繁忙或网络不稳定。\n"
             f"请稍后重试。\n"
@@ -49,7 +44,7 @@ def _api_get(url: str, **kwargs) -> _requests.Response:
 
 from config import (
     RESOURCES_ENDPOINT, ANIMEGARDEN_API, ANIMEGARDEN_RESOURCE_DETAIL, HEADERS, DOWNLOAD_DIR,
-    ARIA2C, FFMPEG
+    ARIA2C
 )
 
 
@@ -195,159 +190,6 @@ def get_resource_detail(provider: str, provider_id: str) -> dict:
     return resp.json()
 
 
-def check_aria2c() -> bool:
-    """Check if aria2c is available."""
-    try:
-        subprocess.run([ARIA2C, "--version"], capture_output=True, timeout=10)
-        return True
-    except Exception:
-        return False
-
-
-def download_magnet(
-    magnet: str,
-    output_dir: str = "",
-    on_progress=None,
-    timeout: int = 600,  # max seconds to wait for download to start
-) -> Optional[str]:
-    """Download a magnet link using aria2c.
-
-    Args:
-        magnet: Magnet URI
-        output_dir: Where to save downloaded files
-        on_progress: Optional callback(percent, speed, eta)
-        timeout: Max seconds to wait before giving up (default 10 min)
-
-    Returns:
-        Path to the downloaded file, or None if failed.
-    """
-    if not output_dir:
-        output_dir = DOWNLOAD_DIR
-    os.makedirs(output_dir, exist_ok=True)
-
-    if not check_aria2c():
-        raise RuntimeError("aria2c 未安装，下载功能不可用。")
-
-    # Common trackers (UDP and HTTP)
-    trackers = [
-        "udp://tracker.opentrackr.org:1337/announce",
-        "udp://open.demonii.com:1337/announce",
-        "udp://tracker.torrent.eu.org:451/announce",
-        "udp://explodie.org:6969/announce",
-        "udp://tracker.coppersurfer.tk:6969/announce",
-        "udp://tracker.leechers-paradise.org:6969/announce",
-        "udp://9.rarbg.to:2710/announce",
-        "udp://tracker.internetwarriors.net:1337/announce",
-        "http://tracker.opentrackr.org:1337/announce",
-        "http://open.acgnxtracker.com:80/announce",
-        "https://trakx.herokuapp.com:443/announce",
-    ]
-
-    cmd = [
-        ARIA2C,
-        "--seed-time=0",
-        "--max-connection-per-server=16",
-        "--split=16",
-        "--min-split-size=1M",
-        "--dir", output_dir,
-        # DHT configuration
-        "--enable-dht=true",
-        "--dht-listen-port=6881-6999",
-        "--dht-entry-point=router.bittorrent.com:6881",
-        "--dht-entry-point=router.utorrent.com:6881",
-        "--dht-entry-point=dht.transmissionbt.com:6881",
-        "--enable-dht6=false",
-        # Peer discovery
-        "--bt-enable-lpd=true",
-        "--enable-peer-exchange=true",
-        # Timeouts
-        "--bt-stop-timeout=600",
-        "--bt-tracker-connect-timeout=10",
-        "--bt-tracker-timeout=10",
-        "--connect-timeout=10",
-        "--bt-request-peer-speed-limit=50K",
-        # Trackers
-        *[f"--bt-tracker={t}" for t in trackers],
-        "--bt-detach-seed-only",
-        magnet,
-    ]
-
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-    )
-
-    import threading
-    killed = [False]
-
-    def kill_on_timeout():
-        killed[0] = True
-        try:
-            proc.kill()
-        except Exception:
-            pass
-
-    timer = threading.Timer(timeout, kill_on_timeout)
-    timer.start()
-
-    output_lines = []
-    has_progress = False
-    try:
-        for line in proc.stdout:
-            line = line.strip()
-            output_lines.append(line)
-
-            if on_progress:
-                pct_match = re.search(r'\((\d+)%\)', line)
-                if pct_match:
-                    has_progress = True
-                    speed_match = re.search(r'DL:(\S+)', line)
-                    speed = speed_match.group(1) if speed_match else ""
-                    on_progress(int(pct_match.group(1)), speed, "")
-    except Exception:
-        pass
-    finally:
-        timer.cancel()
-        if proc.poll() is None:
-            proc.kill()
-            proc.wait()
-
-    if killed[0]:
-        return None  # timed out
-
-    if not has_progress:
-        # Never started downloading — check error output for hints
-        last_lines = "\n".join(output_lines[-10:])
-        if "no peers" in last_lines.lower() or "tracker" in last_lines.lower():
-            raise RuntimeError(
-                f"无法找到下载节点。磁力链接可能没有可用资源，或网络环境限制了 P2P 连接。\n"
-                f"建议：复制磁力链接使用其他下载工具（如 qBittorrent、迅雷等）下载后，\n"
-                f"将 MKV 文件放入 video/ 目录，然后从「本地文件」页面处理。"
-            )
-        raise RuntimeError(f"下载未能启动。aria2c 输出:\n{last_lines[:500]}")
-
-    if proc.returncode != 0 and proc.returncode is not None:
-        raise RuntimeError(f"下载失败 (aria2c exit code: {proc.returncode})")
-
-    return output_dir
-
-
-def download_via_ffmpeg(m3u8_url: str, output_path: str) -> bool:
-    """Fallback: download a stream via ffmpeg (not for magnet)."""
-    cmd = [
-        FFMPEG, "-y",
-        "-i", m3u8_url,
-        "-c", "copy",
-        "-bsf:a", "aac_adtstoasc",
-        output_path,
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=7200)
-    return result.returncode == 0
-
-
 def parse_magnet(magnet: str) -> dict:
     """Parse a magnet URI into its components.
 
@@ -436,10 +278,9 @@ def fetch_magnet_files(magnet: str, timeout: int = 60) -> list[dict]:
                 "size_mb": round(fsize / 1024 / 1024, 1),
             })
     except ImportError:
-        # Fallback: parse .torrent with basic bencode
-        files = _parse_torrent_simple(torrent_files[0])
+        return []
     except Exception:
-        files = _parse_torrent_simple(torrent_files[0])
+        return []
 
     # Cleanup
     try:
@@ -449,54 +290,6 @@ def fetch_magnet_files(magnet: str, timeout: int = 60) -> list[dict]:
         pass
 
     return files
-
-
-def _parse_torrent_simple(torrent_path: str) -> list[dict]:
-    """Basic torrent parser without external dependencies."""
-    with open(torrent_path, "rb") as f:
-        data = f.read()
-
-    files = []
-    # Try to find file names using regex patterns
-    # Look for 4:nameX:... or 5:files patterns
-    import re
-    # Find file paths (like 4:nameX:....)
-    path_pattern = re.compile(rb'(\d+):([^\d]{2,30})')
-    # Find file sizes
-    size_pattern = re.compile(rb'6:lengthi(\d+)e')
-
-    matches_path = path_pattern.findall(data)
-    matches_size = size_pattern.findall(data)
-
-    # Try to reconstruct file list from .torrent structure
-    # Simple approach: extract the info section and parse manually
-    info_start = data.find(b'4:info')
-    if info_start >= 0:
-        info_data = data[info_start + 6:]
-        # Try to decode as much as possible
-        try:
-            text = info_data.decode("utf-8", errors="replace")
-            # Extract meaningful file names
-            for m in re.finditer(r'(\d+):([^\d]{3,60})', text):
-                s = m.group(2).strip()
-                if len(s) > 3 and not s.startswith(":") and not s.startswith("i"):
-                    files.append({
-                        "name": s,
-                        "size_bytes": 0,
-                        "size_mb": 0,
-                    })
-        except Exception:
-            pass
-
-    # Deduplicate and clean
-    seen = set()
-    clean = []
-    for f in files:
-        if f["name"] not in seen and len(f["name"]) > 2:
-            seen.add(f["name"])
-            clean.append(f)
-
-    return clean
 
 
 def find_local_video_files(directory: str = "") -> list[str]:

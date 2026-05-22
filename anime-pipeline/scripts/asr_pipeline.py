@@ -4,12 +4,6 @@ Extracts audio from video, runs VAD + SenseVoiceSmall via FunASR, generates SRT 
 """
 import os
 import sys
-
-# Ensure ffmpeg is on PATH for funasr's internal audio loading
-_QUICKCUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "QuickCut")
-if os.path.isdir(_QUICKCUT_DIR) and _QUICKCUT_DIR not in os.environ.get("PATH", ""):
-    os.environ["PATH"] = _QUICKCUT_DIR + os.pathsep + os.environ.get("PATH", "")
-
 import subprocess
 import json
 import time
@@ -21,20 +15,16 @@ import numpy as np
 import soundfile as sf
 
 from config import (
-    FFMPEG, FFPROBE, DATA_DIR, SUBTITLE_DIR,
+    COMICUT_ROOT, FFMPEG, FFPROBE, DATA_DIR, SUBTITLE_DIR,
+    ASR_DIR, ASR_AUDIO_DIR, ASR_SUBTITLE_DIR,
     ASR_COMPARE_DIR, ASR_COMPARE_SUBTITLE_DIR, ASR_COMPARE_AUDIO_DIR,
     ASR_COMPARE_OUTPUT_DIR, ASR_COMPARE_DISCARD_DIR,
 )
 
-# --- ASR directories ---
-ASR_DIR = os.path.join(DATA_DIR, "asr")
-ASR_AUDIO_DIR = os.path.join(ASR_DIR, "audio")
-ASR_SUBTITLE_DIR = os.path.join(ASR_DIR, "subtitles")
-
-for d in [ASR_DIR, ASR_AUDIO_DIR, ASR_SUBTITLE_DIR,
-          ASR_COMPARE_DIR, ASR_COMPARE_SUBTITLE_DIR, ASR_COMPARE_AUDIO_DIR,
-          ASR_COMPARE_OUTPUT_DIR, ASR_COMPARE_DISCARD_DIR]:
-    os.makedirs(d, exist_ok=True)
+# Ensure ffmpeg is on PATH for funasr's internal audio loading
+_QUICKCUT_DIR = os.path.join(COMICUT_ROOT, "QuickCut")
+if os.path.isdir(_QUICKCUT_DIR) and _QUICKCUT_DIR not in os.environ.get("PATH", ""):
+    os.environ["PATH"] = _QUICKCUT_DIR + os.pathsep + os.environ.get("PATH", "")
 
 # --- Available ASR models ---
 ASR_MODELS = {

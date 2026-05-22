@@ -7,9 +7,10 @@ import sys
 import numpy as np
 import soundfile as sf
 
+from config import COMICUT_ROOT
+
 _CLEARVOICE_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "ClearerVoice-Studio-main", "ClearerVoice-Studio-main", "clearvoice"
+    COMICUT_ROOT, "ClearerVoice-Studio-main", "ClearerVoice-Studio-main", "clearvoice"
 )
 if _CLEARVOICE_PATH not in sys.path:
     sys.path.insert(0, _CLEARVOICE_PATH)

@@ -566,55 +566,6 @@ def trim_video(
         _split_semaphore.release()
 
 
-def filter_short_clips(
-    clip_paths: list[str],
-    min_duration: float = 2.0,
-    on_progress=None,
-) -> dict:
-    """Delete clips shorter than min_duration seconds.
-
-    Args:
-        clip_paths: List of paths to video clip files
-        min_duration: Minimum duration in seconds (clips shorter than this are deleted)
-        on_progress: Optional callback(current, total)
-
-    Returns:
-        dict with keys: kept (list of remaining paths), deleted (count), total_before, total_after
-    """
-    kept = []
-    deleted = 0
-    total = len(clip_paths)
-
-    for i, path in enumerate(clip_paths):
-        if on_progress:
-            on_progress(i + 1, total)
-
-        if not os.path.exists(path):
-            continue
-
-        duration = get_video_duration(path)
-        if duration <= 0:
-            # Could not determine duration, keep the file
-            kept.append(path)
-            continue
-
-        if duration < min_duration:
-            try:
-                os.remove(path)
-                deleted += 1
-            except OSError:
-                kept.append(path)  # Keep if can't delete
-        else:
-            kept.append(path)
-
-    return {
-        "kept": kept,
-        "deleted": deleted,
-        "total_before": total,
-        "total_after": len(kept),
-    }
-
-
 def split_video_by_duration(
     video_path: str,
     segment_duration: float,

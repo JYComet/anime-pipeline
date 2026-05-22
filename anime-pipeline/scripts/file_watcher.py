@@ -5,11 +5,7 @@ and auto-triggers the extract+split pipeline.
 import os
 import time
 import threading
-from config import DOWNLOAD_DIR
-
-# Video directory at ComicCut root
-_COMICUT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-VIDEO_DIR = os.path.join(_COMICUT_ROOT, "video")
+from config import DOWNLOAD_DIR, COMICUT_ROOT, VIDEO_DIR
 
 # Set of known files to avoid re-processing
 _known_files: set[str] = set()

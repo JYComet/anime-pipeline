@@ -11,9 +11,6 @@ import librosa
 import soundfile as sf
 import torch
 import torchaudio
-import threading
-from dataclasses import dataclass, field
-from enum import Enum
 
 # ============================================================
 # Config
@@ -40,25 +37,6 @@ NON_SPEECH_ENERGY_THRESHOLD = 0.001
 # Step 4: PAD
 TARGET_SILENCE_DURATION = 0.5
 SILENCE_THRESHOLD = 0.01
-
-
-class StepStatus(Enum):
-    PENDING = "pending"
-    RUNNING = "running"
-    PASSED = "passed"
-    DISCARDED = "discarded"
-    ERROR = "error"
-
-
-@dataclass
-class AudioJob:
-    job_id: str
-    name: str
-    source_path: str
-    status: str = "pending"
-    steps: list[dict] = field(default_factory=list)
-    output_path: str = ""
-    progress: float = 0
 
 
 # ============================================================
@@ -788,110 +766,3 @@ def pad_normalize(audio_path: str, output_path: str) -> str:
     return output_path
 
 
-# ============================================================
-# Full Pipeline
-# ============================================================
-_audio_jobs: dict[str, AudioJob] = {}
-_audio_lock = threading.Lock()
-
-
-def run_audio_pipeline(job_id: str, name: str, source_path: str, output_dir: str) -> AudioJob:
-    """Run the full audio normalization pipeline on a single WAV file."""
-    job = AudioJob(job_id=job_id, name=name, source_path=source_path)
-    job.status = "running"
-    job.progress = 5
-    with _audio_lock:
-        _audio_jobs[job_id] = job
-
-    base = os.path.splitext(name)[0]
-
-    # Step 1: Reverb detection
-    job.progress = 10
-    has_reverb, rev_info = detect_reverb(source_path)
-    job.steps.append({"step": "reverb", "status": "passed" if not has_reverb else "discarded",
-                       "info": rev_info})
-    if has_reverb:
-        job.status = "discarded"
-        job.steps.append({"step": "result", "status": "discarded",
-                          "message": f"检测到混响 (energy_ratio={rev_info.get('energy_ratio', '?')})，已丢弃"})
-        job.progress = 100
-        with _audio_lock:
-            _audio_jobs[job_id] = job
-        return job
-
-    # Step 2: Silence ratio
-    job.progress = 30
-    is_silent, sil_info = check_silence_ratio(source_path)
-    job.steps.append({"step": "silence_filter", "status": "passed" if not is_silent else "discarded",
-                       "info": sil_info})
-    if is_silent:
-        job.status = "discarded"
-        job.steps.append({"step": "result", "status": "discarded",
-                          "message": f"静音占比过高 ({sil_info.get('silence_ratio', '?')})，已丢弃"})
-        job.progress = 100
-        with _audio_lock:
-            _audio_jobs[job_id] = job
-        return job
-
-    # Step 3: VAD
-    job.progress = 50
-    has_noise, vad_info = vad_filter(source_path)
-    job.steps.append({"step": "vad", "status": "passed" if not has_noise else "discarded",
-                       "info": vad_info})
-    if has_noise:
-        job.status = "discarded"
-        job.steps.append({"step": "result", "status": "discarded",
-                          "message": f"检测到噪声事件 ({vad_info.get('reason', '?')})，已丢弃"})
-        job.progress = 100
-        with _audio_lock:
-            _audio_jobs[job_id] = job
-        return job
-
-    # Step 4: PAD
-    job.progress = 70
-    out_path = os.path.join(output_dir, f"{base}_norm.wav")
-    try:
-        pad_normalize(source_path, out_path)
-        job.output_path = out_path
-        job.steps.append({"step": "pad", "status": "passed",
-                           "message": f"静音规范化完成 → {os.path.basename(out_path)}"})
-        job.status = "completed"
-        job.progress = 100
-        job.steps.append({"step": "result", "status": "passed",
-                          "message": f"全部通过，输出: {os.path.basename(out_path)}"})
-    except Exception as e:
-        job.steps.append({"step": "pad", "status": "error", "message": str(e)})
-        job.status = "error"
-
-    with _audio_lock:
-        _audio_jobs[job_id] = job
-    return job
-
-
-def get_job(job_id: str) -> AudioJob | None:
-    return _audio_jobs.get(job_id)
-
-
-def get_all_jobs() -> list[dict]:
-    return [{
-        "job_id": j.job_id,
-        "name": j.name,
-        "status": j.status,
-        "steps": j.steps,
-        "output_path": j.output_path,
-        "progress": j.progress,
-    } for j in _audio_jobs.values()]
-
-
-def batch_process(audio_files: list[tuple[str, str]], output_dir: str) -> list[str]:
-    """Process multiple WAV files. Returns list of job IDs."""
-    import uuid
-    job_ids = []
-    for path, name in audio_files:
-        if not os.path.exists(path):
-            continue
-        jid = uuid.uuid4().hex[:12]
-        job_ids.append(jid)
-        t = threading.Thread(target=run_audio_pipeline, args=(jid, name, path, output_dir), daemon=True)
-        t.start()
-    return job_ids
