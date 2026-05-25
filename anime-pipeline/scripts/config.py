@@ -6,6 +6,10 @@ import os
 import sys
 import json
 
+# --- Platform detection ---
+_IS_WIN = sys.platform == "win32"
+_EXE = ".exe" if _IS_WIN else ""
+
 # --- Project root ---
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 COMICUT_ROOT = os.path.dirname(PROJECT_ROOT)
@@ -25,14 +29,30 @@ EMOTION_DIR = os.path.join(DATA_DIR, "情绪")              # emotion classifica
 EMOTION_DENOISE_DIR = os.path.join(DATA_DIR, "情绪降噪")   # denoise emotion classification output
 
 # --- External tools ---
+# Each tool checks a local bundled path first, then falls back to system PATH.
+# On Windows the binaries carry .exe; on Linux/macOS they do not.
+
+import shutil as _shutil
+
+def _find_tool(name, *preferred_dirs):
+    """Find a tool binary, checking preferred_dirs first, then PATH."""
+    fname = f"{name}{_EXE}"
+    for d in preferred_dirs:
+        p = os.path.join(d, fname) if d else fname
+        if os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
+    # Fallback to PATH (shutil.which handles _EXE automatically on Windows)
+    found = _shutil.which(name)
+    return found or fname
+
 MKVTOOLNIX_DIR = os.path.join(COMICUT_ROOT, "mkvtoolnix")
-MKVEXTRACT = os.path.join(MKVTOOLNIX_DIR, "mkvextract.exe")
-MKVMERGE = os.path.join(MKVTOOLNIX_DIR, "mkvmerge.exe")
-MKVINFO = os.path.join(MKVTOOLNIX_DIR, "mkvinfo.exe")
+MKVEXTRACT = _find_tool("mkvextract", MKVTOOLNIX_DIR)
+MKVMERGE = _find_tool("mkvmerge", MKVTOOLNIX_DIR)
+MKVINFO = _find_tool("mkvinfo", MKVTOOLNIX_DIR)
 
 QUICKCUT_DIR = os.path.join(COMICUT_ROOT, "QuickCut")
-FFMPEG = os.path.join(QUICKCUT_DIR, "ffmpeg.exe")
-FFPROBE = os.path.join(QUICKCUT_DIR, "ffprobe.exe")
+FFMPEG = _find_tool("ffmpeg", QUICKCUT_DIR)
+FFPROBE = _find_tool("ffprobe", QUICKCUT_DIR)
 
 # --- API ---
 ANIMEGARDEN_API = "https://api.animes.garden"
@@ -40,37 +60,40 @@ RESOURCES_ENDPOINT = f"{ANIMEGARDEN_API}/resources"
 ANIMEGARDEN_RESOURCE_DETAIL = f"{ANIMEGARDEN_API}/resource"
 
 # --- Download ---
-# aria2c — bundled in project tools/ directory (legacy fallback)
-_ARIA2C_LOCAL = os.path.join(PROJECT_ROOT, "tools", "aria2c.exe")
-ARIA2C = _ARIA2C_LOCAL if os.path.exists(_ARIA2C_LOCAL) else "aria2c"
+# aria2c — bundled in project tools/ directory, or system PATH
+ARIA2C = _find_tool("aria2c", os.path.join(PROJECT_ROOT, "tools"))
 
 # qBittorrent — primary download backend
-_QBITTORRENT_LOCAL = os.path.join(PROJECT_ROOT, "tools", "qbittorrent", "qbittorrent.exe")
-if os.path.exists(_QBITTORRENT_LOCAL):
-    QBITTORRENT_EXE = _QBITTORRENT_LOCAL
-else:
-    _QBITTORRENT_PF = r"C:\Program Files\qBittorrent\qbittorrent.exe"
-    _QBITTORRENT_PFX86 = r"C:\Program Files (x86)\qBittorrent\qbittorrent.exe"
-    if os.path.exists(_QBITTORRENT_PF):
-        QBITTORRENT_EXE = _QBITTORRENT_PF
-    elif os.path.exists(_QBITTORRENT_PFX86):
-        QBITTORRENT_EXE = _QBITTORRENT_PFX86
+_QB_LOCAL_DIR = os.path.join(PROJECT_ROOT, "tools", "qbittorrent")
+_QB_PATH = _find_tool("qbittorrent", _QB_LOCAL_DIR)
+if _QB_PATH != os.path.join(_QB_LOCAL_DIR, f"qbittorrent{_EXE}"):
+    QBITTORRENT_EXE = _QB_PATH  # found on PATH
+elif _IS_WIN:
+    for _pf in [r"C:\Program Files\qBittorrent", r"C:\Program Files (x86)\qBittorrent"]:
+        _p = os.path.join(_pf, "qbittorrent.exe")
+        if os.path.exists(_p):
+            QBITTORRENT_EXE = _p
+            break
     else:
         QBITTORRENT_EXE = "qbittorrent.exe"
-
-# BitComet — alternative download backend
-_BITCOMET_LOCAL = os.path.join(PROJECT_ROOT, "tools", "BitComet", "BitComet.exe")
-if os.path.exists(_BITCOMET_LOCAL):
-    BITCOMET_EXE = _BITCOMET_LOCAL
 else:
-    _BITCOMET_PF = r"C:\Program Files\BitComet\BitComet.exe"
-    _BITCOMET_PFX86 = r"C:\Program Files (x86)\BitComet\BitComet.exe"
-    if os.path.exists(_BITCOMET_PF):
-        BITCOMET_EXE = _BITCOMET_PF
-    elif os.path.exists(_BITCOMET_PFX86):
-        BITCOMET_EXE = _BITCOMET_PFX86
+    QBITTORRENT_EXE = "qbittorrent"
+
+# BitComet — alternative download backend (Windows only)
+_BIT_LOCAL_DIR = os.path.join(PROJECT_ROOT, "tools", "BitComet")
+_BIT_PATH = _find_tool("BitComet", _BIT_LOCAL_DIR)
+if _BIT_PATH != os.path.join(_BIT_LOCAL_DIR, f"BitComet{_EXE}"):
+    BITCOMET_EXE = _BIT_PATH
+elif _IS_WIN:
+    for _pf in [r"C:\Program Files\BitComet", r"C:\Program Files (x86)\BitComet"]:
+        _p = os.path.join(_pf, "BitComet.exe")
+        if os.path.exists(_p):
+            BITCOMET_EXE = _p
+            break
     else:
         BITCOMET_EXE = "BitComet.exe"
+else:
+    BITCOMET_EXE = "BitComet"
 
 # --- Video splitting ---
 # Hardware acceleration: auto-detect, or force one of: nvenc, amf, qsv, none

@@ -1,3 +1,7 @@
+# Offline wheels (not tracked)
+anime-pipeline/offline_wheels/
+anime-pipeline/venv_linux_wsl/
+
 # Large external dependencies
 ClearerVoice-Studio-main/
 checkpoints/
