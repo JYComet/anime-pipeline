@@ -8,10 +8,8 @@ import subprocess
 import time
 import xml.etree.ElementTree as ET
 
-from config import DOWNLOAD_DIR
+from config import DOWNLOAD_DIR, BITCOMET_EXE
 
-BITCOMET_EXE = r"C:\Program Files\BitComet\BitComet.exe"
-BITCOMETD_EXE = r"C:\Program Files\BitComet\bitcometd.exe"
 BITCOMET_DIR = os.path.join(os.environ.get("APPDATA", ""), "BitComet")
 BITCOMET_CONFIG = os.path.join(BITCOMET_DIR, "BitComet.xml")
 

@@ -1,0 +1,5 @@
+# Optional: ASR (speech recognition) dependencies
+# Uncomment to install, or run: pip install -r requirements-asr.txt
+funasr>=1.0.0
+transformers>=4.40.0
+nemo_toolkit[asr]>=1.23.0

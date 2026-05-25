@@ -766,3 +766,122 @@ def pad_normalize(audio_path: str, output_path: str) -> str:
     return output_path
 
 
+# ============================================================
+# Low-volume segment detection
+# ============================================================
+LOW_VOL_SPEECH_RATIO = 0.25       # frames below 25% of speech RMS are "low volume"
+LOW_VOL_MIN_DURATION = 1.5        # minimum continuous low-vol duration (seconds)
+LOW_VOL_MAX_RATIO = 0.35          # flag if >35% of non-silent audio is low-volume
+LOW_VOL_SILENCE_THRESHOLD = 0.005 # below this is silence (not "low volume")
+
+
+def detect_low_volume_segments(audio_path: str = "", audio_array=None, sr: int = SR) -> dict:
+    """Detect audio with long segments of low-volume but audible content.
+
+    These are typically background voices or other audio artifacts where the
+    volume is significantly lower than the main speaker. Different from silence
+    detection — these segments contain sound, just much quieter than normal speech.
+
+    Returns dict with:
+        has_low_volume: bool — whether the clip should be flagged
+        low_vol_ratio: float — ratio of frames that are low-volume-but-not-silent
+        max_cont_low_vol_s: float — longest continuous low-volume segment (seconds)
+        speech_rms: float — estimated main speech energy level
+        details: str
+    """
+    result = {
+        "has_low_volume": False,
+        "low_vol_ratio": 0.0,
+        "max_cont_low_vol_s": 0.0,
+        "speech_rms": 0.0,
+        "details": "",
+    }
+
+    # Load audio
+    if audio_array is not None:
+        y = audio_array
+    elif audio_path:
+        try:
+            y, sr = librosa.load(audio_path, sr=SR, mono=True)
+        except Exception:
+            result["details"] = "failed to load audio"
+            return result
+    else:
+        result["details"] = "no audio input"
+        return result
+
+    if len(y) < sr * 0.5:
+        result["details"] = "too short"
+        return result
+
+    rms = _rms(y)
+    if len(rms) == 0:
+        result["details"] = "no frames"
+        return result
+
+    frame_len_s = HOP_MS
+
+    # Estimate the "main speech" energy level using non-silent frames
+    non_silent_mask = rms >= LOW_VOL_SILENCE_THRESHOLD
+    non_silent_rms = rms[non_silent_mask]
+    if len(non_silent_rms) == 0:
+        result["details"] = "all silent"
+        return result
+
+    # Use 75th percentile as speech level reference (robust to outliers)
+    speech_rms = float(np.percentile(non_silent_rms, 75))
+    result["speech_rms"] = round(speech_rms, 6)
+
+    if speech_rms <= LOW_VOL_SILENCE_THRESHOLD * 2:
+        result["details"] = "speech level too low"
+        return result
+
+    low_vol_threshold = speech_rms * LOW_VOL_SPEECH_RATIO
+
+    # Classify each frame
+    is_silent = rms < LOW_VOL_SILENCE_THRESHOLD
+    is_low_vol = (rms >= LOW_VOL_SILENCE_THRESHOLD) & (rms < low_vol_threshold)
+
+    # Find continuous low-volume segments
+    max_cont_frames = 0
+    current_cont = 0
+    total_low_vol_frames = 0
+    for i in range(len(is_low_vol)):
+        if is_low_vol[i]:
+            current_cont += 1
+            total_low_vol_frames += 1
+        else:
+            if current_cont > max_cont_frames:
+                max_cont_frames = current_cont
+            current_cont = 0
+    if current_cont > max_cont_frames:
+        max_cont_frames = current_cont
+
+    max_cont_s = max_cont_frames * frame_len_s
+    result["max_cont_low_vol_s"] = round(max_cont_s, 2)
+
+    # Calculate ratio of low-volume frames among non-silent frames
+    total_non_silent = int(np.sum(non_silent_mask))
+    low_vol_ratio = total_low_vol_frames / max(total_non_silent, 1)
+    result["low_vol_ratio"] = round(float(low_vol_ratio), 4)
+
+    # Flag if: long continuous low-volume segment AND significant ratio
+    has_long_segment = max_cont_s >= LOW_VOL_MIN_DURATION
+    has_high_ratio = low_vol_ratio >= LOW_VOL_MAX_RATIO
+    result["has_low_volume"] = has_long_segment and has_high_ratio
+
+    if result["has_low_volume"]:
+        result["details"] = (
+            f"低音量段过长: 最长连续{max_cont_s:.1f}s, "
+            f"低音量占比{low_vol_ratio:.1%}, 语音RMS阈值{low_vol_threshold:.4f}"
+        )
+    else:
+        parts = []
+        if not has_long_segment:
+            parts.append(f"最长低音量段{max_cont_s:.1f}s < {LOW_VOL_MIN_DURATION}s")
+        if not has_high_ratio:
+            parts.append(f"低音量占比{low_vol_ratio:.1%} < {LOW_VOL_MAX_RATIO:.0%}")
+        result["details"] = "; ".join(parts) if parts else "正常"
+
+    return result
+

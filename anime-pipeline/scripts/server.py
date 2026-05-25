@@ -18,6 +18,7 @@ import uvicorn
 from config import (
     PROJECT_ROOT, COMICUT_ROOT, VIDEO_DIR, DATA_DIR, DOWNLOAD_DIR, SUBTITLE_DIR, CLIPS_DIR,
     APPROVED_DIR, CLEANED_DIR, CLEANED_UNREVIEWED_DIR, DENOISED_APPROVED_DIR, STITCHED_DIR,
+    PIPELINE_VIDEO_DIR, TEMP_DIR,
     ASR_DIR, ASR_AUDIO_DIR, ASR_SUBTITLE_DIR,
     ASR_COMPARE_DIR, ASR_COMPARE_SUBTITLE_DIR, ASR_COMPARE_AUDIO_DIR,
     ASR_COMPARE_OUTPUT_DIR, ASR_COMPARE_DISCARD_DIR,
@@ -80,6 +81,84 @@ _denoise_jobs: dict[str, DenoiseJob] = {}
 _denoise_lock = threading.Lock()
 
 
+# ============================================================
+# Pipeline Video job tracking
+# ============================================================
+
+@dataclass
+class PipelineVideoFileItem:
+    name: str
+    input_path: str
+    wav_path: str = ""
+    status: str = "pending"   # pending/converting/running/completed/error
+    current_step: str = ""    # convert/enhance/super_resolve/asr/cut
+    progress: float = 0.0
+    steps: list = field(default_factory=list)       # [{step, status, message}]
+    output_clips: list = field(default_factory=list)
+    error: str = ""
+
+    def to_dict(self):
+        return {
+            "name": self.name,
+            "input_path": self.input_path,
+            "wav_path": self.wav_path,
+            "status": self.status,
+            "current_step": self.current_step,
+            "progress": self.progress,
+            "steps": self.steps,
+            "output_clips": self.output_clips,
+            "error": self.error,
+        }
+
+@dataclass
+class PipelineVideoJob:
+    job_id: str
+    folder_name: str
+    files: list  # list[PipelineVideoFileItem]
+    status: str = "pending"   # pending/running/completed/cancelled
+    progress: float = 0.0
+    cancelled: bool = False
+    created_at: float = field(default_factory=time.time)
+
+    def to_dict(self):
+        return {
+            "job_id": self.job_id,
+            "folder_name": self.folder_name,
+            "status": self.status,
+            "progress": self.progress,
+            "files": [f.to_dict() for f in self.files],
+            "created_at": self.created_at,
+        }
+
+_pipeline_video_jobs: dict[str, PipelineVideoJob] = {}
+_pipeline_video_lock = threading.Lock()
+
+
+def _update_pipeline_job_progress(job: PipelineVideoJob):
+    """Compute overall job progress as weighted average across all files."""
+    files = job.files
+    if not files:
+        job.progress = 0
+        return
+    total_pct = 0.0
+    steps_weight = {"convert": 10, "enhance": 25, "super_resolve": 25, "asr": 20, "cut": 20}
+    for f in files:
+        if f.status == "completed":
+            total_pct += 100
+        elif f.status == "error":
+            step_w = steps_weight.get(f.current_step, 0)
+            prior = sum(w for s, w in steps_weight.items() if list(steps_weight).index(s) < list(steps_weight).index(f.current_step)) if f.current_step in steps_weight else 0
+            total_pct += prior
+        elif f.status == "pending":
+            total_pct += 0
+        else:
+            step_w = steps_weight.get(f.current_step, 20)
+            step_idx = list(steps_weight).index(f.current_step) if f.current_step in steps_weight else 0
+            prior = sum(list(steps_weight.values())[:step_idx])
+            total_pct += prior + (f.progress / 100) * step_w
+    job.progress = total_pct / len(files)
+
+
 def _auto_process_new_mkv(mkv_path: str):
     """Callback for file watcher: record download completion, no auto-split.
 
@@ -109,6 +188,10 @@ def _auto_process_new_mkv(mkv_path: str):
 @app.on_event("startup")
 def startup_services():
     """Start aria2c daemon and file watcher on server startup."""
+    # Load user settings overrides
+    from config import load_settings
+    load_settings()
+
     def start_aria2():
         try:
             from aria2_rpc import ensure_running
@@ -1504,6 +1587,92 @@ def detect_multi_voice_clips(
     return {"status": "started", "job_id": job_id}
 
 
+@app.post("/api/review/detect-low-volume")
+def detect_low_volume_clips(
+    clip_dir: str = Query(..., description="Path to clip directory"),
+):
+    """Detect clips with long segments of low-volume-but-audible content (e.g. background voices).
+    Runs in background. Returns flagged clips, does NOT auto-delete."""
+    if not os.path.exists(clip_dir):
+        raise HTTPException(status_code=404, detail="Clip directory not found")
+
+    job_id = uuid.uuid4().hex[:12]
+
+    def _run():
+        import numpy as np
+        from audio_pipeline import detect_low_volume_segments
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def _extract_audio_pipe(video_path: str):
+            proc = subprocess.Popen(
+                [FFMPEG, "-y", "-i", video_path, "-vn", "-acodec", "pcm_s16le",
+                 "-ar", "16000", "-ac", "1", "-t", "120", "-f", "wav", "pipe:1"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            )
+            raw = proc.stdout.read()
+            proc.wait(timeout=10)
+            if len(raw) < 44:
+                return None
+            audio = np.frombuffer(raw[44:], dtype=np.int16).astype(np.float32) / 32768.0
+            return audio
+
+        mp4_files = sorted([f for f in os.listdir(clip_dir) if f.endswith(".mp4")])
+        total = len(mp4_files)
+        results = []
+
+        job = pipeline.create_job(job_id, title="低音量检测: " + os.path.basename(clip_dir))
+        job.status = "running"
+        job.current_step = "analyzing"
+        job.progress = 0
+
+        work = [(i, f, os.path.join(clip_dir, f)) for i, f in enumerate(mp4_files)]
+        completed = 0
+
+        def _process_one(item):
+            idx, name, path = item
+            try:
+                audio = _extract_audio_pipe(path)
+                if audio is not None and len(audio) > 0:
+                    analysis = detect_low_volume_segments(audio_array=audio)
+                    if analysis["has_low_volume"]:
+                        return {
+                            "name": name,
+                            "path": path,
+                            "size_mb": round(os.path.getsize(path) / 1024 / 1024, 1),
+                            **analysis,
+                        }
+            except Exception as e:
+                print(f"[detect-low-volume] Error on {name}: {e}")
+            return None
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {executor.submit(_process_one, w): w for w in work}
+            for future in as_completed(futures):
+                completed += 1
+                job.progress = (completed / total) * 100
+                r = future.result()
+                if r is not None:
+                    results.append(r)
+
+        results.sort(key=lambda x: x["name"])
+
+        job.status = "completed"
+        job.progress = 100
+        job.current_step = "done"
+        from pipeline import StepResult, StepStatus
+        job.steps = [StepResult(
+            step="detect_low_volume",
+            status=StepStatus.COMPLETED,
+            message=f"检测完成: {total} 个片段中 {len(results)} 个含长段低音量",
+            data={"results": results},
+        )]
+        pipeline._save_jobs()
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    return {"status": "started", "job_id": job_id}
+
+
 @app.get("/api/review/stream")
 def stream_clip(path: str = Query(..., description="Full path to clip file")):
     """Stream a clip file for playback in the browser."""
@@ -1684,6 +1853,11 @@ def _is_denoised_wav(filename: str) -> bool:
     if not filename.endswith(".wav"):
         return False
     return "_enhanced" in filename or "_norm" in filename
+
+
+def _is_media_file(filename: str) -> bool:
+    """Check if a file is a reviewable media file (WAV, MP4, MKV, etc.)."""
+    return _is_denoised_wav(filename) or filename.lower().endswith(('.mp4', '.mkv', '.mp3', '.aac', '.flac', '.webm'))
 
 
 @app.get("/api/denoise/unreviewed-dirs")
@@ -1867,19 +2041,59 @@ def list_unreviewed_denoise_results(
 # Denoise Review endpoints
 # ============================================================
 
-def _find_denoised_dirs() -> list[str]:
-    """Find all directories with denoised WAV files (from cleaned/ and cleaned_unreviewed/)."""
+def _find_denoised_dirs(bases: list[str] | None = None) -> list[str]:
+    """Find all directories with media files under the given base directories."""
+    if bases is None:
+        bases = [CLEANED_DIR, CLEANED_UNREVIEWED_DIR]
     dirs = []
     seen = set()
-    for base in [CLEANED_DIR, CLEANED_UNREVIEWED_DIR]:
+    for base in bases:
         if not os.path.exists(base):
             continue
         for root, subdirs, files in os.walk(base):
-            if any(_is_denoised_wav(f) for f in files):
+            if any(_is_media_file(f) for f in files):
                 if root not in seen:
                     dirs.append(root)
                     seen.add(root)
     return dirs
+
+
+def _find_denoise_base_dirs() -> list[dict]:
+    """Find data/ subdirectories that contain reviewable media (as potential base folders for denoise review)."""
+    bases = []
+    if not os.path.exists(DATA_DIR):
+        return bases
+    for name in sorted(os.listdir(DATA_DIR)):
+        p = os.path.join(DATA_DIR, name)
+        if not os.path.isdir(p) or name.startswith("."):
+            continue
+        has_media = False
+        for f in os.listdir(p):
+            fp = os.path.join(p, f)
+            if os.path.isfile(fp) and (_is_denoised_wav(f) or f.lower().endswith(('.mp4', '.mkv', '.mp3', '.aac', '.flac'))):
+                has_media = True
+                break
+            if os.path.isdir(fp) and not f.startswith("."):
+                try:
+                    if any(_is_denoised_wav(sf) or sf.lower().endswith(('.mp4', '.mkv', '.wav', '.mp3', '.aac', '.flac')) for sf in os.listdir(fp)):
+                        has_media = True
+                        break
+                except OSError:
+                    pass
+        if has_media:
+            bases.append({"name": name, "path": p})
+    # Ensure these key directories are always present
+    existing = {b["path"] for b in bases}
+    for d in [CLEANED_UNREVIEWED_DIR, CLEANED_DIR, PIPELINE_VIDEO_DIR]:
+        if d not in existing and os.path.exists(d):
+            bases.append({"name": os.path.basename(d), "path": d})
+    return bases
+
+
+@app.get("/api/denoise-review/base-dirs")
+def list_denoise_review_base_dirs():
+    """List available data/ subdirectories that can serve as base folders for denoise review."""
+    return {"bases": _find_denoise_base_dirs()}
 
 
 def _get_denoise_review_state(clip_dir: str) -> dict:
@@ -1901,10 +2115,15 @@ def _save_denoise_review_state(clip_dir: str, state: dict):
 
 
 @app.get("/api/denoise-review/dirs")
-def list_denoise_review_dirs():
+def list_denoise_review_dirs(
+    base: str = Query("", description="Base directory to scan. Defaults to cleaned_unreviewed + cleaned."),
+):
     """List all directories with denoised audio available for review."""
-    dirs = _find_denoised_dirs()
-    # Determine source type and display name
+    if base and os.path.isdir(base):
+        bases = [base]
+    else:
+        bases = [CLEANED_UNREVIEWED_DIR, CLEANED_DIR]
+    dirs = _find_denoised_dirs(bases)
     result = []
     for d in dirs:
         if d.startswith(CLEANED_UNREVIEWED_DIR):
@@ -1914,17 +2133,25 @@ def list_denoise_review_dirs():
             source = "已审核降噪"
             rel = os.path.relpath(d, CLEANED_DIR)
         else:
-            source = "未知"
-            rel = os.path.basename(d)
-        result.append({"name": rel.replace("\\", "/"), "path": d.replace("\\", "/"), "source": source})
-    return {"dirs": result}
+            # Generic: show path relative to the base dir
+            for b in bases:
+                if d.startswith(b):
+                    source = os.path.basename(b)
+                    rel = os.path.relpath(d, b) if d != b else "."
+                    break
+            else:
+                source = "未知"
+                rel = os.path.basename(d)
+        name = rel.replace("\\", "/") if rel != "." else os.path.basename(d)
+        result.append({"name": name, "path": d.replace("\\", "/"), "source": source})
+    return {"dirs": result, "base": base if base else "<default>"}
 
 
 @app.get("/api/denoise-review/clips")
 def list_denoise_review_clips(
     clip_dir: str = Query(..., description="Path to denoised audio directory"),
 ):
-    """List denoised WAV files available for review, with review status."""
+    """List media files available for denoise review, with review status."""
     if not os.path.exists(clip_dir):
         raise HTTPException(status_code=404, detail="Directory not found")
 
@@ -1934,7 +2161,7 @@ def list_denoise_review_clips(
 
     clips = []
     for f in sorted(os.listdir(clip_dir)):
-        if not _is_denoised_wav(f):
+        if not _is_media_file(f):
             continue
         if f.startswith("."):
             continue
@@ -2294,12 +2521,77 @@ def denoise_review_remove_multi_voice(
     return {"status": "started", "job_id": job_id}
 
 
+@app.post("/api/denoise-review/remove-low-volume")
+def denoise_review_remove_low_volume(
+    clip_dir: str = Query(..., description="Path to denoised audio directory"),
+):
+    """Detect and remove denoised audio files with long low-volume segments. Runs in background."""
+    if not os.path.exists(clip_dir):
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    job_id = uuid.uuid4().hex[:12]
+
+    def _run():
+        from audio_pipeline import detect_low_volume_segments
+
+        wav_files = sorted([f for f in os.listdir(clip_dir) if f.endswith("_norm.wav")])
+        total = len(wav_files)
+        removed = []
+
+        job = pipeline.create_job(job_id, title="降噪审核-去除低音量: " + os.path.basename(clip_dir))
+        job.status = "running"
+        job.current_step = "analyzing"
+        job.progress = 0
+
+        for i, f in enumerate(wav_files):
+            full = os.path.join(clip_dir, f)
+            try:
+                analysis = detect_low_volume_segments(audio_path=full)
+                if analysis["has_low_volume"]:
+                    os.remove(full)
+                    removed.append(f)
+            except Exception as e:
+                print(f"[denoise-review-remove-low-volume] Error on {f}: {e}")
+
+            job.progress = ((i + 1) / total) * 100
+
+        state = _get_denoise_review_state(clip_dir)
+        for name in removed:
+            if name in state.get("approved", []):
+                state["approved"].remove(name)
+            if name in state.get("skipped", []):
+                state["skipped"].remove(name)
+        _save_denoise_review_state(clip_dir, state)
+
+        job.status = "completed"
+        job.progress = 100
+        job.current_step = "done"
+        from pipeline import StepResult, StepStatus
+        job.steps = [StepResult(
+            step="remove_low_volume",
+            status=StepStatus.COMPLETED,
+            message=f"检测完成: {total} 个降噪音频中删除了 {len(removed)} 个低音量片段",
+            data={"deleted": removed},
+        )]
+        pipeline._save_jobs()
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    return {"status": "started", "job_id": job_id}
+
+
 @app.get("/api/denoise-review/stream")
-def denoise_review_stream(path: str = Query(..., description="Full path to audio file")):
-    """Stream a denoised audio file for playback in the browser."""
+def denoise_review_stream(path: str = Query(..., description="Full path to media file")):
+    """Stream a media file for playback in the browser."""
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(path, media_type="audio/wav")
+    # Auto-detect media type from extension
+    ext = os.path.splitext(path)[1].lower()
+    mime_map = {
+        ".wav": "audio/wav", ".mp3": "audio/mpeg", ".aac": "audio/aac", ".flac": "audio/flac",
+        ".mp4": "video/mp4", ".mkv": "video/x-matroska", ".webm": "video/webm",
+    }
+    return FileResponse(path, media_type=mime_map.get(ext, "application/octet-stream"))
 
 
 @app.post("/api/open-folder")
@@ -2333,6 +2625,91 @@ def open_folder_in_explorer(payload: dict = Body(...)):
         return {"status": "ok"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/settings")
+def get_settings():
+    """Return current path settings and denoise defaults."""
+    import config
+    paths = {}
+    for k in config._PATH_VARS:
+        paths[k] = getattr(config, k, '')
+    steps = getattr(config, 'DENOISE_DEFAULT_STEPS', None)
+    return {"paths": paths, "denoise_default_steps": steps}
+
+
+@app.post("/api/settings")
+def save_settings(payload: dict = Body(...)):
+    """Save path settings and/or denoise default steps."""
+    from config import save_settings
+    paths = payload.get("paths", {})
+    steps = payload.get("denoise_default_steps", None)
+    save_settings(paths, steps)
+    return {"status": "ok"}
+
+
+@app.get("/api/browse-folder")
+def browse_folder_generic(title: str = "选择文件夹", initialdir: str = ""):
+    """Open a native folder picker and return the selected path."""
+    import subprocess, tempfile
+
+    if not initialdir or not os.path.isdir(initialdir):
+        initialdir = DATA_DIR if os.path.isdir(DATA_DIR) else os.path.expanduser("~")
+
+    result_file = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8")
+    result_path = result_file.name
+    result_file.close()
+
+    picker_code = f'''
+import tkinter as tk
+from tkinter import filedialog
+import sys, os, ctypes
+root = tk.Tk()
+root.withdraw()
+root.attributes("-topmost", True)
+root.lift()
+root.focus_force()
+root.update()
+hwnd = root.winfo_id() if root.winfo_exists() else 0
+if hwnd:
+    ctypes.windll.user32.SetForegroundWindow(hwnd)
+    ctypes.windll.user32.BringWindowToTop(hwnd)
+try:
+    path = filedialog.askdirectory(title=r"{title}", initialdir=r"{initialdir}")
+    if path:
+        with open(r"{result_path}", "w", encoding="utf-8") as f:
+            f.write(path)
+except Exception:
+    pass
+try:
+    root.destroy()
+except Exception:
+    pass
+'''
+
+    picker_file = tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8")
+    picker_file.write(picker_code)
+    picker_path = picker_file.name
+    picker_file.close()
+
+    try:
+        subprocess.run([sys.executable, picker_path], timeout=300)
+        if os.path.exists(result_path):
+            with open(result_path, "r", encoding="utf-8") as f:
+                path = f.read().strip()
+            return {"path": path}
+        return {"path": ""}
+    except subprocess.TimeoutExpired:
+        return {"path": "", "error": "操作超时"}
+    except Exception as e:
+        return {"path": "", "error": str(e)}
+    finally:
+        for f in (picker_path, result_path):
+            if os.path.exists(f):
+                try:
+                    os.remove(f)
+                except Exception:
+                    pass
 
 
 @app.get("/api/results/video/{video_name}/cleaned")
@@ -3321,7 +3698,7 @@ def browse_folder():
     result_path = result_file.name
     result_file.close()
 
-    default_dir = DATA_DIR if os.path.isdir(DATA_DIR) else "C:\\"
+    default_dir = DATA_DIR if os.path.isdir(DATA_DIR) else os.path.expanduser("~")
     picker_code = f'''
 import tkinter as tk
 from tkinter import filedialog
@@ -3850,6 +4227,853 @@ def stream_asr_compare_file(path: str = Query(..., description="Full path to SRT
         raise HTTPException(status_code=404, detail="File not found")
     media_type = "audio/wav" if path.lower().endswith(".wav") else "text/plain; charset=utf-8"
     return FileResponse(path, media_type=media_type)
+
+
+# ============================================================
+# Pipeline Video — 视频管线  (import, process, progress, stream)
+# ============================================================
+
+VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".webm", ".flv"}
+AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".aac", ".ogg", ".m4a"}
+
+
+def _get_media_info(file_path: str) -> dict:
+    """Get duration and other info for a media file via ffprobe."""
+    try:
+        result = subprocess.run(
+            [FFPROBE, "-v", "quiet", "-print_format", "json", "-show_format", file_path],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            fmt = data.get("format", {})
+            return {
+                "duration_s": float(fmt.get("duration", 0)),
+                "size_mb": os.path.getsize(file_path) / 1024 / 1024,
+            }
+    except Exception:
+        pass
+    return {"duration_s": 0, "size_mb": os.path.getsize(file_path) / 1024 / 1024}
+
+
+@app.get("/api/pipeline-video/scan")
+def pv_scan_folder(folder_path: str = Query("", description="Full path to folder")):
+    """Scan a folder for video and audio files."""
+    if not folder_path or not os.path.isdir(folder_path):
+        return {"error": "文件夹不存在", "files": [], "count": 0}
+
+    return _scan_single_folder(folder_path)
+
+
+@app.post("/api/pipeline-video/scan-folders")
+def pv_scan_folders(payload: dict = Body(...)):
+    """Scan multiple folders for video and audio files.
+
+    Body: {folder_paths: [str, ...]}
+    """
+    folder_paths = payload.get("folder_paths", [])
+    if not folder_paths:
+        raise HTTPException(status_code=400, detail="No folder paths provided")
+
+    all_files = []
+    for fp in folder_paths:
+        if os.path.isdir(fp):
+            result = _scan_single_folder(fp)
+            if result.get("files"):
+                all_files.extend(result["files"])
+
+    return {"files": all_files, "count": len(all_files), "folders_scanned": len(folder_paths)}
+
+
+def _scan_single_folder(folder_path: str) -> dict:
+    """Scan a single folder for video and audio files (parallel ffprobe)."""
+    try:
+        entries = sorted(os.listdir(folder_path))
+    except PermissionError:
+        return {"error": "没有权限访问该文件夹", "files": [], "count": 0}
+
+    # Collect matching files first (no ffprobe yet)
+    candidates = []
+    for name in entries:
+        full = os.path.join(folder_path, name)
+        if not os.path.isfile(full):
+            continue
+        ext = os.path.splitext(name)[1].lower()
+        if ext not in VIDEO_EXTENSIONS and ext not in AUDIO_EXTENSIONS:
+            continue
+        candidates.append({"name": name, "path": full, "ext": ext, "size_mb": round(os.path.getsize(full) / 1024 / 1024, 1)})
+
+    # Parallel ffprobe for duration (up to 4 concurrent)
+    import concurrent.futures as _futures
+
+    def _probe_duration(c):
+        info = _get_media_info(c["path"])
+        c["duration_s"] = round(info.get("duration_s", 0), 1)
+        return c
+
+    with _futures.ThreadPoolExecutor(max_workers=4) as _pool:
+        files = list(_pool.map(_probe_duration, candidates))
+
+    for f in files:
+        f["folder"] = folder_path
+    return {"folder_path": folder_path, "files": files, "count": len(files)}
+
+
+@app.get("/api/pipeline-video/browse-folder")
+def pv_browse_folder():
+    """Open a native folder picker dialog and return the selected path."""
+    import subprocess as _subprocess
+    import tempfile as _tempfile
+    import sys as _sys
+
+    result_file = _tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8")
+    result_path = result_file.name
+    result_file.close()
+
+    _preferred = "//RS3621/CompanyShare-Confidential/Persons/jiangyichen/videodownload"
+    if os.path.isdir(_preferred):
+        default_dir = _preferred
+    elif os.path.isdir(DATA_DIR):
+        default_dir = DATA_DIR
+    else:
+        default_dir = os.path.expanduser("~")
+
+    picker_code = f'''
+import tkinter as tk
+from tkinter import filedialog
+import sys, os, ctypes
+root = tk.Tk()
+root.withdraw()
+root.attributes("-topmost", True)
+root.lift()
+root.focus_force()
+root.update()
+hwnd = root.winfo_id() if root.winfo_exists() else 0
+if hwnd:
+    ctypes.windll.user32.SetForegroundWindow(hwnd)
+    ctypes.windll.user32.BringWindowToTop(hwnd)
+try:
+    path = filedialog.askdirectory(title="选择包含视频/音频文件的文件夹", initialdir=r"{default_dir}")
+    if path:
+        with open(r"{result_path}", "w", encoding="utf-8") as f:
+            f.write(path)
+except Exception:
+    pass
+try:
+    root.destroy()
+except Exception:
+    pass
+'''
+
+    picker_file = _tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8")
+    picker_file.write(picker_code)
+    picker_path = picker_file.name
+    picker_file.close()
+
+    try:
+        _subprocess.run([_sys.executable, picker_path], timeout=300)
+        if os.path.exists(result_path):
+            with open(result_path, "r", encoding="utf-8") as f:
+                path = f.read().strip()
+            return {"path": path}
+        return {"path": ""}
+    except _subprocess.TimeoutExpired:
+        return {"path": "", "error": "操作超时"}
+    except Exception as e:
+        return {"path": "", "error": str(e)}
+    finally:
+        for f in (picker_path, result_path):
+            if os.path.exists(f):
+                try:
+                    os.unlink(f)
+                except Exception:
+                    pass
+
+
+@app.post("/api/pipeline-video/start")
+def pv_start_pipeline(payload: dict = Body(...)):
+    """Start a video pipeline job.
+
+    Body: {folder_path: str, file_paths: [str, ...]}
+    """
+    folder_path = payload.get("folder_path", "")
+    file_paths = payload.get("file_paths", [])
+
+    if not file_paths:
+        raise HTTPException(status_code=400, detail="No file paths provided")
+
+    valid_paths = [p for p in file_paths if os.path.exists(p)]
+    if not valid_paths:
+        raise HTTPException(status_code=400, detail="No valid files found")
+
+    folder_name = os.path.basename(folder_path) or "unknown"
+    job_id = uuid.uuid4().hex[:12]
+
+    files = [PipelineVideoFileItem(
+        name=os.path.basename(p),
+        input_path=p,
+    ) for p in valid_paths]
+
+    job = PipelineVideoJob(job_id=job_id, folder_name=folder_name, files=files)
+    job.steps_config = payload.get("steps", None)
+    job.output_dir = payload.get("output_dir", "") or PIPELINE_VIDEO_DIR
+    with _pipeline_video_lock:
+        _pipeline_video_jobs[job_id] = job
+
+    threading.Thread(target=_run_pipeline_video, args=(job_id,), daemon=True).start()
+
+    return {"status": "ok", "job_id": job_id, "file_count": len(valid_paths)}
+
+
+@app.get("/api/pipeline-video/job/{job_id}")
+def pv_get_job(job_id: str):
+    """Poll pipeline video job status."""
+    with _pipeline_video_lock:
+        job = _pipeline_video_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job.to_dict()
+
+
+@app.get("/api/pipeline-video/jobs")
+def pv_list_jobs():
+    """List recent pipeline video jobs (latest 20)."""
+    with _pipeline_video_lock:
+        jobs = sorted(_pipeline_video_jobs.values(), key=lambda j: j.created_at, reverse=True)[:20]
+    return {"jobs": [j.to_dict() for j in jobs], "count": len(jobs)}
+
+
+@app.get("/api/pipeline-video/stream")
+def pv_stream_file(path: str = Query(..., description="Full path to media file")):
+    """Stream a video or audio file for HTML5 playback."""
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    ext = path.lower().split(".")[-1] if "." in path else ""
+    mime_map = {
+        "mp4": "video/mp4", "mkv": "video/x-matroska", "webm": "video/webm",
+        "avi": "video/x-msvideo", "mov": "video/quicktime", "wmv": "video/x-ms-wmv",
+        "flv": "video/x-flv", "wav": "audio/wav", "mp3": "audio/mpeg",
+        "flac": "audio/flac", "aac": "audio/aac", "ogg": "audio/ogg", "m4a": "audio/mp4",
+    }
+    media_type = mime_map.get(ext, "application/octet-stream")
+    return FileResponse(path, media_type=media_type)
+
+
+@app.post("/api/pipeline-video/job/{job_id}/cancel")
+def pv_cancel_job(job_id: str):
+    """Cancel a running pipeline video job."""
+    with _pipeline_video_lock:
+        job = _pipeline_video_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job.cancelled = True
+    job.status = "cancelled"
+    _update_pipeline_job_progress(job)
+    return {"status": "ok", "message": "已取消任务"}
+
+
+# ============================================================
+# Pipeline Video — background processing
+# ============================================================
+
+def _convert_to_wav_ffmpeg(input_path: str) -> str:
+    """Convert an audio file (AAC/MP3/FLAC/OGG/M4A etc.) to WAV format using ffmpeg."""
+    wav_path = os.path.splitext(input_path)[0] + ".wav"
+    if os.path.exists(wav_path) and os.path.getsize(wav_path) > 0:
+        return wav_path
+    try:
+        result = subprocess.run(
+            [FFMPEG, "-y", "-i", input_path, "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2", wav_path],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+        )
+        if os.path.exists(wav_path) and os.path.getsize(wav_path) > 0:
+            return wav_path
+        if result.stderr:
+            print(f"[pipeline-video] ffmpeg convert error for {input_path}: {result.stderr[:300]}")
+    except Exception as e:
+        print(f"[pipeline-video] ffmpeg convert exception for {input_path}: {e}")
+    return ""
+
+
+def _run_pipeline_video(job_id: str):
+    """Run the video pipeline in background.
+
+    Steps are configurable via job.steps_config.
+    Each file flows through all enabled steps independently.
+    Per-step BoundedSemaphore(2) controls model concurrency.
+    Intermediate files kept in a job-specific temp directory, cleaned on success.
+    """
+    import concurrent.futures
+    import shutil as _shutil
+
+    with _pipeline_video_lock:
+        job = _pipeline_video_jobs.get(job_id)
+    if not job:
+        return
+
+    job.status = "running"
+    files = job.files
+    folder = job.folder_name
+
+    # Parse enabled steps from config (or default)
+    steps_config = getattr(job, 'steps_config', None)
+    if not steps_config:
+        steps_config = [
+            {"key": "enhance", "enabled": True},
+            {"key": "super_resolve", "enabled": True},
+            {"key": "asr", "enabled": True},
+            {"key": "cut", "enabled": True},
+        ]
+    enabled_steps = [s["key"] for s in steps_config if s.get("enabled", True)]
+    step_cfg_map = {s["key"]: s for s in steps_config}
+
+    # Job-specific temp directory for intermediate files
+    temp_dir = os.path.join(TEMP_DIR, "pipeline_video", job_id)
+    os.makedirs(temp_dir, exist_ok=True)
+
+    # Per-step semaphores
+    _sem = {
+        "convert": threading.BoundedSemaphore(2),
+        "enhance": threading.BoundedSemaphore(3),
+        "super_resolve": threading.BoundedSemaphore(2),
+        "asr": threading.BoundedSemaphore(2),
+        "duration_split": threading.BoundedSemaphore(1),
+        "cut": threading.BoundedSemaphore(2),
+    }
+
+    file_state = {}
+
+    def _temp_path(f, step_key, ext=".wav", state=None):
+        base = os.path.splitext(f.name)[0]
+        suffix = state.get("seg_suffix", "") if state else ""
+        return os.path.join(temp_dir, f"{base}{suffix}_{step_key}{ext}")
+
+    def _step_convert(f, job, state):
+        from convert_audio import mp4_to_wav
+        f.current_step = "convert"
+        f.status = "converting"
+        f.progress = 0
+        _update_pipeline_job_progress(job)
+
+        out = _temp_path(f, "convert")
+        if os.path.exists(out) and os.path.getsize(out) > 0:
+            state["wav"] = out
+            f.status = "running"
+            f.progress = 100
+            f.steps.append({"step": "convert", "status": "completed", "message": "WAV已存在"})
+            _update_pipeline_job_progress(job)
+            return True
+
+        ext = os.path.splitext(f.input_path)[1].lower()
+        if ext in VIDEO_EXTENSIONS:
+            wav_path = mp4_to_wav(f.input_path, out)
+            if wav_path and os.path.exists(wav_path):
+                state["wav"] = wav_path
+                f.status = "running"
+                f.progress = 100
+                f.steps.append({"step": "convert", "status": "completed", "message": "视频转WAV完成"})
+                _update_pipeline_job_progress(job)
+                return True
+        elif ext == ".wav":
+            if f.input_path != out:
+                _shutil.copy2(f.input_path, out)
+            state["wav"] = out
+            f.status = "running"
+            f.progress = 100
+            f.steps.append({"step": "convert", "status": "completed", "message": "已是WAV格式"})
+            _update_pipeline_job_progress(job)
+            return True
+        else:
+            wav_path = _convert_to_wav_ffmpeg(f.input_path)
+            if wav_path:
+                if wav_path != out:
+                    _shutil.copy2(wav_path, out)
+                state["wav"] = out
+                f.progress = 100
+                f.steps.append({"step": "convert", "status": "completed", "message": "音频转WAV完成"})
+                _update_pipeline_job_progress(job)
+                return True
+
+        f.status = "error"
+        f.error = "WAV转换失败"
+        f.steps.append({"step": "convert", "status": "error", "message": "转换失败"})
+        _update_pipeline_job_progress(job)
+        return False
+
+    def _step_enhance(f, job, state):
+        from denoise_audio import run_full_denoise
+        f.current_step = "enhance"
+        f.progress = 5
+        f.steps.append({"step": "enhance", "status": "running", "message": "加载模型中..."})
+        _update_pipeline_job_progress(job)
+
+        src = state.get("wav", f.wav_path)
+        out = _temp_path(f, "enhance", ".wav", state)
+
+        def on_step(step_key, status, message):
+            f.steps.append({"step": step_key, "status": status, "message": message})
+
+        try:
+            f.progress = 20
+            _update_pipeline_job_progress(job)
+            result = run_full_denoise(src, temp_dir, on_step=on_step, steps=["enhance"])
+            if result.get("success") and result.get("output_path") and os.path.exists(result["output_path"]):
+                out_path = result["output_path"]
+                if out_path != out:
+                    _shutil.copy2(out_path, out)
+                state["wav"] = out
+                f.progress = 100
+                f.steps.append({"step": "enhance", "status": "completed", "message": "语音增强完成"})
+            else:
+                reason = result.get("discard_reason", "")
+                if src != out:
+                    _shutil.copy2(src, out)
+                state["wav"] = out
+                f.steps.append({"step": "enhance", "status": "passed", "message": f"增强跳过: {reason}"})
+                f.progress = 100
+        except Exception as e:
+            f.steps.append({"step": "enhance", "status": "error", "message": str(e)[:100]})
+            f.progress = 100
+        _update_pipeline_job_progress(job)
+        return True
+
+    def _step_super_resolve(f, job, state):
+        from denoise_audio import run_full_denoise
+        f.current_step = "super_resolve"
+        f.progress = 5
+        f.steps.append({"step": "super_resolve", "status": "running", "message": "加载超分模型..."})
+        _update_pipeline_job_progress(job)
+
+        src = state.get("wav", f.wav_path)
+        out = _temp_path(f, "super_resolve", ".wav", state)
+
+        def on_step(step_key, status, message):
+            f.steps.append({"step": step_key, "status": status, "message": message})
+
+        try:
+            f.progress = 20
+            _update_pipeline_job_progress(job)
+            result = run_full_denoise(src, temp_dir, on_step=on_step, steps=["super_resolve"])
+            if result.get("success") and result.get("output_path") and os.path.exists(result["output_path"]):
+                out_path = result["output_path"]
+                if out_path != out:
+                    _shutil.copy2(out_path, out)
+                state["wav"] = out
+                f.progress = 100
+                f.steps.append({"step": "super_resolve", "status": "completed", "message": "超分辨率完成"})
+            else:
+                if src != out:
+                    _shutil.copy2(src, out)
+                state["wav"] = out
+                f.steps.append({"step": "super_resolve", "status": "passed", "message": "超分跳过"})
+                f.progress = 100
+        except Exception as e:
+            f.steps.append({"step": "super_resolve", "status": "error", "message": str(e)[:100]})
+            f.progress = 100
+        _update_pipeline_job_progress(job)
+        return True
+
+    def _step_asr(f, job, state):
+        from asr_pipeline import run_asr_on_audio
+        f.current_step = "asr"
+        f.progress = 0
+        _update_pipeline_job_progress(job)
+
+        src = state.get("wav", f.wav_path)
+
+        def on_progress(phase, msg):
+            if isinstance(msg, str):
+                f.steps.append({"step": f"asr_{phase}", "status": "running", "message": str(msg)[:80]})
+            else:
+                f.progress = float(msg) if isinstance(msg, (int, float)) else f.progress
+
+        try:
+            result = run_asr_on_audio(
+                src, output_dir=temp_dir, model_key="qwen3-asr", language="zh",
+                progress_callback=on_progress,
+            )
+            srt = result.get("srt_path", "")
+            if srt and os.path.exists(srt):
+                state["srt"] = srt
+                f.progress = 100
+                f.steps.append({"step": "asr", "status": "completed",
+                                "message": f"ASR完成: {result.get('segments_count', 0)}条字幕"})
+            else:
+                f.steps.append({"step": "asr", "status": "error", "message": "ASR未生成字幕"})
+        except Exception as e:
+            f.steps.append({"step": "asr", "status": "error", "message": str(e)[:100]})
+        _update_pipeline_job_progress(job)
+        return True
+
+    def _step_duration_split(f, job, state):
+        """Split current WAV into N-minute segments via ffmpeg segment muxer.
+        Works for both audio and video inputs (convert has already produced a WAV).
+        Returns list of WAV segment paths in state['duration_segments'].
+        """
+        f.current_step = "duration_split"
+        f.progress = 0
+        _update_pipeline_job_progress(job)
+
+        src = state.get("wav", f.wav_path)
+        if not src or not os.path.exists(src):
+            f.steps.append({"step": "duration_split", "status": "error", "message": "无可用WAV"})
+            _update_pipeline_job_progress(job)
+            return True
+
+        cfg = step_cfg_map.get("duration_split", {}).get("config", {})
+        segment_dur = float(cfg.get("segment_duration", 600))
+
+        base = os.path.splitext(f.name)[0]
+        seg_dir = os.path.join(temp_dir, f"segments_{base}")
+        os.makedirs(seg_dir, exist_ok=True)
+
+        # ffmpeg segment muxer: splits WAV into equal-length chunks
+        seg_pattern = os.path.join(seg_dir, f"{base}_%03d.wav")
+        cmd = [
+            FFMPEG, "-y", "-i", src,
+            "-f", "segment", "-segment_time", str(segment_dur),
+            "-c", "copy", seg_pattern,
+        ]
+
+        try:
+            subprocess.run(cmd, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=300)
+            # Collect generated segment files, remove first and last
+            segments = sorted([
+                os.path.join(seg_dir, x) for x in os.listdir(seg_dir)
+                if x.endswith(".wav") and os.path.getsize(os.path.join(seg_dir, x)) > 0
+            ])
+            if len(segments) >= 3:
+                # Remove first and last segment (opening/closing noise)
+                removed_first = segments.pop(0)
+                removed_last = segments.pop(-1)
+                os.remove(removed_first)
+                os.remove(removed_last)
+                print(f"[pipeline-video] Removed first and last segment")
+            if segments:
+                state["duration_segments"] = segments
+                f.progress = 100
+                f.steps.append({"step": "duration_split", "status": "completed",
+                                "message": f"时长切分: {len(segments)}段 (每段{segment_dur}秒, 已去除首尾)"})
+            else:
+                f.steps.append({"step": "duration_split", "status": "error", "message": "切分未产生有效片段"})
+        except Exception as e:
+            f.steps.append({"step": "duration_split", "status": "error", "message": str(e)[:100]})
+        _update_pipeline_job_progress(job)
+        return True
+
+    def _step_cut(f, job, state):
+        f.current_step = "cut"
+        f.progress = 0
+        _update_pipeline_job_progress(job)
+
+        srt = state.get("srt", "")
+        if not srt:
+            f.steps.append({"step": "cut", "status": "skipped", "message": "无字幕，跳过切割"})
+            _update_pipeline_job_progress(job)
+            return True
+
+        src = state.get("wav", f.wav_path)
+        out_dir = os.path.join(temp_dir, f"cut_{os.path.splitext(f.name)[0]}")
+        os.makedirs(out_dir, exist_ok=True)
+
+        def on_progress(cur, total):
+            if total > 0:
+                f.progress = (cur / total) * 100
+
+        try:
+            clips = cut_audio_by_subtitle(
+                audio_path=src, srt_path=srt, output_dir=out_dir,
+                base_name=os.path.splitext(f.name)[0],
+                on_progress=on_progress,
+            )
+            f.output_clips.extend(clips)
+            f.progress = 100
+            f.steps.append({"step": "cut", "status": "completed",
+                            "message": f"切割完成: {len(clips)}个片段"})
+        except Exception as e:
+            f.steps.append({"step": "cut", "status": "error", "message": str(e)[:100]})
+        _update_pipeline_job_progress(job)
+        return True
+
+    STEP_HANDLERS = {
+        "enhance": _step_enhance,
+        "super_resolve": _step_super_resolve,
+        "asr": _step_asr,
+        "duration_split": _step_duration_split,
+        "cut": _step_cut,
+    }
+
+    # Order: steps before duration_split run once on full WAV,
+    # then duration_split splits, then remaining steps run per-segment.
+    def _get_step_index(key):
+        try:
+            return enabled_steps.index(key)
+        except ValueError:
+            return -1
+
+    def _process_one_file(f):
+        try:
+            state = file_state.setdefault(f.input_path, {})
+            f.status = "running"
+
+            if job.cancelled:
+                f.status = "error"; f.error = "任务已取消"
+                _update_pipeline_job_progress(job); return
+            with _sem["convert"]:
+                if not _step_convert(f, job, state):
+                    return
+
+            # Run steps up to (and including) duration_split
+            ds_idx = _get_step_index("duration_split")
+            pre_steps = enabled_steps[:ds_idx+1] if ds_idx >= 0 else enabled_steps
+            post_steps = enabled_steps[ds_idx+1:] if ds_idx >= 0 else []
+
+            for step_key in pre_steps:
+                if job.cancelled:
+                    f.status = "error"; f.error = "任务已取消"
+                    _update_pipeline_job_progress(job); return
+                handler = STEP_HANDLERS.get(step_key)
+                if not handler:
+                    continue
+                sem = _sem.get(step_key, threading.BoundedSemaphore(2))
+                with sem:
+                    handler(f, job, state)
+
+            # If duration_split produced segments, process each through remaining steps
+            segments = state.get("duration_segments", [])
+            if segments:
+                import threading as _threading2
+                seg_lock = _threading2.Lock()
+
+                def _process_segment(seg_idx, seg_path):
+                    if job.cancelled: return
+                    seg_suffix = f"_seg{seg_idx:03d}"
+                    seg_state = {"wav": seg_path, "seg_suffix": seg_suffix}
+                    with seg_lock:
+                        f.steps.append({"step": "duration_split", "status": "running",
+                                        "message": f"处理片段 {seg_idx+1}/{len(segments)}"})
+                        _update_pipeline_job_progress(job)
+
+                    for step_key in post_steps:
+                        if job.cancelled: return
+                        handler = STEP_HANDLERS.get(step_key)
+                        if not handler: continue
+                        sem = _sem.get(step_key, _threading2.BoundedSemaphore(2))
+                        with sem:
+                            handler(f, job, seg_state)
+                    if "cut" not in enabled_steps:
+                        final_wav = seg_state.get("wav", "")
+                        if final_wav and os.path.exists(final_wav):
+                            with seg_lock:
+                                f.output_clips.append(final_wav)
+
+                seg_futures = [executor.submit(_process_segment, idx, p) for idx, p in enumerate(segments)]
+                concurrent.futures.wait(seg_futures)
+            else:
+                # No duration splitting, run remaining steps on full WAV
+                for step_key in post_steps:
+                    if job.cancelled:
+                        f.status = "error"; f.error = "任务已取消"
+                        _update_pipeline_job_progress(job); return
+                    handler = STEP_HANDLERS.get(step_key)
+                    if not handler:
+                        continue
+                    sem = _sem.get(step_key, threading.BoundedSemaphore(2))
+                    with sem:
+                        handler(f, job, state)
+                # If cut not enabled, save the final enhanced WAV as output
+                if "cut" not in enabled_steps:
+                    final_wav = state.get("wav", "")
+                    if final_wav and os.path.exists(final_wav):
+                        f.output_clips.append(final_wav)
+
+            f.status = "completed"
+        except Exception as e:
+            f.status = "error"
+            f.error = str(e)[:200]
+        _update_pipeline_job_progress(job)
+
+    max_workers = min(len(files), 10)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_process_one_file, f) for f in files]
+        concurrent.futures.wait(futures)
+
+    # Move final clips to output
+    output_base = getattr(job, 'output_dir', PIPELINE_VIDEO_DIR) or PIPELINE_VIDEO_DIR
+    final_dir = os.path.join(output_base, folder)
+    os.makedirs(final_dir, exist_ok=True)
+    for f in files:
+        if f.output_clips:
+            for clip in list(f.output_clips):
+                if os.path.exists(clip):
+                    dest = os.path.join(final_dir, os.path.basename(clip))
+                    try:
+                        _shutil.move(clip, dest)
+                    except Exception:
+                        try:
+                            _shutil.copy2(clip, dest)
+                        except Exception:
+                            pass
+            f.output_clips = [os.path.join(final_dir, os.path.basename(c)) for c in f.output_clips]
+
+    had_errors = any(f.status == "error" for f in files)
+    if not had_errors and not job.cancelled:
+        try:
+            _shutil.rmtree(temp_dir)
+            print(f"[pipeline-video] Cleaned temp dir: {temp_dir}")
+        except Exception as e:
+            print(f"[pipeline-video] Failed to clean temp: {e}")
+
+    for f in files:
+        if f.status not in ("error",):
+            f.status = "completed"
+    job.status = "completed"
+    job.progress = 100
+    _update_pipeline_job_progress(job)
+
+# ============================================================
+# cut_audio_by_subtitle — helper to slice audio by SRT
+# ============================================================
+
+def cut_audio_by_subtitle(
+    audio_path: str,
+    srt_path: str,
+    output_dir: str,
+    base_name: str = "",
+    padding: float = 0.1,
+    on_progress=None,
+) -> list:
+    """Cut audio into WAV segments based on SRT subtitle timestamps.
+
+    Each subtitle entry produces: {base_name}_{sanitized_text}.wav
+    """
+    import re
+    import json as _json
+
+    if not base_name:
+        base_name = os.path.splitext(os.path.basename(audio_path))[0]
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Get audio duration
+    audio_duration = 0.0
+    try:
+        result = subprocess.run(
+            [FFPROBE, "-v", "quiet", "-print_format", "json", "-show_format", audio_path],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+        )
+        if result.returncode == 0:
+            data = _json.loads(result.stdout)
+            audio_duration = float(data.get("format", {}).get("duration", 0))
+    except Exception:
+        pass
+
+    # Parse SRT entries
+    entries = _parse_srt_entries(srt_path)
+    total = len(entries)
+    clips = []
+
+    for i, entry in enumerate(entries):
+        start = max(0, entry["start"] - padding)
+        end = min(audio_duration or 999999, entry["end"] + padding)
+        duration = end - start
+
+        if duration < 0.3:
+            continue
+
+        # Sanitize text for filename
+        safe_text = re.sub(r'[\\/*?:"<>|]', '', entry["text"])[:30].strip()
+        if not safe_text:
+            safe_text = f"seg_{i + 1:03d}"
+        safe_text = re.sub(r'\s+', '_', safe_text)
+        if len(safe_text) > 50:
+            safe_text = safe_text[:50]
+
+        output_path = os.path.join(output_dir, f"{base_name}_{safe_text}.wav")
+
+        counter = 1
+        base_out = output_path
+        while os.path.exists(output_path):
+            stem, ext = os.path.splitext(base_out)
+            output_path = f"{stem}_{counter}{ext}"
+            counter += 1
+
+        cmd = [
+            FFMPEG, "-y",
+            "-ss", str(start),
+            "-i", audio_path,
+            "-t", str(duration),
+            "-acodec", "pcm_s16le",
+            "-ar", "44100",
+            "-ac", "2",
+            output_path,
+        ]
+
+        try:
+            subprocess.run(cmd, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=120)
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                clips.append(output_path)
+        except Exception as e:
+            print(f"[cut_audio] Error on segment {i + 1}: {e}")
+
+        if on_progress:
+            on_progress(i + 1, total)
+
+    print(f"[cut_audio] Created {len(clips)} clips in {output_dir}")
+    return clips
+
+
+def _parse_srt_entries(srt_path: str) -> list:
+    """Parse SRT file into list of {index, start, end, text}."""
+    import re
+    entries = []
+    try:
+        with open(srt_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except Exception:
+        return entries
+
+    blocks = re.split(r'\n\s*\n', content.strip())
+    for block in blocks:
+        lines = block.strip().split('\n')
+        if len(lines) < 3:
+            continue
+        # Skip index line, find timestamp line
+        time_line_idx = None
+        for li, line in enumerate(lines):
+            if re.match(r'\d+:\d+:\d+[,\.]\d+\s*-->\s*\d+:\d+:\d+[,\.]\d+', line.strip()):
+                time_line_idx = li
+                break
+        if time_line_idx is None:
+            continue
+
+        time_match = re.match(
+            r'(\d+:\d+:\d+[,\.]\d+)\s*-->\s*(\d+:\d+:\d+[,\.]\d+)',
+            lines[time_line_idx].strip()
+        )
+        if not time_match:
+            continue
+
+        start = _srt_time_to_sec(time_match.group(1))
+        end = _srt_time_to_sec(time_match.group(2))
+        text = " ".join(l.strip() for l in lines[time_line_idx + 1:] if l.strip())
+        text = re.sub(r'<[^>]+>', '', text)  # strip HTML tags
+
+        entries.append({"index": len(entries), "start": start, "end": end, "text": text})
+
+    return entries
+
+
+def _srt_time_to_sec(t: str) -> float:
+    """Convert SRT timestamp (HH:MM:SS,mmm) to seconds."""
+    t = t.replace(",", ".")
+    parts = t.split(":")
+    if len(parts) == 3:
+        return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+    return 0.0
 
 
 # ============================================================

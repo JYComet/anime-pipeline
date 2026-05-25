@@ -14,6 +14,8 @@ anime-pipeline/checkpoints/
 __pycache__/
 *.pyc
 *.pyo
+venv/
+.setup_done
 
 # Claude
 .claude/
