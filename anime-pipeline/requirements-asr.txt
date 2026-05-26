@@ -3,3 +3,10 @@
 funasr>=1.0.0
 transformers>=4.40.0
 nemo_toolkit[asr]>=1.23.0
+
+# Optional: FlashAttention 2 for faster transformer attention (Linux/GPU only)
+# Windows: PyTorch native SDPA is used as fallback (~80% of flash-attn speed)
+# flash-attn>=2.7.0
+
+# Optional: ONNX Runtime for gender detection model
+# onnxruntime>=1.18.0

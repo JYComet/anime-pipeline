@@ -38,6 +38,9 @@ echo Starting server...
 echo Frontend: http://localhost:5800
 echo.
 
+:: Fix PyTorch GBK encoding issue on Chinese Windows
+set PYTHONUTF8=1
+
 "%VENV_PYTHON%" "%PROJECT_ROOT%\scripts\server.py"
 pause
 

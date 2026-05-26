@@ -6,12 +6,17 @@ import subprocess
 from config import FFMPEG
 
 
-def mp4_to_wav(mp4_path: str, wav_path: str = "") -> str:
+def mp4_to_wav(mp4_path: str, wav_path: str = "", sample_rate: int = 44100,
+               channels: int = 2) -> str:
     """Extract audio from an MP4 file and save as 16-bit PCM WAV.
 
     Args:
         mp4_path: Path to the source MP4 file.
         wav_path: Optional output path. If empty, replaces .mp4 extension with .wav.
+        sample_rate: Output sample rate in Hz (default 44100).
+                     Use 16000 for ASR/analysis to reduce file size ~5x.
+        channels: Number of audio channels (default 2 stereo).
+                  Use 1 for mono when downstream is ASR/analysis.
 
     Returns:
         Path to the created WAV file, or empty string on failure.
@@ -27,8 +32,8 @@ def mp4_to_wav(mp4_path: str, wav_path: str = "") -> str:
         "-i", mp4_path,
         "-vn",                    # no video
         "-acodec", "pcm_s16le",   # 16-bit PCM WAV
-        "-ar", "44100",           # 44.1kHz sample rate
-        "-ac", "2",               # stereo
+        "-ar", str(sample_rate),
+        "-ac", str(channels),
         wav_path,
     ]
 

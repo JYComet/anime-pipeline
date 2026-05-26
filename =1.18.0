@@ -1,0 +1,210 @@
+Collecting funasr
+  Using cached funasr-1.3.3-py3-none-any.whl.metadata (44 kB)
+Collecting transformers
+  Using cached transformers-5.9.0-py3-none-any.whl.metadata (33 kB)
+Collecting onnxruntime
+  Using cached onnxruntime-1.23.2-cp310-cp310-win_amd64.whl.metadata (5.3 kB)
+Requirement already satisfied: scipy>=1.4.1 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from funasr) (1.15.3)
+Requirement already satisfied: librosa in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from funasr) (0.11.0)
+Collecting jamo (from funasr)
+  Using cached jamo-0.4.1-py3-none-any.whl.metadata (2.3 kB)
+Requirement already satisfied: PyYAML>=5.1.2 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from funasr) (6.0.3)
+Requirement already satisfied: soundfile>=0.12.1 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from funasr) (0.13.1)
+Collecting kaldiio>=2.17.0 (from funasr)
+  Using cached kaldiio-2.18.1-py3-none-any.whl.metadata (13 kB)
+Collecting torch_complex (from funasr)
+  Using cached torch_complex-0.4.4-py3-none-any.whl.metadata (3.1 kB)
+Collecting sentencepiece (from funasr)
+  Using cached sentencepiece-0.2.1-cp310-cp310-win_amd64.whl.metadata (10 kB)
+Collecting jieba (from funasr)
+  Using cached jieba-0.42.1.tar.gz (19.2 MB)
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Getting requirements to build wheel: started
+  Getting requirements to build wheel: finished with status 'done'
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Collecting pytorch_wpe (from funasr)
+  Using cached pytorch_wpe-0.0.1-py3-none-any.whl.metadata (242 bytes)
+Collecting editdistance>=0.5.2 (from funasr)
+  Downloading editdistance-0.8.1-cp310-cp310-win_amd64.whl.metadata (3.9 kB)
+Collecting oss2 (from funasr)
+  Using cached oss2-2.19.1.tar.gz (298 kB)
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Getting requirements to build wheel: started
+  Getting requirements to build wheel: finished with status 'done'
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Collecting tqdm (from funasr)
+  Using cached tqdm-4.67.3-py3-none-any.whl.metadata (57 kB)
+Collecting umap_learn (from funasr)
+  Using cached umap_learn-0.5.12-py3-none-any.whl.metadata (24 kB)
+Collecting jaconv (from funasr)
+  Using cached jaconv-0.5.0-py3-none-any.whl.metadata (8.9 kB)
+Collecting hydra-core>=1.3.2 (from funasr)
+  Using cached hydra_core-1.3.2-py3-none-any.whl.metadata (5.5 kB)
+Collecting tensorboardX (from funasr)
+  Using cached tensorboardx-2.6.5-py3-none-any.whl.metadata (6.6 kB)
+Requirement already satisfied: requests in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from funasr) (2.34.2)
+Collecting modelscope (from funasr)
+  Using cached modelscope-1.37.1-py3-none-any.whl.metadata (43 kB)
+Collecting huggingface-hub<2.0,>=1.5.0 (from transformers)
+  Using cached huggingface_hub-1.16.1-py3-none-any.whl.metadata (14 kB)
+Requirement already satisfied: numpy>=1.17 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from transformers) (1.26.4)
+Requirement already satisfied: packaging>=20.0 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from transformers) (23.2)
+Collecting regex>=2025.10.22 (from transformers)
+  Using cached regex-2026.5.9-cp310-cp310-win_amd64.whl.metadata (41 kB)
+Collecting tokenizers<=0.23.0,>=0.22.0 (from transformers)
+  Using cached tokenizers-0.22.2-cp39-abi3-win_amd64.whl.metadata (7.4 kB)
+Requirement already satisfied: typer in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from transformers) (0.9.0)
+Collecting safetensors>=0.4.3 (from transformers)
+  Using cached safetensors-0.7.0-cp38-abi3-win_amd64.whl.metadata (4.2 kB)
+Requirement already satisfied: filelock>=3.10.0 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from huggingface-hub<2.0,>=1.5.0->transformers) (3.29.0)
+Requirement already satisfied: fsspec>=2023.5.0 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from huggingface-hub<2.0,>=1.5.0->transformers) (2026.4.0)
+Collecting hf-xet<2.0.0,>=1.4.3 (from huggingface-hub<2.0,>=1.5.0->transformers)
+  Using cached hf_xet-1.5.0-cp37-abi3-win_amd64.whl.metadata (4.9 kB)
+Collecting httpx<1,>=0.23.0 (from huggingface-hub<2.0,>=1.5.0->transformers)
+  Using cached httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+Collecting typer (from transformers)
+  Using cached typer-0.25.1-py3-none-any.whl.metadata (15 kB)
+Requirement already satisfied: typing-extensions>=4.1.0 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from huggingface-hub<2.0,>=1.5.0->transformers) (4.15.0)
+Requirement already satisfied: anyio in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from httpx<1,>=0.23.0->huggingface-hub<2.0,>=1.5.0->transformers) (4.13.0)
+Requirement already satisfied: certifi in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from httpx<1,>=0.23.0->huggingface-hub<2.0,>=1.5.0->transformers) (2026.5.20)
+Collecting httpcore==1.* (from httpx<1,>=0.23.0->huggingface-hub<2.0,>=1.5.0->transformers)
+  Using cached httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+Requirement already satisfied: idna in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from httpx<1,>=0.23.0->huggingface-hub<2.0,>=1.5.0->transformers) (3.16)
+Requirement already satisfied: h11>=0.16 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from httpcore==1.*->httpx<1,>=0.23.0->huggingface-hub<2.0,>=1.5.0->transformers) (0.16.0)
+Collecting coloredlogs (from onnxruntime)
+  Using cached coloredlogs-15.0.1-py2.py3-none-any.whl.metadata (12 kB)
+Collecting flatbuffers (from onnxruntime)
+  Using cached flatbuffers-25.12.19-py2.py3-none-any.whl.metadata (1.0 kB)
+Collecting protobuf (from onnxruntime)
+  Using cached protobuf-7.35.0-cp310-abi3-win_amd64.whl.metadata (595 bytes)
+Requirement already satisfied: sympy in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from onnxruntime) (1.14.0)
+Collecting omegaconf<2.4,>=2.2 (from hydra-core>=1.3.2->funasr)
+  Using cached omegaconf-2.3.0-py3-none-any.whl.metadata (3.9 kB)
+Collecting antlr4-python3-runtime==4.9.* (from hydra-core>=1.3.2->funasr)
+  Using cached antlr4_python3_runtime-4.9.3-py3-none-any.whl
+Requirement already satisfied: cffi>=1.0 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from soundfile>=0.12.1->funasr) (2.0.0)
+Requirement already satisfied: pycparser in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from cffi>=1.0->soundfile>=0.12.1->funasr) (3.0)
+Requirement already satisfied: colorama in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from tqdm->funasr) (0.4.6)
+Requirement already satisfied: click>=8.2.1 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from typer->transformers) (8.4.0)
+Collecting shellingham>=1.3.0 (from typer->transformers)
+  Using cached shellingham-1.5.4-py2.py3-none-any.whl.metadata (3.5 kB)
+Requirement already satisfied: rich>=13.8.0 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from typer->transformers) (13.9.4)
+Requirement already satisfied: annotated-doc>=0.0.2 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from typer->transformers) (0.0.4)
+Requirement already satisfied: markdown-it-py>=2.2.0 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from rich>=13.8.0->typer->transformers) (4.2.0)
+Requirement already satisfied: pygments<3.0.0,>=2.13.0 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from rich>=13.8.0->typer->transformers) (2.20.0)
+Requirement already satisfied: mdurl~=0.1 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from markdown-it-py>=2.2.0->rich>=13.8.0->typer->transformers) (0.1.2)
+Requirement already satisfied: exceptiongroup>=1.0.2 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from anyio->httpx<1,>=0.23.0->huggingface-hub<2.0,>=1.5.0->transformers) (1.3.1)
+Collecting humanfriendly>=9.1 (from coloredlogs->onnxruntime)
+  Using cached humanfriendly-10.0-py2.py3-none-any.whl.metadata (9.2 kB)
+Collecting pyreadline3 (from humanfriendly>=9.1->coloredlogs->onnxruntime)
+  Using cached pyreadline3-3.5.6-py3-none-any.whl.metadata (4.7 kB)
+Requirement already satisfied: audioread>=2.1.9 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from librosa->funasr) (3.1.0)
+Requirement already satisfied: numba>=0.51.0 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from librosa->funasr) (0.65.1)
+Requirement already satisfied: scikit-learn>=1.1.0 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from librosa->funasr) (1.7.2)
+Requirement already satisfied: joblib>=1.0 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from librosa->funasr) (1.5.3)
+Requirement already satisfied: decorator>=4.3.0 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from librosa->funasr) (5.3.1)
+Requirement already satisfied: pooch>=1.1 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from librosa->funasr) (1.9.0)
+Requirement already satisfied: soxr>=0.3.2 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from librosa->funasr) (1.1.0)
+Requirement already satisfied: lazy_loader>=0.1 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from librosa->funasr) (0.5)
+Requirement already satisfied: msgpack>=1.0 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from librosa->funasr) (1.1.2)
+Requirement already satisfied: llvmlite<0.48,>=0.47.0dev0 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from numba>=0.51.0->librosa->funasr) (0.47.0)
+Requirement already satisfied: platformdirs>=2.5.0 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from pooch>=1.1->librosa->funasr) (4.9.6)
+Requirement already satisfied: charset_normalizer<4,>=2 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from requests->funasr) (3.4.7)
+Requirement already satisfied: urllib3<3,>=1.26 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from requests->funasr) (2.7.0)
+Requirement already satisfied: threadpoolctl>=3.1.0 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from scikit-learn>=1.1.0->librosa->funasr) (3.6.0)
+Requirement already satisfied: setuptools in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from modelscope->funasr) (78.1.0)
+Collecting crcmod>=1.7 (from oss2->funasr)
+  Using cached crcmod-1.7.tar.gz (89 kB)
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Getting requirements to build wheel: started
+  Getting requirements to build wheel: finished with status 'done'
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Collecting pycryptodome>=3.4.7 (from oss2->funasr)
+  Using cached pycryptodome-3.23.0-cp37-abi3-win_amd64.whl.metadata (3.5 kB)
+Collecting aliyun-python-sdk-kms>=2.4.1 (from oss2->funasr)
+  Using cached aliyun_python_sdk_kms-2.16.5-py2.py3-none-any.whl.metadata (1.5 kB)
+Collecting aliyun-python-sdk-core>=2.13.12 (from oss2->funasr)
+  Using cached aliyun-python-sdk-core-2.16.0.tar.gz (449 kB)
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Getting requirements to build wheel: started
+  Getting requirements to build wheel: finished with status 'done'
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Requirement already satisfied: six in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from oss2->funasr) (1.17.0)
+Collecting jmespath<1.0.0,>=0.9.3 (from aliyun-python-sdk-core>=2.13.12->oss2->funasr)
+  Using cached jmespath-0.10.0-py2.py3-none-any.whl.metadata (8.0 kB)
+Collecting cryptography>=3.0.0 (from aliyun-python-sdk-core>=2.13.12->oss2->funasr)
+  Downloading cryptography-48.0.0-cp39-abi3-win_amd64.whl.metadata (4.3 kB)
+Requirement already satisfied: mpmath<1.4,>=1.1.0 in c:\users\msi\appdata\local\programs\python\python310\lib\site-packages (from sympy->onnxruntime) (1.3.0)
+Collecting pynndescent>=0.5 (from umap_learn->funasr)
+  Using cached pynndescent-0.6.0-py3-none-any.whl.metadata (6.9 kB)
+Using cached funasr-1.3.3-py3-none-any.whl (887 kB)
+Using cached transformers-5.9.0-py3-none-any.whl (10.8 MB)
+Using cached huggingface_hub-1.16.1-py3-none-any.whl (668 kB)
+Using cached hf_xet-1.5.0-cp37-abi3-win_amd64.whl (4.0 MB)
+Using cached httpx-0.28.1-py3-none-any.whl (73 kB)
+Using cached httpcore-1.0.9-py3-none-any.whl (78 kB)
+Using cached tokenizers-0.22.2-cp39-abi3-win_amd64.whl (2.7 MB)
+Using cached onnxruntime-1.23.2-cp310-cp310-win_amd64.whl (13.5 MB)
+Downloading editdistance-0.8.1-cp310-cp310-win_amd64.whl (79 kB)
+Using cached hydra_core-1.3.2-py3-none-any.whl (154 kB)
+Using cached omegaconf-2.3.0-py3-none-any.whl (79 kB)
+Using cached kaldiio-2.18.1-py3-none-any.whl (29 kB)
+Using cached regex-2026.5.9-cp310-cp310-win_amd64.whl (278 kB)
+Using cached safetensors-0.7.0-cp38-abi3-win_amd64.whl (341 kB)
+Using cached tqdm-4.67.3-py3-none-any.whl (78 kB)
+Using cached typer-0.25.1-py3-none-any.whl (58 kB)
+Using cached shellingham-1.5.4-py2.py3-none-any.whl (9.8 kB)
+Using cached coloredlogs-15.0.1-py2.py3-none-any.whl (46 kB)
+Using cached humanfriendly-10.0-py2.py3-none-any.whl (86 kB)
+Using cached flatbuffers-25.12.19-py2.py3-none-any.whl (26 kB)
+Using cached jaconv-0.5.0-py3-none-any.whl (16 kB)
+Using cached jamo-0.4.1-py3-none-any.whl (9.5 kB)
+Using cached modelscope-1.37.1-py3-none-any.whl (6.1 MB)
+Using cached jmespath-0.10.0-py2.py3-none-any.whl (24 kB)
+Using cached aliyun_python_sdk_kms-2.16.5-py2.py3-none-any.whl (99 kB)
+Downloading cryptography-48.0.0-cp39-abi3-win_amd64.whl (3.8 MB)
+   ---------------------------------------- 3.8/3.8 MB 9.0 MB/s  0:00:00
+Using cached pycryptodome-3.23.0-cp37-abi3-win_amd64.whl (1.8 MB)
+Using cached protobuf-7.35.0-cp310-abi3-win_amd64.whl (439 kB)
+Using cached pyreadline3-3.5.6-py3-none-any.whl (85 kB)
+Using cached pytorch_wpe-0.0.1-py3-none-any.whl (8.1 kB)
+Using cached sentencepiece-0.2.1-cp310-cp310-win_amd64.whl (1.1 MB)
+Using cached tensorboardx-2.6.5-py3-none-any.whl (87 kB)
+Using cached torch_complex-0.4.4-py3-none-any.whl (9.1 kB)
+Using cached umap_learn-0.5.12-py3-none-any.whl (91 kB)
+Using cached pynndescent-0.6.0-py3-none-any.whl (73 kB)
+Building wheels for collected packages: jieba, oss2, aliyun-python-sdk-core, crcmod
+  Building wheel for jieba (pyproject.toml): started
+  Building wheel for jieba (pyproject.toml): finished with status 'done'
+  Created wheel for jieba: filename=jieba-0.42.1-py3-none-any.whl size=19314527 sha256=a71b7f860e7d40711ca4665d466e97a6c8d5a00a9c902e84e9f78f5ae8dea784
+  Stored in directory: c:\users\msi\appdata\local\pip\cache\wheels\c9\69\31\d56d90b22a1777b0b231e234b00302a55be255930f8bd92dcd
+  Building wheel for oss2 (pyproject.toml): started
+  Building wheel for oss2 (pyproject.toml): finished with status 'done'
+  Created wheel for oss2: filename=oss2-2.19.1-py3-none-any.whl size=124053 sha256=03c2c7b41c53b0b81fc73dc12d4c4de0060a2e43cd23308e40c0fcd9b1ba1036
+  Stored in directory: c:\users\msi\appdata\local\pip\cache\wheels\7d\1b\c6\dbf318597d350b50a94408a23a56b7349e706d61e0a06a6407
+  Building wheel for aliyun-python-sdk-core (pyproject.toml): started
+  Building wheel for aliyun-python-sdk-core (pyproject.toml): finished with status 'done'
+  Created wheel for aliyun-python-sdk-core: filename=aliyun_python_sdk_core-2.16.0-py3-none-any.whl size=535435 sha256=b42902e96015bcfd0aa832b2c69256a94440ae0c239701b462abf8535f51897c
+  Stored in directory: c:\users\msi\appdata\local\pip\cache\wheels\35\11\5e\08e7cb4e03a3e83b4862edd12d1143c8d3936a3dd57a3ee46d
+  Building wheel for crcmod (pyproject.toml): started
+  Building wheel for crcmod (pyproject.toml): finished with status 'done'
+  Created wheel for crcmod: filename=crcmod-1.7-py3-none-any.whl size=18949 sha256=a6c097e173715e062adb18dcb1c192de8cd6666a9b48570f912c40a4b44f68d8
+  Stored in directory: c:\users\msi\appdata\local\pip\cache\wheels\85\4c\07\72215c529bd59d67e3dac29711d7aba1b692f543c808ba9e86
+Successfully built jieba oss2 aliyun-python-sdk-core crcmod
+Installing collected packages: jieba, jamo, jaconv, flatbuffers, crcmod, antlr4-python3-runtime, tqdm, torch_complex, shellingham, sentencepiece, safetensors, regex, pytorch_wpe, pyreadline3, pycryptodome, protobuf, omegaconf, kaldiio, jmespath, httpcore, hf-xet, editdistance, tensorboardX, modelscope, hydra-core, humanfriendly, cryptography, typer, pynndescent, httpx, coloredlogs, aliyun-python-sdk-core, umap_learn, onnxruntime, huggingface-hub, aliyun-python-sdk-kms, tokenizers, oss2, transformers, funasr
+  Attempting uninstall: typer
+    Found existing installation: typer 0.9.0
+    Uninstalling typer-0.9.0:
+      Successfully uninstalled typer-0.9.0
+
+ERROR: pip's dependency resolver does not currently take into account all the packages that are installed. This behaviour is the source of the following dependency conflicts.
+xrfeitoria 0.6.3 requires typer==0.9.0, but you have typer 0.25.1 which is incompatible.
+Successfully installed aliyun-python-sdk-core-2.16.0 aliyun-python-sdk-kms-2.16.5 antlr4-python3-runtime-4.9.3 coloredlogs-15.0.1 crcmod-1.7 cryptography-48.0.0 editdistance-0.8.1 flatbuffers-25.12.19 funasr-1.3.3 hf-xet-1.5.0 httpcore-1.0.9 httpx-0.28.1 huggingface-hub-1.16.1 humanfriendly-10.0 hydra-core-1.3.2 jaconv-0.5.0 jamo-0.4.1 jieba-0.42.1 jmespath-0.10.0 kaldiio-2.18.1 modelscope-1.37.1 omegaconf-2.3.0 onnxruntime-1.23.2 oss2-2.19.1 protobuf-7.35.0 pycryptodome-3.23.0 pynndescent-0.6.0 pyreadline3-3.5.6 pytorch_wpe-0.0.1 regex-2026.5.9 safetensors-0.7.0 sentencepiece-0.2.1 shellingham-1.5.4 tensorboardX-2.6.5 tokenizers-0.22.2 torch_complex-0.4.4 tqdm-4.67.3 transformers-5.9.0 typer-0.25.1 umap_learn-0.5.12

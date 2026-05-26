@@ -135,28 +135,35 @@ _pipeline_video_lock = threading.Lock()
 
 
 def _update_pipeline_job_progress(job: PipelineVideoJob):
-    """Compute overall job progress as weighted average across all files."""
+    """Compute overall job progress across all files.
+
+    Uses f.progress (set per-segment by the phase-batch loop) as the primary
+    indicator, falling back to step-weight heuristics only when f.progress is 0.
+    """
     files = job.files
     if not files:
         job.progress = 0
         return
     total_pct = 0.0
-    steps_weight = {"convert": 10, "enhance": 25, "super_resolve": 25, "asr": 20, "cut": 20}
     for f in files:
         if f.status == "completed":
             total_pct += 100
         elif f.status == "error":
-            step_w = steps_weight.get(f.current_step, 0)
-            prior = sum(w for s, w in steps_weight.items() if list(steps_weight).index(s) < list(steps_weight).index(f.current_step)) if f.current_step in steps_weight else 0
-            total_pct += prior
-        elif f.status == "pending":
-            total_pct += 0
+            total_pct += max(f.progress, 0)
+        elif f.progress > 0:
+            # Use the per-segment progress set by the pipeline steps
+            total_pct += f.progress
         else:
-            step_w = steps_weight.get(f.current_step, 20)
-            step_idx = list(steps_weight).index(f.current_step) if f.current_step in steps_weight else 0
-            prior = sum(list(steps_weight.values())[:step_idx])
-            total_pct += prior + (f.progress / 100) * step_w
-    job.progress = total_pct / len(files)
+            # Fallback: estimate from current_step position
+            step_order = ["duration_split", "convert", "music_separate",
+                          "enhance", "super_resolve", "asr", "cut"]
+            try:
+                idx = step_order.index(f.current_step) if f.current_step in step_order else -1
+                if idx >= 0:
+                    total_pct += (idx + 1) * (100 // len(step_order))
+            except ValueError:
+                pass
+    job.progress = round(total_pct / len(files))
 
 
 def _auto_process_new_mkv(mkv_path: str):
@@ -3756,7 +3763,7 @@ except Exception:
 def run_asr_folder(payload: dict = Body(...)):
     """Process all audio files in a folder with ASR.
 
-    Body: {folder_path, model?, language?, device?, output_dir?}
+    Body: {folder_path, model?, language?, device?, output_dir?, selected_files?}
     Saves SRT files to output_dir/<folder_name>/ named after each audio file.
     """
     folder_path = payload.get("folder_path", "").strip()
@@ -3764,6 +3771,7 @@ def run_asr_folder(payload: dict = Body(...)):
     language = payload.get("language", "ja")
     device = payload.get("device", "cuda")
     output_base = payload.get("output_dir", "").strip()
+    selected_files = payload.get("selected_files", None)  # optional list of file names
 
     if not folder_path or not os.path.isdir(folder_path):
         raise HTTPException(status_code=400, detail="无效的文件夹路径")
@@ -3782,6 +3790,11 @@ def run_asr_folder(payload: dict = Body(...)):
                     "ext": ext,
                     "size_mb": round(os.path.getsize(full) / 1024 / 1024, 1),
                 })
+
+    # Filter to selected files only
+    if selected_files is not None and len(selected_files) > 0:
+        sel_set = set(selected_files)
+        audio_files = [af for af in audio_files if af["name"] in sel_set]
 
     if not audio_files:
         raise HTTPException(status_code=400, detail="文件夹中没有找到音频文件")
@@ -3819,13 +3832,14 @@ def run_asr_folder(payload: dict = Body(...)):
         _asr_jobs[job_id] = job
 
     def _run():
-        from asr_pipeline import run_asr_on_audio
-
         with _asr_lock:
             j = _asr_jobs.get(job_id)
             if not j:
                 return
             j["status"] = "running"
+            j["current_step"] = "加载模型中..."
+
+        from asr_pipeline import run_asr_on_audio
 
         for idx, af in enumerate(audio_files):
             with _asr_lock:
@@ -3839,7 +3853,7 @@ def run_asr_folder(payload: dict = Body(...)):
                 with _asr_lock:
                     jj = _asr_jobs.get(job_id)
                     if jj and jj.get("status") != "cancelled":
-                        jj["current_step"] = step
+                        jj["current_step"] = str(msg) if msg else str(step)
 
             try:
                 result = run_asr_on_audio(
@@ -4477,15 +4491,22 @@ def pv_cancel_job(job_id: str):
 # Pipeline Video — background processing
 # ============================================================
 
-def _convert_to_wav_ffmpeg(input_path: str) -> str:
-    """Convert an audio file (AAC/MP3/FLAC/OGG/M4A etc.) to WAV format using ffmpeg."""
+def _convert_to_wav_ffmpeg(input_path: str, sample_rate: int = 44100, channels: int = 2) -> str:
+    """Convert an audio file (AAC/MP3/FLAC/OGG/M4A etc.) to WAV format using ffmpeg.
+
+    Args:
+        input_path: Path to source audio file.
+        sample_rate: Output sample rate in Hz.
+        channels: Number of output channels.
+    """
     wav_path = os.path.splitext(input_path)[0] + ".wav"
     if os.path.exists(wav_path) and os.path.getsize(wav_path) > 0:
         return wav_path
     try:
         result = subprocess.run(
-            [FFMPEG, "-y", "-i", input_path, "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2", wav_path],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+            [FFMPEG, "-y", "-i", input_path, "-vn", "-acodec", "pcm_s16le",
+             "-ar", str(sample_rate), "-ac", str(channels), wav_path],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300,
         )
         if os.path.exists(wav_path) and os.path.getsize(wav_path) > 0:
             return wav_path
@@ -4494,6 +4515,23 @@ def _convert_to_wav_ffmpeg(input_path: str) -> str:
     except Exception as e:
         print(f"[pipeline-video] ffmpeg convert exception for {input_path}: {e}")
     return ""
+
+
+def _get_optimal_wav_params(enabled_steps: list) -> tuple:
+    """Choose optimal WAV sample rate and channels based on enabled pipeline steps.
+
+    ClearVoice models (enhance, super_resolve) work natively at 48kHz.
+    Demucs BGM separation needs stereo for source panning.
+    ASR models need 16kHz mono.
+    Default: 44100 Hz stereo for general-purpose / unknown pipelines.
+    """
+    if "enhance" in enabled_steps or "super_resolve" in enabled_steps:
+        return 48000, 1  # ClearVoice native rate, mono (anime is mono source)
+    if "music_separate" in enabled_steps:
+        return 44100, 1  # Demucs works on mono too (spectral separation)
+    if "asr" in enabled_steps:
+        return 16000, 1  # ASR native rate, mono
+    return 44100, 2  # default stereo
 
 
 def _run_pipeline_video(job_id: str):
@@ -4520,10 +4558,12 @@ def _run_pipeline_video(job_id: str):
     steps_config = getattr(job, 'steps_config', None)
     if not steps_config:
         steps_config = [
+            {"key": "duration_split", "enabled": True},
+            {"key": "music_separate", "enabled": True},
             {"key": "enhance", "enabled": True},
-            {"key": "super_resolve", "enabled": True},
+            {"key": "super_resolve", "enabled": False},
             {"key": "asr", "enabled": True},
-            {"key": "cut", "enabled": True},
+            {"key": "cut", "enabled": False},
         ]
     enabled_steps = [s["key"] for s in steps_config if s.get("enabled", True)]
     step_cfg_map = {s["key"]: s for s in steps_config}
@@ -4532,14 +4572,26 @@ def _run_pipeline_video(job_id: str):
     temp_dir = os.path.join(TEMP_DIR, "pipeline_video", job_id)
     os.makedirs(temp_dir, exist_ok=True)
 
-    # Per-step semaphores
+    # Per-step semaphores — tuned for RTX 5060 Ti (8 GB).
+    #
+    # GPU budget (8.1 GB total, ~5 GB used by desktop):
+    #   Demucs HT        ≈ 0.5 GB   (model + working)
+    #   ClearVoice SE     ≈ 0.3 GB
+    #   ClearVoice SR     ≈ 0.3 GB
+    #   Qwen3-ASR-1.7B   ≈ 3.4 GB   (bf16, needs whole remaining GPU)
+    #
+    # "gpu" semaphore limits TOTAL concurrent GPU operations across all steps.
+    # Non-GPU steps (split / convert / cut) do NOT acquire the gpu sem.
     _sem = {
-        "convert": threading.BoundedSemaphore(2),
-        "enhance": threading.BoundedSemaphore(3),
-        "super_resolve": threading.BoundedSemaphore(2),
-        "asr": threading.BoundedSemaphore(2),
+        "gpu":      threading.BoundedSemaphore(1),  # global GPU cap (8GB: 2 concurrent OOMs)
+        "ffmpeg":   threading.BoundedSemaphore(4),  # global ffmpeg cap
+        "convert":  threading.BoundedSemaphore(2),
+        "music_separate": threading.BoundedSemaphore(2),
+        "enhance":  threading.BoundedSemaphore(2),
+        "super_resolve": threading.BoundedSemaphore(1),
+        "asr":      threading.BoundedSemaphore(1),
         "duration_split": threading.BoundedSemaphore(1),
-        "cut": threading.BoundedSemaphore(2),
+        "cut":      threading.BoundedSemaphore(2),
     }
 
     file_state = {}
@@ -4565,14 +4617,18 @@ def _run_pipeline_video(job_id: str):
             _update_pipeline_job_progress(job)
             return True
 
+        # Pick optimal WAV params based on downstream steps
+        opt_sr, opt_ch = _get_optimal_wav_params(enabled_steps)
+
         ext = os.path.splitext(f.input_path)[1].lower()
         if ext in VIDEO_EXTENSIONS:
-            wav_path = mp4_to_wav(f.input_path, out)
+            wav_path = mp4_to_wav(f.input_path, out, sample_rate=opt_sr, channels=opt_ch)
             if wav_path and os.path.exists(wav_path):
                 state["wav"] = wav_path
                 f.status = "running"
                 f.progress = 100
-                f.steps.append({"step": "convert", "status": "completed", "message": "视频转WAV完成"})
+                f.steps.append({"step": "convert", "status": "completed",
+                                "message": f"视频转WAV完成 ({opt_sr}Hz)"})
                 _update_pipeline_job_progress(job)
                 return True
         elif ext == ".wav":
@@ -4585,13 +4641,14 @@ def _run_pipeline_video(job_id: str):
             _update_pipeline_job_progress(job)
             return True
         else:
-            wav_path = _convert_to_wav_ffmpeg(f.input_path)
+            wav_path = _convert_to_wav_ffmpeg(f.input_path, sample_rate=opt_sr, channels=opt_ch)
             if wav_path:
                 if wav_path != out:
                     _shutil.copy2(wav_path, out)
                 state["wav"] = out
                 f.progress = 100
-                f.steps.append({"step": "convert", "status": "completed", "message": "音频转WAV完成"})
+                f.steps.append({"step": "convert", "status": "completed",
+                                "message": f"音频转WAV完成 ({opt_sr}Hz)"})
                 _update_pipeline_job_progress(job)
                 return True
 
@@ -4601,10 +4658,40 @@ def _run_pipeline_video(job_id: str):
         _update_pipeline_job_progress(job)
         return False
 
+    def _step_music_separate(f, job, state):
+        """BGM separation: Demucs HT → keep vocals only, delete instrumentals."""
+        from music_separate import separate_vocals
+        f.current_step = "music_separate"
+        f.steps.append({"step": "music_separate", "status": "running", "message": "加载 Demucs 模型..."})
+        _update_pipeline_job_progress(job)
+
+        src = state.get("wav", f.wav_path)
+        out = _temp_path(f, "separated", ".wav", state)
+        seg_dir = os.path.join(temp_dir, f"separated_{os.path.splitext(f.name)[0]}")
+        os.makedirs(seg_dir, exist_ok=True)
+
+        try:
+            vocals_path = separate_vocals(src, seg_dir)
+            if vocals_path and os.path.exists(vocals_path):
+                if vocals_path != out:
+                    _shutil.copy2(vocals_path, out)
+                state["wav"] = out
+                f.steps.append({"step": "music_separate", "status": "completed",
+                                "message": "人声分离完成 (BGM/鼓/贝斯已删除)"})
+            else:
+                if src != out and os.path.exists(src):
+                    _shutil.copy2(src, out)
+                state["wav"] = out
+                f.steps.append({"step": "music_separate", "status": "passed",
+                                "message": "分离未产出人声，使用原始音频"})
+        except Exception as e:
+            f.steps.append({"step": "music_separate", "status": "error", "message": str(e)[:100]})
+        _update_pipeline_job_progress(job)
+        return True
+
     def _step_enhance(f, job, state):
         from denoise_audio import run_full_denoise
         f.current_step = "enhance"
-        f.progress = 5
         f.steps.append({"step": "enhance", "status": "running", "message": "加载模型中..."})
         _update_pipeline_job_progress(job)
 
@@ -4615,15 +4702,12 @@ def _run_pipeline_video(job_id: str):
             f.steps.append({"step": step_key, "status": status, "message": message})
 
         try:
-            f.progress = 20
-            _update_pipeline_job_progress(job)
             result = run_full_denoise(src, temp_dir, on_step=on_step, steps=["enhance"])
             if result.get("success") and result.get("output_path") and os.path.exists(result["output_path"]):
                 out_path = result["output_path"]
                 if out_path != out:
                     _shutil.copy2(out_path, out)
                 state["wav"] = out
-                f.progress = 100
                 f.steps.append({"step": "enhance", "status": "completed", "message": "语音增强完成"})
             else:
                 reason = result.get("discard_reason", "")
@@ -4631,10 +4715,8 @@ def _run_pipeline_video(job_id: str):
                     _shutil.copy2(src, out)
                 state["wav"] = out
                 f.steps.append({"step": "enhance", "status": "passed", "message": f"增强跳过: {reason}"})
-                f.progress = 100
         except Exception as e:
             f.steps.append({"step": "enhance", "status": "error", "message": str(e)[:100]})
-            f.progress = 100
         _update_pipeline_job_progress(job)
         return True
 
@@ -4707,17 +4789,26 @@ def _run_pipeline_video(job_id: str):
         return True
 
     def _step_duration_split(f, job, state):
-        """Split current WAV into N-minute segments via ffmpeg segment muxer.
-        Works for both audio and video inputs (convert has already produced a WAV).
-        Returns list of WAV segment paths in state['duration_segments'].
+        """Split source file directly into N-minute segments.
+
+        Strategy (optimized to skip full-file WAV conversion):
+        - WAV source: split with ``-c copy`` (instant, no re-encode).
+        - Audio source (AAC/MP3/etc.): split with ``-c copy`` into original-codec
+          segments, which are then converted to WAV in parallel by the caller.
+        - Video source (MP4/MKV): extract audio + convert to WAV + split in one
+          ffmpeg pass, writing WAV segments directly.
+
+        First and last segments are always discarded (opening/closing noise).
+        Results stored in ``state['duration_segments']``.
         """
         f.current_step = "duration_split"
         f.progress = 0
         _update_pipeline_job_progress(job)
 
-        src = state.get("wav", f.wav_path)
+        # Use the ORIGINAL source file, not a pre-converted WAV
+        src = f.input_path
         if not src or not os.path.exists(src):
-            f.steps.append({"step": "duration_split", "status": "error", "message": "无可用WAV"})
+            f.steps.append({"step": "duration_split", "status": "error", "message": "源文件不存在"})
             _update_pipeline_job_progress(job)
             return True
 
@@ -4728,21 +4819,50 @@ def _run_pipeline_video(job_id: str):
         seg_dir = os.path.join(temp_dir, f"segments_{base}")
         os.makedirs(seg_dir, exist_ok=True)
 
-        # ffmpeg segment muxer: splits WAV into equal-length chunks
-        seg_pattern = os.path.join(seg_dir, f"{base}_%03d.wav")
-        cmd = [
-            FFMPEG, "-y", "-i", src,
-            "-f", "segment", "-segment_time", str(segment_dur),
-            "-c", "copy", seg_pattern,
-        ]
+        ext = os.path.splitext(src)[1].lower()
+        is_video = ext in VIDEO_EXTENSIONS
+
+        # Pick optimal WAV params for downstream steps
+        opt_sr, opt_ch = _get_optimal_wav_params(enabled_steps)
+
+        if ext == ".wav":
+            # Already WAV — split with -c copy, instant
+            seg_pattern = os.path.join(seg_dir, f"{base}_%03d.wav")
+            cmd = [
+                FFMPEG, "-y", "-i", src,
+                "-f", "segment", "-segment_time", str(segment_dur),
+                "-c", "copy", seg_pattern,
+            ]
+            seg_ext = ".wav"
+        elif is_video:
+            # Video: extract audio + convert to WAV + split in one pass
+            seg_pattern = os.path.join(seg_dir, f"{base}_%03d.wav")
+            cmd = [
+                FFMPEG, "-y", "-i", src, "-vn",
+                "-f", "segment", "-segment_time", str(segment_dur),
+                "-acodec", "pcm_s16le",
+                "-ar", str(opt_sr), "-ac", str(opt_ch),
+                seg_pattern,
+            ]
+            seg_ext = ".wav"
+        else:
+            # Audio (AAC/MP3/FLAC etc.): split with -c copy (no re-encode),
+            # keeping original codec. Segments converted to WAV later in parallel.
+            seg_ext = ext if ext else ".aac"
+            seg_pattern = os.path.join(seg_dir, f"{base}_%03d{seg_ext}")
+            cmd = [
+                FFMPEG, "-y", "-i", src,
+                "-f", "segment", "-segment_time", str(segment_dur),
+                "-c", "copy", seg_pattern,
+            ]
 
         try:
             subprocess.run(cmd, capture_output=True, text=True,
                           encoding="utf-8", errors="replace", timeout=300)
-            # Collect generated segment files, remove first and last
+            # Collect generated segment files
             segments = sorted([
                 os.path.join(seg_dir, x) for x in os.listdir(seg_dir)
-                if x.endswith(".wav") and os.path.getsize(os.path.join(seg_dir, x)) > 0
+                if x.endswith(seg_ext) and os.path.getsize(os.path.join(seg_dir, x)) > 0
             ])
             if len(segments) >= 3:
                 # Remove first and last segment (opening/closing noise)
@@ -4753,6 +4873,10 @@ def _run_pipeline_video(job_id: str):
                 print(f"[pipeline-video] Removed first and last segment")
             if segments:
                 state["duration_segments"] = segments
+                state["seg_dir"] = seg_dir
+                state["seg_ext"] = seg_ext  # track whether conversion needed
+                state["opt_sr"] = opt_sr
+                state["opt_ch"] = opt_ch
                 f.progress = 100
                 f.steps.append({"step": "duration_split", "status": "completed",
                                 "message": f"时长切分: {len(segments)}段 (每段{segment_dur}秒, 已去除首尾)"})
@@ -4798,12 +4922,15 @@ def _run_pipeline_video(job_id: str):
         return True
 
     STEP_HANDLERS = {
+        "music_separate": _step_music_separate,
         "enhance": _step_enhance,
         "super_resolve": _step_super_resolve,
         "asr": _step_asr,
         "duration_split": _step_duration_split,
         "cut": _step_cut,
     }
+    # Steps that require GPU — automatically acquire _sem["gpu"] during execution
+    _GPU_STEPS = {"music_separate", "enhance", "super_resolve", "asr"}
 
     # Order: steps before duration_split run once on full WAV,
     # then duration_split splits, then remaining steps run per-segment.
@@ -4817,63 +4944,187 @@ def _run_pipeline_video(job_id: str):
         try:
             state = file_state.setdefault(f.input_path, {})
             f.status = "running"
-
             if job.cancelled:
                 f.status = "error"; f.error = "任务已取消"
                 _update_pipeline_job_progress(job); return
-            with _sem["convert"]:
-                if not _step_convert(f, job, state):
-                    return
 
-            # Run steps up to (and including) duration_split
             ds_idx = _get_step_index("duration_split")
             pre_steps = enabled_steps[:ds_idx+1] if ds_idx >= 0 else enabled_steps
             post_steps = enabled_steps[ds_idx+1:] if ds_idx >= 0 else []
 
-            for step_key in pre_steps:
-                if job.cancelled:
-                    f.status = "error"; f.error = "任务已取消"
-                    _update_pipeline_job_progress(job); return
-                handler = STEP_HANDLERS.get(step_key)
-                if not handler:
-                    continue
-                sem = _sem.get(step_key, threading.BoundedSemaphore(2))
-                with sem:
-                    handler(f, job, state)
+            # --- Fast path: duration_split is first, no pre-split steps ---
+            # Split source directly → convert segments in parallel → process segments.
+            # Avoids converting the entire file to WAV before splitting (saves ~1.2GB I/O).
+            if ds_idx == 0:
+                # Step A: Split source directly (no pre-convert needed)
+                with _sem["duration_split"]:
+                    _step_duration_split(f, job, state)
 
-            # If duration_split produced segments, process each through remaining steps
-            segments = state.get("duration_segments", [])
-            if segments:
-                import threading as _threading2
-                seg_lock = _threading2.Lock()
+                segments = state.get("duration_segments", [])
+                segments_needs_convert = state.get("seg_ext", ".wav") != ".wav"
 
-                def _process_segment(seg_idx, seg_path):
-                    if job.cancelled: return
-                    seg_suffix = f"_seg{seg_idx:03d}"
-                    seg_state = {"wav": seg_path, "seg_suffix": seg_suffix}
-                    with seg_lock:
-                        f.steps.append({"step": "duration_split", "status": "running",
-                                        "message": f"处理片段 {seg_idx+1}/{len(segments)}"})
+                if segments and segments_needs_convert:
+                    # Step B: Convert each segment to WAV in parallel with optimal params
+                    opt_sr = state.get("opt_sr", 44100)
+                    opt_ch = state.get("opt_ch", 2)
+
+                    def _convert_segment(idx, seg_path):
+                        if job.cancelled:
+                            return
+                        base = os.path.splitext(f.name)[0]
+                        wav_out = os.path.join(state["seg_dir"], f"{base}_seg{idx:03d}.wav")
+                        if os.path.exists(wav_out) and os.path.getsize(wav_out) > 0:
+                            return wav_out
+                        try:
+                            with _sem["ffmpeg"]:
+                                subprocess.run(
+                                    [FFMPEG, "-y", "-i", seg_path, "-vn",
+                                     "-acodec", "pcm_s16le",
+                                     "-ar", str(opt_sr), "-ac", str(opt_ch),
+                                     wav_out],
+                                    capture_output=True, text=True,
+                                    encoding="utf-8", errors="replace", timeout=120,
+                                )
+                            if os.path.exists(wav_out) and os.path.getsize(wav_out) > 0:
+                                os.remove(seg_path)  # clean up original-codec segment
+                                return wav_out
+                            return ""
+                        except Exception:
+                            return ""
+
+                    f.steps.append({"step": "convert", "status": "running",
+                                    "message": f"并行转换 {len(segments)} 段 ({opt_sr}Hz)..."})
+                    _update_pipeline_job_progress(job)
+
+                    # Phase B uses its own executor to avoid deadlock with the
+                    # outer executor. Limit workers to prevent thread explosion
+                    # when processing many files simultaneously.
+                    convert_workers = min(len(segments), 4)
+                    with concurrent.futures.ThreadPoolExecutor(
+                        max_workers=convert_workers
+                    ) as convert_exec:
+                        convert_futures = [convert_exec.submit(_convert_segment, i, p)
+                                          for i, p in enumerate(segments)]
+                        concurrent.futures.wait(convert_futures)
+
+                    # Replace segment list with converted WAV paths
+                    new_segments = []
+                    failed = 0
+                    for i, fut in enumerate(convert_futures):
+                        result_path = fut.result()
+                        if result_path and os.path.exists(result_path):
+                            new_segments.append(result_path)
+                        else:
+                            failed += 1
+
+                    if new_segments:
+                        state["duration_segments"] = new_segments
+                        segments = new_segments
+                        state["seg_ext"] = ".wav"
+                        f.steps.append({"step": "convert", "status": "completed",
+                                        "message": f"并行转换完成: {len(new_segments)} 段 "
+                                                   f"({opt_sr}Hz/{'单声道' if opt_ch == 1 else '立体声'})"
+                                                   + (f", {failed}段失败" if failed else "")})
+                    elif segments:
+                        f.steps.append({"step": "convert", "status": "error",
+                                        "message": f"所有 {len(segments)} 段转换失败"})
+                        segments = []
+                    _update_pipeline_job_progress(job)
+
+                if segments:
+                    # Step C: Process segments through remaining steps
+                    # Phase-batch: each step runs on all segments before moving to next.
+                    import threading as _threading2
+                    seg_lock = _threading2.Lock()
+                    seg_count = len(segments)
+                    seg_states = [{"wav": p, "seg_suffix": f"_seg{i:03d}"} for i, p in enumerate(segments)]
+                    total_active_steps = sum(1 for s in post_steps if s != "convert")
+
+                    active_idx = 0  # counts only non-convert steps
+                    for step_key in post_steps:
+                        if job.cancelled:
+                            f.status = "error"; f.error = "任务已取消"
+                            _update_pipeline_job_progress(job); return
+
+                        # "convert" already done in Phase B (parallel segment conversion).
+                        if step_key == "convert":
+                            continue
+
+                        handler = STEP_HANDLERS.get(step_key)
+                        if not handler:
+                            continue
+                        step_sem = _sem.get(step_key, _threading2.BoundedSemaphore(2))
+
+                        # Progress: split(0-5) + convert(5-15) + step_N(15+active*85/total .. )
+                        step_base = 15 + active_idx * (85 // max(total_active_steps, 1))
+                        step_range = 85 // max(total_active_steps, 1)
+                        active_idx += 1
+                        step_done = [0]  # mutable counter for threads
+                        f.progress = step_base
                         _update_pipeline_job_progress(job)
 
-                    for step_key in post_steps:
-                        if job.cancelled: return
-                        handler = STEP_HANDLERS.get(step_key)
-                        if not handler: continue
-                        sem = _sem.get(step_key, _threading2.BoundedSemaphore(2))
-                        with sem:
-                            handler(f, job, seg_state)
-                    if "cut" not in enabled_steps:
-                        final_wav = seg_state.get("wav", "")
-                        if final_wav and os.path.exists(final_wav):
-                            with seg_lock:
-                                f.output_clips.append(final_wav)
+                        step_workers = min(seg_count, 4)
+                        step_futures = []
+                        with concurrent.futures.ThreadPoolExecutor(
+                            max_workers=step_workers
+                        ) as step_exec:
+                            for idx, ss in enumerate(seg_states):
+                                if job.cancelled:
+                                    break
 
-                seg_futures = [executor.submit(_process_segment, idx, p) for idx, p in enumerate(segments)]
-                concurrent.futures.wait(seg_futures)
+                                def _run_step(_idx, _ss, _step_key=step_key):
+                                    if job.cancelled:
+                                        return
+                                    with seg_lock:
+                                        f.steps.append({"step": _step_key, "status": "running",
+                                                        "message": f"处理片段 {_idx+1}/{seg_count}"})
+                                        _update_pipeline_job_progress(job)
+                                    try:
+                                        h = STEP_HANDLERS.get(_step_key)
+                                        if h:
+                                            is_gpu = _step_key in _GPU_STEPS
+                                            if is_gpu:
+                                                with _sem["gpu"]:
+                                                    with step_sem:
+                                                        h(f, job, _ss)
+                                            else:
+                                                with step_sem:
+                                                    h(f, job, _ss)
+                                    except Exception as e:
+                                        with seg_lock:
+                                            f.steps.append({"step": _step_key, "status": "error",
+                                                            "message": str(e)[:100]})
+                                    with seg_lock:
+                                        step_done[0] += 1
+                                        f.progress = step_base + int(step_done[0] / seg_count * step_range)
+                                        _update_pipeline_job_progress(job)
+                                    if "cut" not in enabled_steps and _step_key == post_steps[-1]:
+                                        final_wav = _ss.get("wav", "")
+                                        if final_wav and os.path.exists(final_wav):
+                                            with seg_lock:
+                                                f.output_clips.append(final_wav)
+
+                                step_futures.append(step_exec.submit(_run_step, idx, ss))
+                            concurrent.futures.wait(step_futures)
+
+                    f.progress = 100
+                    _update_pipeline_job_progress(job)
+                    if "cut" in enabled_steps:
+                        for ss in seg_states:
+                            for clip in ss.get("output_clips", []):
+                                if clip and os.path.exists(clip):
+                                    f.output_clips.append(clip)
+                else:
+                    # No segments — file was fully discarded
+                    pass
             else:
-                # No duration splitting, run remaining steps on full WAV
-                for step_key in post_steps:
+                # --- Standard path: steps may exist before duration_split, or no split at all ---
+                # Convert full file to WAV first
+                with _sem["convert"]:
+                    if not _step_convert(f, job, state):
+                        return
+
+                for step_key in pre_steps:
                     if job.cancelled:
                         f.status = "error"; f.error = "任务已取消"
                         _update_pipeline_job_progress(job); return
@@ -4881,13 +5132,94 @@ def _run_pipeline_video(job_id: str):
                     if not handler:
                         continue
                     sem = _sem.get(step_key, threading.BoundedSemaphore(2))
-                    with sem:
-                        handler(f, job, state)
-                # If cut not enabled, save the final enhanced WAV as output
-                if "cut" not in enabled_steps:
-                    final_wav = state.get("wav", "")
-                    if final_wav and os.path.exists(final_wav):
-                        f.output_clips.append(final_wav)
+                    is_gpu = step_key in _GPU_STEPS
+                    try:
+                        if is_gpu:
+                            with _sem["gpu"]:
+                                with sem:
+                                    handler(f, job, state)
+                        else:
+                            with sem:
+                                handler(f, job, state)
+                    except Exception as e:
+                        f.steps.append({"step": step_key, "status": "error",
+                                        "message": str(e)[:100]})
+                        _update_pipeline_job_progress(job)
+
+                # If duration_split produced segments, process each through remaining steps
+                segments = state.get("duration_segments", [])
+                if segments:
+                    import threading as _threading2
+                    seg_lock = _threading2.Lock()
+
+                    def _process_segment(seg_idx, seg_path):
+                        if job.cancelled: return
+                        seg_suffix = f"_seg{seg_idx:03d}"
+                        seg_state = {"wav": seg_path, "seg_suffix": seg_suffix}
+                        with seg_lock:
+                            f.steps.append({"step": "duration_split", "status": "running",
+                                            "message": f"处理片段 {seg_idx+1}/{len(segments)}"})
+                            _update_pipeline_job_progress(job)
+
+                        for step_key in post_steps:
+                            if job.cancelled: return
+                            handler = STEP_HANDLERS.get(step_key)
+                            if not handler: continue
+                            sem = _sem.get(step_key, _threading2.BoundedSemaphore(2))
+                            is_gpu = step_key in _GPU_STEPS
+                            try:
+                                if is_gpu:
+                                    with _sem["gpu"]:
+                                        with sem:
+                                            handler(f, job, seg_state)
+                                else:
+                                    with sem:
+                                        handler(f, job, seg_state)
+                            except Exception as e:
+                                with seg_lock:
+                                    f.steps.append({"step": step_key, "status": "error",
+                                                    "message": str(e)[:100]})
+                                    _update_pipeline_job_progress(job)
+                        if "cut" not in enabled_steps:
+                            final_wav = seg_state.get("wav", "")
+                            if final_wav and os.path.exists(final_wav):
+                                with seg_lock:
+                                    f.output_clips.append(final_wav)
+
+                    # Use fresh executor to avoid deadlock with outer executor
+                    with concurrent.futures.ThreadPoolExecutor(
+                        max_workers=min(len(segments), 4)
+                    ) as seg_exec:
+                        seg_futures = [seg_exec.submit(_process_segment, idx, p)
+                                      for idx, p in enumerate(segments)]
+                        concurrent.futures.wait(seg_futures)
+                else:
+                    # No duration splitting, run remaining steps on full WAV
+                    for step_key in post_steps:
+                        if job.cancelled:
+                            f.status = "error"; f.error = "任务已取消"
+                            _update_pipeline_job_progress(job); return
+                        handler = STEP_HANDLERS.get(step_key)
+                        if not handler:
+                            continue
+                        sem = _sem.get(step_key, threading.BoundedSemaphore(2))
+                        is_gpu = step_key in _GPU_STEPS
+                        try:
+                            if is_gpu:
+                                with _sem["gpu"]:
+                                    with sem:
+                                        handler(f, job, state)
+                            else:
+                                with sem:
+                                    handler(f, job, state)
+                        except Exception as e:
+                            f.steps.append({"step": step_key, "status": "error",
+                                            "message": str(e)[:100]})
+                            _update_pipeline_job_progress(job)
+                    if "cut" not in enabled_steps:
+                        final_wav = state.get("wav", "")
+                        if final_wav and os.path.exists(final_wav):
+                            f.output_clips.append(final_wav)
 
             f.status = "completed"
         except Exception as e:

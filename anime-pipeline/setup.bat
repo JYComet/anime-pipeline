@@ -265,6 +265,9 @@ for /f "tokens=5" %%a in ('netstat -ano 2^>nul ^| findstr ":5800.*LISTENING"') d
     timeout /t 2 /nobreak >nul
 )
 
+:: Fix PyTorch GBK encoding issue on Chinese Windows
+set PYTHONUTF8=1
+
 :: Launch server with venv python
 "%PYTHON%" "%PROJECT_ROOT%\scripts\server.py"
 pause

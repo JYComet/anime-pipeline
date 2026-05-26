@@ -15,24 +15,29 @@ _CLEARVOICE_PATH = os.path.join(
 if _CLEARVOICE_PATH not in sys.path:
     sys.path.insert(0, _CLEARVOICE_PATH)
 
-# Singleton model instances (lazy-loaded)
+# Singleton model instances (lazy-loaded, thread-safe)
 _se_model = None
 _sr_model = None
+_cv_lock = __import__('threading').Lock()
 
 
 def _get_se_model():
     global _se_model
     if _se_model is None:
-        from clearvoice import ClearVoice
-        _se_model = ClearVoice(task='speech_enhancement', model_names=['MossFormer2_SE_48K'])
+        with _cv_lock:
+            if _se_model is None:  # double-check
+                from clearvoice import ClearVoice
+                _se_model = ClearVoice(task='speech_enhancement', model_names=['MossFormer2_SE_48K'])
     return _se_model
 
 
 def _get_sr_model():
     global _sr_model
     if _sr_model is None:
-        from clearvoice import ClearVoice
-        _sr_model = ClearVoice(task='speech_super_resolution', model_names=['MossFormer2_SR_48K'])
+        with _cv_lock:
+            if _sr_model is None:  # double-check
+                from clearvoice import ClearVoice
+                _sr_model = ClearVoice(task='speech_super_resolution', model_names=['MossFormer2_SR_48K'])
     return _sr_model
 
 
@@ -44,9 +49,10 @@ def _get_sr_model():
 
 STEP_REGISTRY = {}  # Populated below
 
-DEFAULT_STEPS = ["male_voice", "enhance", "super_resolve", "reverb", "silence", "vad", "pad", "clear_short"]
+DEFAULT_STEPS = ["music_separate", "male_voice", "enhance", "super_resolve", "reverb", "silence", "vad", "pad", "clear_short"]
 
 STEP_LABELS = {
+    "music_separate": "BGM分离",
     "clear_short": "清除短音频",
     "enhance": "语音增强",
     "super_resolve": "超分辨率",
@@ -147,6 +153,21 @@ def _step_pad(current_path, output_dir, base):
         return {"success": False, "discard_reason": f"PAD失败: {str(e)[:100]}"}
 
 
+def _step_music_separate(current_path, output_dir, base):
+    """BGM separation: Demucs HT → keep vocals only."""
+    out = os.path.join(output_dir, f"{base}_vocals.wav")
+    if os.path.exists(out) and os.path.getsize(out) > 0:
+        return {"success": True, "output_path": out}
+    try:
+        from music_separate import separate_vocals
+        vocals_path = separate_vocals(current_path, output_dir)
+        if vocals_path and os.path.exists(vocals_path):
+            return {"success": True, "output_path": vocals_path}
+        return {"success": True, "output_path": current_path, "info": {"fallback": "BGM分离未产出人声，使用原始音频"}}
+    except Exception as e:
+        return {"success": True, "output_path": current_path, "info": {"fallback": f"BGM分离失败: {str(e)[:100]}"}}
+
+
 def _step_male_voice(current_path, output_dir, base):
     """Remove male voice clips via pitch detection."""
     from audio_pipeline import analyze_clip_gender
@@ -157,6 +178,7 @@ def _step_male_voice(current_path, output_dir, base):
 
 
 STEP_REGISTRY = {
+    "music_separate": _step_music_separate,
     "clear_short": _step_clear_short,
     "enhance": _step_enhance,
     "super_resolve": _step_super_resolve,
@@ -186,6 +208,10 @@ def run_full_denoise(input_path: str, output_dir: str, on_step=None, steps=None)
     """
     if steps is None:
         steps = DEFAULT_STEPS
+
+    # Clear audio cache for this pipeline run (opt 5: single-pass loading)
+    from audio_pipeline import clear_audio_cache
+    clear_audio_cache()
 
     # Validate step keys
     valid_steps = [s for s in steps if s in STEP_REGISTRY]

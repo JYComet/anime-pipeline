@@ -147,6 +147,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
 .pv-file-item:hover { background: var(--bg2); }
 .pv-file-remove:hover { color: var(--danger) !important; background: rgba(233,69,96,0.15); }
 .pv-folder-remove:hover { color: var(--danger) !important; background: rgba(233,69,96,0.15); }
+.pv-folder-sec-remove:hover { color: var(--danger) !important; background: rgba(233,69,96,0.15); }
 .pv-folder-chip:hover { border-color: var(--accent); }
 .pv-step-disabled { opacity: 0.45; }
 
@@ -1104,6 +1105,13 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
             </div>
             <div id="asr-folder-file-info" style="display:none;margin-top:6px;padding:6px 10px;border-radius:6px;background:var(--bg2);border:1px solid var(--border);font-size:12px;color:var(--text2);">
             </div>
+            <div id="asr-folder-select-bar" style="display:none;margin-top:6px;align-items:center;gap:8px;">
+              <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;">
+                <input type="checkbox" id="asr-folder-select-all-cb" onchange="asrFolderToggleSelectAll()" style="cursor:pointer;">
+                全选
+              </label>
+              <span id="asr-folder-selected-count" style="font-size:11px;color:var(--text2);"></span>
+            </div>
             <div id="asr-folder-file-list" class="file-list" style="display:none;max-height:300px;overflow-y:auto;margin-top:4px;border:1px solid var(--border);border-radius:8px;"></div>
           </div>
 
@@ -1581,9 +1589,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
         <button class="btn btn-primary" onclick="pvScanFolders()" style="font-size:12px;padding:6px 16px;white-space:nowrap;" id="btn-pv-scan" disabled>🔍 扫描</button>
         <span style="font-size:12px;color:var(--text2);">支持 MP4/MKV/AVI/MOV/WMV/WEBM/FLV 视频及 WAV/MP3/FLAC/AAC/OGG 音频</span>
       </div>
-      <div id="pv-folder-list" style="display:flex;gap:8px;flex-wrap:wrap;">
-        <span style="font-size:13px;color:var(--text2);" id="pv-folder-hint">点击「添加文件夹」选择包含视频/音频的文件夹，可选择多个</span>
-      </div>
+      <span style="font-size:13px;color:var(--text2);" id="pv-folder-hint">点击「添加文件夹」选择包含视频/音频的文件夹，可选择多个</span>
+      <div id="pv-folder-list" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
     </div>
 
     <!-- Step config panel -->
@@ -1630,7 +1637,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
       </div>
 
       <!-- File list -->
-      <div id="pv-file-list" class="file-list" style="max-height:45vh;border:1px solid var(--border);border-radius:8px;margin-bottom:16px;">
+      <div id="pv-file-list" style="max-height:55vh;overflow-y:auto;margin-bottom:16px;">
       </div>
     </div>
 
@@ -1899,7 +1906,7 @@ function statusText(s) {
 }
 
 function stepName(s) {
-  var map = { download: '下载', extract_subtitles: '提取字幕', split_video: '分割视频', filter_clips: '时长筛选', filter_silence: '静音筛选', queued: '排队等待中', subtitle_split: '按字幕分割', duration_split: '按时长分割', size_split: '按大小分割', trim_video: '裁剪视频', done: '已完成', error: '出错' };
+  var map = { download: '下载', extract_subtitles: '提取字幕', split_video: '分割视频', filter_clips: '时长筛选', filter_silence: '静音筛选', queued: '排队等待中', subtitle_split: '按字幕分割', duration_split: '按时长分割', size_split: '按大小分割', trim_video: '裁剪视频', music_separate: 'BGM分离', convert: 'WAV转换', enhance: '语音增强', super_resolve: '超分辨率', asr: 'ASR识别', cut: '字幕切割', done: '已完成', error: '出错' };
   return map[s] || s;
 }
 
@@ -4713,6 +4720,7 @@ var _denoiseResultSelected = {};
 
 // Default step order (all enabled)
 var STEP_DEFAULTS = [
+  {key: 'music_separate', label: 'BGM分离', enabled: false},
   {key: 'male_voice', label: '去除男声', enabled: true},
   {key: 'enhance', label: '语音增强', enabled: true},
   {key: 'super_resolve', label: '超分辨率', enabled: true},
@@ -6209,6 +6217,7 @@ var _asrFolderJobId = null;
 var _asrFolderPollTimer = null;
 var _asrFolderFiles = [];   // detected audio files in selected folder
 var _asrFolderPath = '';    // selected folder path
+var _asrFolderSelected = {}; // {name: true} for selected files
 
 function switchAsrMode(mode) {
   var isFolder = mode === 'folder';
@@ -6255,6 +6264,7 @@ async function browseAsrOutputDir() {
 async function detectAsrFolderFiles(folderPath) {
   if (!folderPath) {
     document.getElementById('asr-folder-file-info').style.display = 'none';
+    document.getElementById('asr-folder-select-bar').style.display = 'none';
     document.getElementById('btn-asr-folder-run').disabled = true;
     return;
   }
@@ -6267,29 +6277,23 @@ async function detectAsrFolderFiles(folderPath) {
     var data = await resp.json();
     _asrFolderFiles = data.files || [];
     _asrFolderPath = folderPath;
+    _asrFolderSelected = {};
+    // Select all by default
+    for (var i = 0; i < _asrFolderFiles.length; i++) {
+      _asrFolderSelected[_asrFolderFiles[i].name] = true;
+    }
     var infoEl = document.getElementById('asr-folder-file-info');
+    var barEl = document.getElementById('asr-folder-select-bar');
     var listEl = document.getElementById('asr-folder-file-list');
     if (data._debug) { console.log('folder-detect debug:', JSON.stringify(data._debug)); }
 
     if (_asrFolderFiles.length) {
       infoEl.style.display = 'block';
       infoEl.textContent = '发现 ' + _asrFolderFiles.length + ' 个音频文件 (' + data.total_size_mb + ' MB)';
+      barEl.style.display = 'flex';
       document.getElementById('btn-asr-folder-run').disabled = false;
 
-      // Render file list with play buttons
-      var html = '';
-      for (var i = 0; i < _asrFolderFiles.length; i++) {
-        var f = _asrFolderFiles[i];
-        var audioPath = folderPath.replace(/\\/g, '/').replace(/\/$/, '') + '/' + f.name;
-        html += '<div class="file-item" style="display:flex;align-items:center;gap:6px;padding:4px 8px;border-bottom:1px solid var(--border);">';
-        html += '<span style="font-size:12px;color:var(--text2);flex-shrink:0;width:20px;text-align:center;">' + (i + 1) + '</span>';
-        html += '<span style="flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(f.name) + '">' + escapeHtml(f.name) + '</span>';
-        html += '<span style="font-size:10px;color:var(--text2);flex-shrink:0;">' + f.size_mb + ' MB</span>';
-        html += '<button class="btn btn-secondary" onclick="playAsrFolderAudio(\'' + safeAttr(audioPath) + '\',\'' + escapeHtml(f.name).replace(/'/g, "\\\\'") + '\')" style="font-size:10px;padding:2px 8px;flex-shrink:0;" title="播放">▶</button>';
-        html += '</div>';
-      }
-      listEl.innerHTML = html;
-      listEl.style.display = 'block';
+      _asrRenderFolderFileList();
     } else {
       infoEl.style.display = 'block';
       var msg = '未找到音频文件（支持 wav, mp3, flac, m4a, aac, ogg, wma, opus）';
@@ -6301,10 +6305,52 @@ async function detectAsrFolderFiles(folderPath) {
         }
       }
       infoEl.textContent = msg;
+      barEl.style.display = 'none';
       listEl.style.display = 'none';
       document.getElementById('btn-asr-folder-run').disabled = true;
     }
   } catch(e) { console.error(e); }
+}
+
+function _asrRenderFolderFileList() {
+  var listEl = document.getElementById('asr-folder-file-list');
+  var html = '';
+  var selCount = 0;
+  for (var i = 0; i < _asrFolderFiles.length; i++) {
+    var f = _asrFolderFiles[i];
+    if (_asrFolderSelected[f.name]) selCount++;
+    var audioPath = _asrFolderPath.replace(/\\/g, '/').replace(/\/$/, '') + '/' + f.name;
+    var checked = _asrFolderSelected[f.name] ? 'checked' : '';
+    html += '<div class="file-item" style="display:flex;align-items:center;gap:6px;padding:4px 8px;border-bottom:1px solid var(--border);">';
+    html += '<input type="checkbox" class="asr-folder-item-cb" ' + checked + ' onchange="asrFolderToggleItem(this)" data-name="' + escapeHtml(f.name) + '" style="cursor:pointer;flex-shrink:0;">';
+    html += '<span style="font-size:12px;color:var(--text2);flex-shrink:0;width:20px;text-align:center;">' + (i + 1) + '</span>';
+    html += '<span style="flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(f.name) + '">' + escapeHtml(f.name) + '</span>';
+    html += '<span style="font-size:10px;color:var(--text2);flex-shrink:0;">' + f.size_mb + ' MB</span>';
+    html += '<button class="btn btn-secondary" onclick="playAsrFolderAudio(\'' + safeAttr(audioPath) + '\',\'' + escapeHtml(f.name).replace(/'/g, "\\\\'") + '\')" style="font-size:10px;padding:2px 8px;flex-shrink:0;" title="播放">▶</button>';
+    html += '</div>';
+  }
+  listEl.innerHTML = html;
+  listEl.style.display = 'block';
+
+  // Update select-all checkbox and count
+  document.getElementById('asr-folder-select-all-cb').checked = selCount === _asrFolderFiles.length && _asrFolderFiles.length > 0;
+  document.getElementById('asr-folder-selected-count').textContent = '已选 ' + selCount + '/' + _asrFolderFiles.length + ' 个';
+}
+
+function asrFolderToggleSelectAll() {
+  var checked = document.getElementById('asr-folder-select-all-cb').checked;
+  for (var i = 0; i < _asrFolderFiles.length; i++) {
+    if (checked) { _asrFolderSelected[_asrFolderFiles[i].name] = true; }
+    else { delete _asrFolderSelected[_asrFolderFiles[i].name]; }
+  }
+  _asrRenderFolderFileList();
+}
+
+function asrFolderToggleItem(cb) {
+  var name = cb.getAttribute('data-name');
+  if (cb.checked) { _asrFolderSelected[name] = true; }
+  else { delete _asrFolderSelected[name]; }
+  _asrRenderFolderFileList();
 }
 
 // Auto-detect when user types/pastes a path
@@ -6318,6 +6364,7 @@ function initAsrFolderPathInput() {
       timer = setTimeout(function() { detectAsrFolderFiles(val); }, 500);
     } else {
       document.getElementById('asr-folder-file-info').style.display = 'none';
+      document.getElementById('asr-folder-select-bar').style.display = 'none';
       document.getElementById('btn-asr-folder-run').disabled = true;
     }
   });
@@ -6326,6 +6373,13 @@ function initAsrFolderPathInput() {
 async function runAsrFolder() {
   var folderPath = document.getElementById('asr-folder-path').value.trim();
   if (!folderPath) { toast('请选择音频文件夹', 'error'); return; }
+
+  // Collect selected file names
+  var selectedFiles = [];
+  for (var i = 0; i < _asrFolderFiles.length; i++) {
+    if (_asrFolderSelected[_asrFolderFiles[i].name]) selectedFiles.push(_asrFolderFiles[i].name);
+  }
+  if (!selectedFiles.length) { toast('请至少选择一个音频文件', 'info'); return; }
 
   var model = document.getElementById('asr-model-select').value;
   var language = document.getElementById('asr-lang-select').value;
@@ -6348,6 +6402,7 @@ async function runAsrFolder() {
         language: language,
         device: device,
         output_dir: outputDir,
+        selected_files: selectedFiles,
       }),
     });
     if (!resp.ok) {
@@ -6356,6 +6411,7 @@ async function runAsrFolder() {
     }
     var data = await resp.json();
     _asrFolderJobId = data.job_id;
+    document.getElementById('btn-asr-folder-run').textContent = '处理中...';
     document.getElementById('asr-folder-progress').style.display = 'block';
     document.getElementById('asr-folder-progress-fill').style.width = '0%';
     document.getElementById('asr-folder-progress-text').textContent = '开始处理 ' + data.file_count + ' 个文件...';
@@ -8229,12 +8285,13 @@ var _pvFolders = [];  // [{path: str, name: str}]
 
 // Step configuration
 var PV_STEP_DEFAULTS = [
-  {key: 'duration_split', label: '时长切分',    enabled: true, config: {segment_duration: 600}},
-  {key: 'convert',        label: 'WAV转换',     enabled: true},
-  {key: 'enhance',        label: '语音增强',    enabled: true},
-  {key: 'super_resolve',  label: '超分辨率',    enabled: false},
-  {key: 'asr',            label: 'ASR字幕识别', enabled: false},
-  {key: 'cut',            label: '字幕切割',    enabled: false},
+  {key: 'duration_split',   label: '时长切分',    enabled: true, config: {segment_duration: 600}},
+  {key: 'convert',          label: 'WAV转换',     enabled: true},
+  {key: 'music_separate',   label: 'BGM分离',     enabled: true},
+  {key: 'enhance',          label: '语音增强',    enabled: true},
+  {key: 'super_resolve',    label: '超分辨率',    enabled: false},
+  {key: 'asr',              label: 'ASR字幕识别', enabled: false},
+  {key: 'cut',              label: '字幕切割',    enabled: false},
 ];
 var _pvSteps = JSON.parse(JSON.stringify(PV_STEP_DEFAULTS));
 
@@ -8399,15 +8456,18 @@ function pvRenderFolderList() {
     if (target.classList.contains('pv-folder-remove')) {
       var idx = parseInt(target.getAttribute('data-pv-folder-idx'));
       if (!isNaN(idx) && idx >= 0 && idx < _pvFolders.length) {
-        _pvFolders.splice(idx, 1);
-        pvRenderFolderList();
+        pvRemoveFolder(idx);
       }
     }
   };
 }
 
 function pvRemoveFolder(idx) {
+  var folderPath = _pvFolders[idx].path;
   _pvFolders.splice(idx, 1);
+  // Also remove files belonging to this folder
+  _pvFiles = _pvFiles.filter(function(f) { return f.folder !== folderPath; });
+  pvCleanSelected();
   pvRenderFolderList();
 }
 
@@ -8467,36 +8527,92 @@ function pvRefreshScan() { pvScanFolders(); }
 function pvRenderFileList() {
   var container = document.getElementById('pv-file-list');
   var selectedCount = 0;
-  var html = '';
+
+  // Group files by folder, preserving folder order
+  var grouped = {};     // {folderPath: [files...]}
+  var folderOrder = []; // [folderPath, ...]
   for (var i = 0; i < _pvFiles.length; i++) {
     var f = _pvFiles[i];
-    var checked = _pvSelected[f.path] ? 'checked' : '';
     if (_pvSelected[f.path]) selectedCount++;
-    var isVideo = ['.mp4','.mkv','.avi','.mov','.wmv','.webm','.flv'].indexOf(f.ext) >= 0;
-    var icon = isVideo ? '🎬' : '🎵';
-    var durStr = f.duration_s > 0 ? pvFormatDuration(f.duration_s) : '';
-    html += '<div class="pv-file-item" data-pv-file-idx="' + i + '">' +
-      '<input type="checkbox" class="pv-item-cb" ' + checked + ' onchange="pvToggleItem(this)" data-path="' + escapeHtmlAttr(f.path) + '">' +
-      '<span>' + icon + '</span>' +
-      '<span class="file-name" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(f.name) + '</span>' +
-      '<span class="file-size" style="font-size:12px;color:var(--text2);white-space:nowrap;">' + (f.size_mb || 0).toFixed(1) + ' MB</span>' +
-      '<span class="file-size" style="font-size:12px;color:var(--text2);white-space:nowrap;">' + (durStr || '') + '</span>' +
-      (isVideo ? '<button class="btn btn-secondary" style="font-size:10px;padding:2px 8px;white-space:nowrap;" onclick="pvPreviewFile(event, \'' + escapeHtmlAttr(f.path) + '\')">预览</button>' : '') +
-      ' <span class="pv-file-remove" data-pv-file-idx="' + i + '" style="cursor:pointer;color:var(--text2);font-size:16px;line-height:1;padding:2px 4px;border-radius:4px;flex-shrink:0;" title="从列表中移除">✕</span>' +
-    '</div>';
+    var fp = f.folder || '';
+    if (!grouped[fp]) { grouped[fp] = []; folderOrder.push(fp); }
+    grouped[fp].push(f);
   }
-  container.innerHTML = html || '<div class="empty-state"><p>未找到媒体文件</p></div>';
 
-  // Attach click handler for remove buttons via event delegation
+  var html = '';
+
+  if (folderOrder.length === 0) {
+    html = '<div class="empty-state"><p>未找到媒体文件</p></div>';
+  } else {
+    for (var gi = 0; gi < folderOrder.length; gi++) {
+      var folderPath = folderOrder[gi];
+      var folderFiles = grouped[folderPath];
+      var folderName = folderPath.replace(/\\/g, '/').split('/').pop() || folderPath;
+
+      // Count selected in this folder
+      var folderSelCount = 0;
+      for (var fi = 0; fi < folderFiles.length; fi++) {
+        if (_pvSelected[folderFiles[fi].path]) folderSelCount++;
+      }
+      var allChecked = folderSelCount === folderFiles.length && folderFiles.length > 0;
+
+      // Folder section header
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:6px 6px 0 0;' +
+        (gi > 0 ? 'margin-top:12px;' : '') + '">';
+      html += '<label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;">';
+      html += '<input type="checkbox" class="pv-folder-cb" ' + (allChecked ? 'checked' : '') +
+        ' data-pv-folder="' + escapeHtmlAttr(folderPath) + '" onchange="pvToggleFolder(this)" style="cursor:pointer;">';
+      html += '<span style="font-weight:600;color:var(--text);">📁 ' + escapeHtml(folderName) + '</span>';
+      html += '</label>';
+      html += '<span style="font-size:11px;color:var(--text2);">' + folderFiles.length + ' 个文件</span>';
+      html += '<span class="pv-folder-sec-remove" data-pv-folder-path="' + escapeHtmlAttr(folderPath) +
+        '" style="cursor:pointer;color:var(--text2);font-size:14px;line-height:1;padding:2px 6px;border-radius:4px;margin-left:auto;" title="移除此文件夹的全部文件">✕</span>';
+      html += '</div>';
+
+      // File items
+      html += '<div style="border:1px solid var(--border);border-top:none;border-radius:0 0 6px 6px;margin-bottom:2px;">';
+      for (var fi = 0; fi < folderFiles.length; fi++) {
+        var f = folderFiles[fi];
+        var checked = _pvSelected[f.path] ? 'checked' : '';
+        var isVideo = ['.mp4','.mkv','.avi','.mov','.wmv','.webm','.flv'].indexOf(f.ext) >= 0;
+        var icon = isVideo ? '🎬' : '🎵';
+        var durStr = f.duration_s > 0 ? pvFormatDuration(f.duration_s) : '';
+        html += '<div class="pv-file-item" style="padding-left:22px;">' +
+          '<input type="checkbox" class="pv-item-cb" ' + checked + ' onchange="pvToggleItem(this)" data-path="' + escapeHtmlAttr(f.path) + '">' +
+          '<span>' + icon + '</span>' +
+          '<span class="file-name" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(f.name) + '</span>' +
+          '<span class="file-size" style="font-size:12px;color:var(--text2);white-space:nowrap;">' + (f.size_mb || 0).toFixed(1) + ' MB</span>' +
+          '<span class="file-size" style="font-size:12px;color:var(--text2);white-space:nowrap;">' + (durStr || '') + '</span>' +
+          (isVideo ? '<button class="btn btn-secondary" style="font-size:10px;padding:2px 8px;white-space:nowrap;" onclick="pvPreviewFile(event, \'' + escapeHtmlAttr(f.path) + '\')">预览</button>' : '') +
+          ' <span class="pv-file-remove" data-pv-file-path="' + escapeHtmlAttr(f.path) +
+          '" style="cursor:pointer;color:var(--text2);font-size:16px;line-height:1;padding:2px 4px;border-radius:4px;flex-shrink:0;" title="从列表中移除">✕</span>' +
+        '</div>';
+      }
+      html += '</div>';
+    }
+  }
+
+  container.innerHTML = html;
+
+  // Event delegation for remove buttons
   container.onclick = function(e) {
     var target = e.target;
-    // Check if clicked on a file remove button
+    // File remove (by path, not index)
     if (target.classList.contains('pv-file-remove')) {
-      var idx = parseInt(target.getAttribute('data-pv-file-idx'));
-      if (!isNaN(idx) && idx >= 0 && idx < _pvFiles.length) {
-        var path = _pvFiles[idx].path;
-        _pvFiles.splice(idx, 1);
-        delete _pvSelected[path];
+      var filePath = target.getAttribute('data-pv-file-path');
+      if (filePath) {
+        _pvFiles = _pvFiles.filter(function(f) { return f.path !== filePath; });
+        delete _pvSelected[filePath];
+        pvRenderFileList();
+      }
+      return;
+    }
+    // Folder section remove
+    if (target.classList.contains('pv-folder-sec-remove')) {
+      var fPath = target.getAttribute('data-pv-folder-path');
+      if (fPath) {
+        _pvFiles = _pvFiles.filter(function(f) { return f.folder !== fPath; });
+        pvCleanSelected();
         pvRenderFileList();
       }
       return;
@@ -8507,6 +8623,26 @@ function pvRenderFileList() {
   document.getElementById('pv-total-files').textContent = '共 ' + _pvFiles.length + ' 个文件';
   document.getElementById('pv-select-all-cb').checked = selectedCount === _pvFiles.length && _pvFiles.length > 0;
   document.getElementById('btn-pv-start').disabled = selectedCount === 0;
+}
+
+function pvCleanSelected() {
+  var keep = {};
+  for (var i = 0; i < _pvFiles.length; i++) {
+    if (_pvSelected[_pvFiles[i].path]) keep[_pvFiles[i].path] = true;
+  }
+  _pvSelected = keep;
+}
+
+function pvToggleFolder(cb) {
+  var folderPath = cb.getAttribute('data-pv-folder');
+  var checked = cb.checked;
+  for (var i = 0; i < _pvFiles.length; i++) {
+    if (_pvFiles[i].folder === folderPath) {
+      if (checked) { _pvSelected[_pvFiles[i].path] = true; }
+      else { delete _pvSelected[_pvFiles[i].path]; }
+    }
+  }
+  pvRenderFileList();
 }
 
 function escapeHtmlAttr(str) {
@@ -8634,8 +8770,8 @@ function pvUpdateUI(job) {
 }
 
 function pvRenderStepLabels(f) {
-  var stepNames = { 'convert': 'WAV转换', 'enhance': '语音增强', 'super_resolve': '超分辨率', 'asr': 'ASR识别', 'cut': '音频切割' };
-  var steps = ['convert', 'enhance', 'super_resolve', 'asr', 'cut'];
+  var stepNames = { 'music_separate': 'BGM分离', 'convert': 'WAV转换', 'enhance': '语音增强', 'super_resolve': '超分辨率', 'asr': 'ASR识别', 'cut': '音频切割' };
+  var steps = ['convert', 'music_separate', 'enhance', 'super_resolve', 'asr', 'cut'];
   var html = '';
   for (var i = 0; i < steps.length; i++) {
     var s = steps[i];

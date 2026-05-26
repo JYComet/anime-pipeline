@@ -42,15 +42,39 @@ SILENCE_THRESHOLD = 0.01
 # ============================================================
 # Helpers
 # ============================================================
+# Per-session audio cache to avoid re-loading the same file from disk
+# across multiple analysis steps. Cache is by absolute path; cleared per pipeline run.
+_audio_cache: dict[str, tuple[np.ndarray, int]] = {}  # path -> (audio_array, sample_rate)
+
+
+def clear_audio_cache():
+    """Clear the per-session audio cache (call between pipeline runs)."""
+    _audio_cache.clear()
+
+
+def _load_audio_cached(audio_path: str, target_sr: int = SR, mono: bool = True) -> tuple[np.ndarray, int]:
+    """Load audio from disk with caching. Returns (audio, sample_rate).
+
+    Subsequent calls with the same path skip disk I/O and resampling.
+    """
+    cache_key = f"{audio_path}:{target_sr}:{mono}"
+    if cache_key in _audio_cache:
+        return _audio_cache[cache_key]
+    y, actual_sr = librosa.load(audio_path, sr=target_sr, mono=mono)
+    _audio_cache[cache_key] = (y, actual_sr)
+    return y, actual_sr
+
+
 def _rms(audio: np.ndarray, frame_len: int = FRAME_LEN, hop_len: int = HOP_LEN) -> np.ndarray:
-    """Compute RMS energy per frame."""
+    """Compute RMS energy per frame — vectorized via stride tricks (~100x faster)."""
     n_frames = 1 + (len(audio) - frame_len) // hop_len
-    rms_vals = np.zeros(n_frames)
-    for i in range(n_frames):
-        start = i * hop_len
-        frame = audio[start:start + frame_len]
-        rms_vals[i] = np.sqrt(np.mean(frame ** 2))
-    return rms_vals
+    if n_frames <= 0:
+        return np.zeros(0)
+    # stride trick: view overlapping frames without copying
+    shape = (n_frames, frame_len)
+    strides = (audio.strides[0] * hop_len, audio.strides[0])
+    frames = np.lib.stride_tricks.as_strided(audio, shape=shape, strides=strides)
+    return np.sqrt(np.mean(frames * frames, axis=1))
 
 
 def _create_silence(duration_s: float, sr: int = SR) -> torch.Tensor:
@@ -65,7 +89,7 @@ def detect_reverb(audio_path: str) -> tuple[bool, dict]:
 
     Returns (has_reverb, debug_info).
     """
-    y, sr = librosa.load(audio_path, sr=SR, mono=True)
+    y, sr = _load_audio_cached(audio_path)
     if len(y) < sr * 0.5:  # too short
         return False, {"reason": "too_short"}
 
@@ -111,7 +135,7 @@ def detect_reverb(audio_path: str) -> tuple[bool, dict]:
 # ============================================================
 def check_silence_ratio(audio_path: str) -> tuple[bool, dict]:
     """Check if audio has too much silence. Returns (is_bad, info)."""
-    y, sr = librosa.load(audio_path, sr=SR, mono=True)
+    y, sr = _load_audio_cached(audio_path)
     total_len = len(y)
     if total_len == 0:
         return True, {"reason": "empty"}
@@ -164,7 +188,7 @@ def analyze_clip_bgm(audio_path: str) -> dict:
 
     # Load audio
     try:
-        y, sr = librosa.load(audio_path, sr=SR, mono=True)
+        y, sr = _load_audio_cached(audio_path)
     except Exception:
         result["details"] = "failed to load audio"
         return result
@@ -462,7 +486,7 @@ def analyze_clip_gender(
         sr_val = sr
     elif audio_path:
         try:
-            y, sr_val = librosa.load(audio_path, sr=SR, mono=True)
+            y, sr_val = _load_audio_cached(audio_path)
         except Exception:
             return {
                 "is_male": False,
@@ -550,7 +574,7 @@ def analyze_clip_multi_voice(audio_path: str = "", audio_array=None, sr: int = S
         sr_val = sr
     elif audio_path:
         try:
-            y, sr_val = librosa.load(audio_path, sr=SR, mono=True)
+            y, sr_val = _load_audio_cached(audio_path)
         except Exception:
             result["details"] = "failed to load audio"
             return result
@@ -661,7 +685,7 @@ def analyze_clip_multi_voice(audio_path: str = "", audio_array=None, sr: int = S
 
 def vad_filter(audio_path: str) -> tuple[bool, dict]:
     """VAD-based noise event detection. Returns (has_noise_issue, info)."""
-    y, sr = librosa.load(audio_path, sr=SR, mono=True)
+    y, sr = _load_audio_cached(audio_path)
     if len(y) < sr * 0.3:
         return False, {"reason": "too_short"}
 
@@ -709,7 +733,7 @@ def vad_filter(audio_path: str) -> tuple[bool, dict]:
 # ============================================================
 def pad_normalize(audio_path: str, output_path: str) -> str:
     """Normalize silence to 0.5s at beginning and end."""
-    y, sr = librosa.load(audio_path, sr=SR, mono=True)
+    y, sr = _load_audio_cached(audio_path)
     wav = torch.from_numpy(y).unsqueeze(0).float()
     target_samples = int(TARGET_SILENCE_DURATION * sr)
 
@@ -802,7 +826,7 @@ def detect_low_volume_segments(audio_path: str = "", audio_array=None, sr: int =
         y = audio_array
     elif audio_path:
         try:
-            y, sr = librosa.load(audio_path, sr=SR, mono=True)
+            y, sr = _load_audio_cached(audio_path)
         except Exception:
             result["details"] = "failed to load audio"
             return result

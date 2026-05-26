@@ -81,7 +81,7 @@ else
     fi
     echo "        Creating venv at $VENV_DIR ..."
 
-    if "$PYTHON3" -m venv --copies "$VENV_DIR" 2>/dev/null; then
+    if "$PYTHON3" -m venv --copies --without-pip "$VENV_DIR" 2>/dev/null; then
         :
     else
         # lib64 symlink fails on network mounts; build venv manually
@@ -178,19 +178,45 @@ if [ -f "$SETUP_DONE_FILE" ]; then
     fi
 fi
 
+FAILED_PKGS=""
+
+install_pkg() {
+    local req="$1"
+    if "$PIP" install --no-index --find-links="$WHEELS_DIR" --only-binary=:all: "$req" 2>/dev/null; then
+        return 0
+    else
+        FAILED_PKGS="$FAILED_PKGS  $req"
+        return 1
+    fi
+}
+
 if [ "$OFFLINE" -eq 1 ]; then
     echo "        Installing from offline wheels..."
-    "$PIP" install --no-index --find-links="$WHEELS_DIR" -r "$PROJECT_ROOT/requirements.txt" || {
-        echo -e "${YELLOW}[WARNING] Some packages failed offline.${NC}"
-        echo "          Try running download_wheels.bat on Windows to refresh."
-    }
+    INSTALL_FLAGS="--no-index --find-links=$WHEELS_DIR"
 else
     echo "        Installing from PyPI..."
-    "$PIP" install -r "$PROJECT_ROOT/requirements.txt" || {
-        echo -e "${YELLOW}[WARNING] Some packages failed to install.${NC}"
-    }
+    INSTALL_FLAGS=""
 fi
-echo "        Core dependencies installed."
+
+# Install one by one — a single missing dep won't block the rest
+while IFS= read -r line || [ -n "$line" ]; do
+    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+    install_pkg "$line" || echo "        SKIPPED: $line"
+done < "$PROJECT_ROOT/requirements.txt"
+
+if [ -n "$FAILED_PKGS" ]; then
+    echo -e "${YELLOW}[WARNING] Failed to install:$FAILED_PKGS${NC}"
+    echo "          Run download_all.py on Windows to fill missing wheels."
+fi
+
+# Verify at least fastapi is installed
+if "$PYTHON" -c "import fastapi" &>/dev/null 2>&1; then
+    echo "        Core dependencies installed."
+else
+    echo -e "${RED}[ERROR] fastapi failed to install. Server cannot start.${NC}"
+    echo "        Run: python download_all.py on Windows, then re-run setup.sh"
+    exit 1
+fi
 
 # ============================================================
 # Step 4 — Optional ASR dependencies
@@ -205,15 +231,15 @@ if [ -f "$ASR_REQ" ]; then
     echo ""
     read -r -p "        Install ASR dependencies? [y/N]: " ASR_INSTALL
     if [ "$ASR_INSTALL" = "y" ] || [ "$ASR_INSTALL" = "Y" ]; then
-        if [ "$OFFLINE" -eq 1 ]; then
-            "$PIP" install --no-index --find-links="$WHEELS_DIR" -r "$ASR_REQ" 2>/dev/null || {
-                echo -e "${YELLOW}[WARNING] Some ASR wheels missing offline.${NC}"
-                echo "          Re-run download_wheels.bat on Windows to include them."
-            }
-        else
-            "$PIP" install -r "$ASR_REQ" || {
-                echo -e "${YELLOW}[WARNING] Some ASR packages failed to install.${NC}"
-            }
+        FAILED_ASR=""
+        while IFS= read -r line || [ -n "$line" ]; do
+            [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+            if ! "$PIP" install --no-index --find-links="$WHEELS_DIR" --only-binary=:all: "$line" 2>/dev/null; then
+                FAILED_ASR="$FAILED_ASR  $line"
+            fi
+        done < "$ASR_REQ"
+        if [ -n "$FAILED_ASR" ]; then
+            echo -e "${YELLOW}[WARNING] ASR packages failed:$FAILED_ASR${NC}"
         fi
     else
         echo "        Skipped."
