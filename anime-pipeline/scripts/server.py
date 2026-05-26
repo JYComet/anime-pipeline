@@ -5135,7 +5135,7 @@ def _run_pipeline_video(job_id: str):
                         f.progress = step_base
                         _update_pipeline_job_progress(job)
 
-                        step_workers = min(seg_count, 4)
+                        step_workers = min(seg_count, 2)
                         step_futures = []
                         with concurrent.futures.ThreadPoolExecutor(
                             max_workers=step_workers
@@ -5156,8 +5156,8 @@ def _run_pipeline_video(job_id: str):
                                         if h:
                                             is_gpu = _step_key in _GPU_STEPS
                                             if is_gpu:
-                                                with _sem["gpu"]:
-                                                    with step_sem:
+                                                with step_sem:
+                                                    with _sem["gpu"]:
                                                         h(f, job, _ss)
                                             else:
                                                 with step_sem:
@@ -5207,8 +5207,8 @@ def _run_pipeline_video(job_id: str):
                     is_gpu = step_key in _GPU_STEPS
                     try:
                         if is_gpu:
-                            with _sem["gpu"]:
-                                with sem:
+                            with sem:
+                                with _sem["gpu"]:
                                     handler(f, job, state)
                         else:
                             with sem:
@@ -5241,8 +5241,8 @@ def _run_pipeline_video(job_id: str):
                             is_gpu = step_key in _GPU_STEPS
                             try:
                                 if is_gpu:
-                                    with _sem["gpu"]:
-                                        with sem:
+                                    with sem:
+                                        with _sem["gpu"]:
                                             handler(f, job, seg_state)
                                 else:
                                     with sem:
@@ -5260,7 +5260,7 @@ def _run_pipeline_video(job_id: str):
 
                     # Use fresh executor to avoid deadlock with outer executor
                     with concurrent.futures.ThreadPoolExecutor(
-                        max_workers=min(len(segments), 4)
+                        max_workers=min(len(segments), 2)
                     ) as seg_exec:
                         seg_futures = [seg_exec.submit(_process_segment, idx, p)
                                       for idx, p in enumerate(segments)]
@@ -5278,8 +5278,8 @@ def _run_pipeline_video(job_id: str):
                         is_gpu = step_key in _GPU_STEPS
                         try:
                             if is_gpu:
-                                with _sem["gpu"]:
-                                    with sem:
+                                with sem:
+                                    with _sem["gpu"]:
                                         handler(f, job, state)
                             else:
                                 with sem:
