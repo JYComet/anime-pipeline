@@ -51,16 +51,14 @@ def _scan_directory(directory: str) -> list[str]:
 def _watcher_loop(interval: int = 5):
     """Background loop: scan directories every N seconds."""
     global _watcher_running
-    # Mark only in-progress downloads as known (files with .aria2 companion)
+    # Pre-seed known files: mark ALL existing files as known so startup doesn't spam
     for d in [DOWNLOAD_DIR, VIDEO_DIR]:
         if os.path.isdir(d):
             for root, dirs, files in os.walk(d):
                 for f in files:
                     if os.path.splitext(f)[1].lower() in VIDEO_EXTS:
                         full = os.path.join(root, f)
-                        aria2_file = full + ".aria2"
-                        if os.path.exists(aria2_file):
-                            _known_files.add(full)  # still downloading, skip for now
+                        _known_files.add(full)
 
     while _watcher_running:
         try:

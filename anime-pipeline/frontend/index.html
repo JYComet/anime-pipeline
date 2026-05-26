@@ -148,6 +148,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
 .pv-file-remove:hover { color: var(--danger) !important; background: rgba(233,69,96,0.15); }
 .pv-folder-remove:hover { color: var(--danger) !important; background: rgba(233,69,96,0.15); }
 .pv-folder-sec-remove:hover { color: var(--danger) !important; background: rgba(233,69,96,0.15); }
+.pv-folder-toggle:hover { color: var(--accent); background: rgba(233,69,96,0.1); }
 .pv-folder-chip:hover { border-color: var(--accent); }
 .pv-step-disabled { opacity: 0.45; }
 
@@ -192,6 +193,26 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
 .results-section { margin-bottom: 24px; }
 .results-section h3 { font-size: 16px; margin-bottom: 8px; color: var(--accent); }
 .clip-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }
+
+/* Folder picker overlay */
+.fp-overlay { display:none; position:fixed; inset:0; z-index:2000; background:rgba(0,0,0,.65); justify-content:center; align-items:center; }
+.fp-overlay.active { display:flex; }
+.fp-panel { background:var(--bg2); border:1px solid var(--border); border-radius:12px; width:520px; max-height:70vh; display:flex; flex-direction:column; box-shadow:0 12px 40px rgba(0,0,0,.5); }
+.fp-header { display:flex; justify-content:space-between; align-items:center; padding:14px 18px; border-bottom:1px solid var(--border); }
+.fp-header h3 { margin:0; font-size:15px; }
+.fp-breadcrumb { display:flex; align-items:center; gap:4px; padding:8px 18px; font-size:12px; color:var(--text2); overflow:hidden; white-space:nowrap; }
+.fp-breadcrumb span { cursor:pointer; color:var(--accent); flex-shrink:0; }
+.fp-breadcrumb span:hover { text-decoration:underline; }
+.fp-path-input { flex:1; background:transparent; border:1px solid var(--border); color:var(--text); padding:4px 8px; border-radius:4px; font-size:12px; margin-left:8px; }
+.fp-list { flex:1; overflow-y:auto; padding:4px 8px; }
+.fp-item { display:flex; align-items:center; gap:8px; padding:8px 12px; border-radius:6px; cursor:pointer; font-size:13px; transition:background .15s; }
+.fp-item:hover { background:var(--bg3); }
+.fp-item .fp-icon { font-size:18px; flex-shrink:0; }
+.fp-item .fp-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.fp-footer { padding:12px 18px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:8px; }
+.fp-drives { display:flex; gap:6px; padding:6px 18px; flex-wrap:wrap; border-bottom:1px solid var(--border); }
+.fp-drive { padding:4px 12px; border-radius:4px; cursor:pointer; font-size:12px; background:var(--bg3); color:var(--accent); }
+.fp-drive:hover { background:var(--accent); color:#fff; }
 
 .toast-container { position: fixed; top: 16px; right: 16px; z-index: 1000; display: flex; flex-direction: column; gap: 8px; }
 .toast {
@@ -1695,10 +1716,173 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
   </div>
 </div>
 
+<!-- Folder Picker Modal -->
+<div id="fpOverlay" class="fp-overlay" onclick="event.target===this && closeFolderPicker()">
+  <div class="fp-panel">
+    <div class="fp-header">
+      <h3 id="fpTitle">选择文件夹</h3>
+      <button class="btn btn-sm" onclick="closeFolderPicker()" style="padding:2px 8px;">&times;</button>
+    </div>
+    <div id="fpDrives" class="fp-drives" style="display:none;"></div>
+    <div class="fp-breadcrumb" id="fpBreadcrumb"></div>
+    <div class="fp-list" id="fpList"></div>
+    <div class="fp-footer">
+      <button class="btn btn-sm" onclick="closeFolderPicker()">取消</button>
+      <button class="btn btn-sm btn-primary" onclick="confirmFolderPicker()">选择此文件夹</button>
+    </div>
+  </div>
+</div>
+
 <div id="toasts" class="toast-container"></div>
 
 <script>
 var API = '';
+
+// ============================================================
+// Folder Picker — browser-based, cross-platform
+// ============================================================
+var _fpResolve = null;
+var _fpCurrentPath = '';
+
+var PATH_MAP_FROM = '/mnt/project';
+var PATH_MAP_TO = 'E:';
+try { var s = localStorage.getItem('path_map_from'); if (s) PATH_MAP_FROM = s; } catch(e) {}
+try { var s = localStorage.getItem('path_map_to'); if (s) PATH_MAP_TO = s; } catch(e) {}
+
+function serverPathToClient(sp) {
+  if (!sp) return sp;
+  sp = sp.replace(/\//g, '\\');
+  var fromWin = PATH_MAP_FROM.replace(/\//g, '\\');
+  if (sp.toLowerCase().startsWith(fromWin.toLowerCase())) {
+    sp = PATH_MAP_TO.replace(/\//g, '\\') + sp.substring(fromWin.length);
+  }
+  return sp;
+}
+
+function openFolderPath(serverPath) {
+  var cp = serverPathToClient(serverPath);
+  var html = '<div style="padding:16px">';
+  html += '<div style="margin-bottom:8px;font-weight:bold">文件夹路径</div>';
+  html += '<div style="background:var(--bg1);padding:12px;border-radius:6px;font-family:monospace;font-size:13px;word-break:break-all;margin-bottom:8px" id="openFolderDisplayPath">' + cp + '</div>';
+  html += '<div style="font-size:11px;color:var(--text2);margin-bottom:12px">服务器路径: ' + serverPath + '</div>';
+  html += '<input id="openFolderMappingFrom" value="' + PATH_MAP_FROM.replace(/"/g, '&quot;') + '" placeholder="服务端前缀" style="width:45%;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg1);color:var(--text);font-size:12px">';
+  html += '<span style="margin:0 4px;color:var(--text2)">→</span>';
+  html += '<input id="openFolderMappingTo" value="' + PATH_MAP_TO.replace(/"/g, '&quot;') + '" placeholder="客户端前缀" style="width:45%;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg1);color:var(--text);font-size:12px">';
+  html += '<div style="font-size:11px;color:var(--text2);margin-top:4px">映射: 服务端路径前缀 → 客户端路径前缀（如 E:\\ 或 \\\\server\\share）</div>';
+  html += '<div style="margin-top:12px;display:flex;gap:8px">';
+  html += '<button class="btn btn-primary" onclick="copyFolderPath(\'' + cp.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">复制路径</button>';
+  html += '<button class="btn btn-secondary" onclick="tryOpenFolder(\'' + cp.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">尝试打开</button>';
+  html += '<button class="btn btn-sm" onclick="document.getElementById(\'fpOverlay\').classList.remove(\'active\')" style="margin-left:auto">关闭</button>';
+  html += '</div></div>';
+  document.getElementById('fpList').innerHTML = html;
+  document.getElementById('fpBreadcrumb').innerHTML = '';
+  document.getElementById('fpDrives').style.display = 'none';
+  document.getElementById('fpTitle').textContent = '打开文件夹';
+  document.getElementById('fpOverlay').classList.add('active');
+  // Update path mapping live
+  document.getElementById('openFolderMappingFrom').oninput = function() {
+    PATH_MAP_FROM = this.value; try { localStorage.setItem('path_map_from', PATH_MAP_FROM); } catch(e) {}
+    document.getElementById('openFolderDisplayPath').textContent = serverPathToClient(serverPath);
+  };
+  document.getElementById('openFolderMappingTo').oninput = function() {
+    PATH_MAP_TO = this.value; try { localStorage.setItem('path_map_to', PATH_MAP_TO); } catch(e) {}
+    document.getElementById('openFolderDisplayPath').textContent = serverPathToClient(serverPath);
+  };
+}
+
+function copyFolderPath(cp) {
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(cp).then(function() { toast('已复制: ' + cp, 'success'); });
+  }
+}
+
+function tryOpenFolder(cp) {
+  copyFolderPath(cp);
+  var fileUrl = 'file:///' + cp.replace(/\\/g, '/').replace(/ /g, '%20');
+  var w = window.open(fileUrl, '_blank');
+  if (!w) { toast('浏览器阻止了打开，路径已复制到剪贴板', 'info'); }
+}
+
+async function openFolderPicker(title, initialPath) {
+  return new Promise(function(resolve) {
+    _fpResolve = resolve;
+    document.getElementById('fpTitle').textContent = title || '选择文件夹';
+    document.getElementById('fpOverlay').classList.add('active');
+    navigateFolderPicker(initialPath || '/');
+  });
+}
+
+function closeFolderPicker() {
+  document.getElementById('fpOverlay').classList.remove('active');
+  if (_fpResolve) { _fpResolve(''); _fpResolve = null; }
+}
+
+function confirmFolderPicker() {
+  document.getElementById('fpOverlay').classList.remove('active');
+  if (_fpResolve) { _fpResolve(_fpCurrentPath); _fpResolve = null; }
+}
+
+async function navigateFolderPicker(path) {
+  _fpCurrentPath = path;
+  try {
+    var resp = await fetch(API + '/api/list-dirs?path=' + encodeURIComponent(path));
+    if (!resp.ok) { toast('无法访问: ' + path, 'error'); return; }
+    var data = await resp.json();
+    _fpCurrentPath = data.path;
+    renderBreadcrumb(data.path);
+    renderDrives(data.roots);
+    renderEntries(data.entries, data.parent);
+  } catch(e) {
+    toast('加载目录失败: ' + e.message, 'error');
+  }
+}
+
+function renderBreadcrumb(path) {
+  var bc = document.getElementById('fpBreadcrumb');
+  var parts = [];
+  var sep = path.indexOf('\\') >= 0 ? '\\' : '/';
+  var segs = path.split(sep).filter(Boolean);
+  if (sep === '\\' && path.length >= 2) segs.unshift(path.substring(0, 1) + ':');
+  if (sep === '/' && path === '/') segs = [''];
+  var cum = sep === '\\' ? '' : '';
+  var html = '';
+  for (var i = 0; i < segs.length; i++) {
+    cum = i === 0 && sep === '\\' ? segs[0] + '\\' : (i === 0 && sep === '/' ? '/' : cum + segs[i] + sep);
+    html += '<span onclick="navigateFolderPicker(\'' + cum.replace(/'/g, "\\'") + '\')">' + (segs[i] || '/') + '</span>';
+    if (i < segs.length - 1) html += ' <span style="color:var(--text2)">' + sep + '</span> ';
+  }
+  html += '<input class="fp-path-input" id="fpPathInput" value="' + path.replace(/"/g, '&quot;') + '" onkeydown="if(event.key===\'Enter\')navigateFolderPicker(this.value)">';
+  bc.innerHTML = html;
+}
+
+function renderDrives(roots) {
+  var d = document.getElementById('fpDrives');
+  if (!roots || roots.length <= 1) { d.style.display = 'none'; return; }
+  d.style.display = 'flex';
+  d.innerHTML = roots.map(function(r) {
+    return '<div class="fp-drive" onclick="navigateFolderPicker(\'' + r.path.replace(/'/g, "\\'") + '\')">' + r.name + '</div>';
+  }).join('');
+}
+
+function renderEntries(entries, parent) {
+  var list = document.getElementById('fpList');
+  var html = '';
+  if (parent) {
+    html += '<div class="fp-item" onclick="navigateFolderPicker(\'' + parent.replace(/'/g, "\\'") + '\')">' +
+      '<span class="fp-icon">&#x1F4C1;</span><span class="fp-name" style="color:var(--accent)">..</span></div>';
+  }
+  if (!entries || entries.length === 0) {
+    html += '<div style="padding:20px;text-align:center;color:var(--text2)">此文件夹为空</div>';
+  } else {
+    entries.forEach(function(e) {
+      html += '<div class="fp-item" onclick="navigateFolderPicker(\'' + e.path.replace(/'/g, "\\'") + '\')">' +
+        '<span class="fp-icon">&#x1F4C1;</span><span class="fp-name">' + e.name + '</span></div>';
+    });
+  }
+  list.innerHTML = html;
+}
+// ============================================================
+
 var currentPage = 1;
 var jobPollInterval = null;
 
@@ -2958,13 +3142,9 @@ async function approveAllDreview() {
 async function openApprovedFolder(type) {
   var clipDir = type === 'denoised-approved' ? window._dreviewDir : window._reviewDir;
   if (!clipDir) { toast('请先加载审核目录', 'info'); return; }
-  try {
-    await fetch(API + '/api/open-folder', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ clip_dir: clipDir, type: type })
-    });
-  } catch(e) { toast('打开失败: ' + e.message, 'error'); }
+  // Use client-side folder path display
+  var path = type === 'denoised-approved' ? window._denoisedApprovedDir || '' : window._approvedDir || '';
+  if (path) openFolderPath(path);
 }
 
 async function clearShortClips() {
@@ -6241,24 +6421,20 @@ function switchAsrMode(mode) {
 }
 
 async function browseAsrFolder() {
-  try {
-    var resp = await fetch(API + '/api/asr/browse-folder');
-    var data = await resp.json();
-    if (data.path) {
-      document.getElementById('asr-folder-path').value = data.path;
-      detectAsrFolderFiles(data.path);
-    }
-  } catch(e) { toast('打开文件夹失败: ' + e.message, 'error'); }
+  var current = document.getElementById('asr-folder-path').value || '';
+  var path = await openFolderPicker('选择 ASR 文件夹', current);
+  if (path) {
+    document.getElementById('asr-folder-path').value = path;
+    detectAsrFolderFiles(path);
+  }
 }
 
 async function browseAsrOutputDir() {
-  try {
-    var resp = await fetch(API + '/api/asr/browse-folder');
-    var data = await resp.json();
-    if (data.path) {
-      document.getElementById('asr-folder-output').value = data.path;
-    }
-  } catch(e) { toast('打开文件夹失败: ' + e.message, 'error'); }
+  var current = document.getElementById('asr-folder-output').value || '';
+  var path = await openFolderPicker('选择 ASR 输出目录', current);
+  if (path) {
+    document.getElementById('asr-folder-output').value = path;
+  }
 }
 
 async function detectAsrFolderFiles(folderPath) {
@@ -8131,12 +8307,19 @@ function loadSavedSettings() {
       }
       _denoiseSteps = JSON.parse(JSON.stringify(STEP_DEFAULTS));
     }
+    if (data.pv_default_steps && data.pv_default_steps.length) {
+      for (var k = 0; k < PV_STEP_DEFAULTS.length; k++) {
+        PV_STEP_DEFAULTS[k].enabled = data.pv_default_steps.indexOf(PV_STEP_DEFAULTS[k].key) >= 0;
+      }
+      _pvSteps = JSON.parse(JSON.stringify(PV_STEP_DEFAULTS));
+    }
   }).catch(function() {});
 }
 
 var SETTINGS_CATEGORIES = [
   {title:'通用 — 下载与处理',keys:['DOWNLOAD_DIR','SUBTITLE_DIR','CLIPS_DIR','TEMP_DIR']},
   {title:'通用 — 审核与输出',keys:['APPROVED_DIR','CLEANED_DIR','DENOISED_APPROVED_DIR','STITCHED_DIR']},
+  {title:'通用 — 其他',keys:['PIPELINE_VIDEO_DIR']},
   {title:'降噪 — 已审核音频',keys:['APPROVED_DIR','CLEANED_DIR']},
   {title:'降噪 — 未审核音频',keys:['CLEANED_UNREVIEWED_DIR','DENOISED_APPROVED_DIR']},
   {title:'ASR 语音识别',keys:['ASR_DIR','ASR_AUDIO_DIR','ASR_SUBTITLE_DIR']},
@@ -8148,7 +8331,8 @@ var SETTINGS_PATH_LABELS = {
   'DOWNLOAD_DIR':'下载目录','SUBTITLE_DIR':'字幕目录','CLIPS_DIR':'视频片段目录',
   'TEMP_DIR':'临时文件目录','APPROVED_DIR':'审核通过目录','CLEANED_DIR':'已降噪目录',
   'CLEANED_UNREVIEWED_DIR':'未审核降噪目录','DENOISED_APPROVED_DIR':'降噪审核通过',
-  'STITCHED_DIR':'音频拼接目录','EMOTION_DIR':'情绪音频目录','EMOTION_DENOISE_DIR':'降噪情绪目录',
+  'STITCHED_DIR':'音频拼接目录','PIPELINE_VIDEO_DIR':'上传视频目录',
+  'EMOTION_DIR':'情绪音频目录','EMOTION_DENOISE_DIR':'降噪情绪目录',
   'ASR_DIR':'ASR 根目录','ASR_AUDIO_DIR':'ASR 音频目录','ASR_SUBTITLE_DIR':'ASR 字幕目录',
   'ASR_COMPARE_DIR':'ASR 对比根目录','ASR_COMPARE_SUBTITLE_DIR':'ASR 对比字幕目录',
   'ASR_COMPARE_AUDIO_DIR':'ASR 对比音频目录','ASR_COMPARE_OUTPUT_DIR':'ASR 对比输出目录',
@@ -8177,6 +8361,14 @@ function renderSettings() {
   var body = document.getElementById('settings-body');
   var html = '';
 
+  // If server has no saved steps, fall back to current _denoiseSteps
+  if (!steps || !steps.length) {
+    steps = [];
+    for (var d = 0; d < _denoiseSteps.length; d++) {
+      if (_denoiseSteps[d].enabled) steps.push(_denoiseSteps[d].key);
+    }
+  }
+
   for (var c = 0; c < SETTINGS_CATEGORIES.length; c++) {
     var cat = SETTINGS_CATEGORIES[c];
     html += '<div class="settings-section">';
@@ -8189,7 +8381,7 @@ function renderSettings() {
       var label = SETTINGS_PATH_LABELS[key] || key;
       html += '<div class="settings-row">';
       html += '<span class="settings-label">' + label + '</span>';
-      html += '<input class="settings-path" data-settings-key="' + key + '" value="' + escapeAttr(val) + '" readonly onclick="this.select()">';
+      html += '<input class="settings-path" data-settings-key="' + key + '" value="' + escapeHtmlAttr(val) + '" readonly onclick="this.select()">';
       html += '<button class="btn btn-secondary" onclick="browseSettingsFolder(\'' + key + '\')">更改</button>';
       html += '<button class="btn btn-secondary" onclick="openSettingsFolder(\'' + key + '\')">打开</button>';
       html += '</div>';
@@ -8217,6 +8409,34 @@ function renderSettings() {
   }
   html += '</div></div>';
 
+  // Pipeline video default steps
+  var pvSteps = _settingsData.pv_default_steps;
+  if (!pvSteps || !pvSteps.length) {
+    pvSteps = [];
+    for (var d = 0; d < _pvSteps.length; d++) {
+      if (_pvSteps[d].enabled) pvSteps.push(_pvSteps[d].key);
+    }
+  }
+  html += '<div class="settings-section">';
+  html += '<div class="settings-section-title">视频管线 — 默认处理步骤</div>';
+  html += '<div style="font-size:11px;color:var(--text2);margin-bottom:6px;">勾选默认启用的步骤，此设置刷新页面后对新任务生效</div>';
+  html += '<div class="settings-steps">';
+  var pvAllKeys = ['duration_split','convert','music_separate','enhance','super_resolve','asr','cut'];
+  var pvAllLabels = {'duration_split':'时长切分','convert':'WAV转换','music_separate':'BGM分离','enhance':'语音增强','super_resolve':'超分辨率','asr':'ASR字幕识别','cut':'字幕切割'};
+  var pvSet = {};
+  if (pvSteps && pvSteps.length) {
+    for (var s = 0; s < pvSteps.length; s++) pvSet[pvSteps[s]] = true;
+  }
+  for (var s = 0; s < pvAllKeys.length; s++) {
+    var sk = pvAllKeys[s];
+    var checked = pvSet[sk] ? ' checked' : '';
+    html += '<label class="settings-step-item' + (checked ? '' : ' disabled') + '">';
+    html += '<input type="checkbox" data-setting-pv-step="' + sk + '"' + checked + ' onchange="this.parentElement.classList.toggle(\'disabled\',!this.checked)">';
+    html += '<span>' + (pvAllLabels[sk] || sk) + '</span></label>';
+    if (s < pvAllKeys.length - 1) html += '<span style="color:var(--text2);font-size:10px;">→</span>';
+  }
+  html += '</div></div>';
+
   body.innerHTML = html;
 }
 
@@ -8224,21 +8444,15 @@ function browseSettingsFolder(key) {
   var input = document.querySelector('[data-settings-key="' + key + '"]');
   var currentVal = input ? input.value : '';
   var title = '选择文件夹 — ' + (SETTINGS_PATH_LABELS[key] || key);
-  fetch(API + '/api/browse-folder?title=' + encodeURIComponent(title) + '&initialdir=' + encodeURIComponent(currentVal)).then(function(r) {
-    return r.json();
-  }).then(function(data) {
-    if (data.path && input) input.value = data.path;
-  }).catch(function(e) { showToast('文件夹选择失败: ' + e.message, 'error'); });
+  openFolderPicker(title, currentVal).then(function(path) {
+    if (path && input) input.value = path;
+  });
 }
 
 function openSettingsFolder(key) {
   var input = document.querySelector('[data-settings-key="' + key + '"]');
   if (!input || !input.value) return;
-  fetch(API + '/api/open-folder', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({path: input.value})
-  });
+  openFolderPath(input.value);
 }
 
 function saveSettings() {
@@ -8254,23 +8468,33 @@ function saveSettings() {
     if (stepChecks[j].checked) steps.push(stepChecks[j].getAttribute('data-setting-step'));
   }
 
+  var pvStepChecks = document.querySelectorAll('[data-setting-pv-step]');
+  var pvSteps = [];
+  for (var j = 0; j < pvStepChecks.length; j++) {
+    if (pvStepChecks[j].checked) pvSteps.push(pvStepChecks[j].getAttribute('data-setting-pv-step'));
+  }
+
   fetch(API + '/api/settings', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({paths: paths, denoise_default_steps: steps})
+    body: JSON.stringify({paths: paths, denoise_default_steps: steps, pv_default_steps: pvSteps})
   }).then(function(r) { return r.json(); }).then(function(data) {
     if (data.status === 'ok') {
-      showToast('设置已保存，刷新页面后生效', 'success');
+      toast('设置已保存，刷新页面后生效', 'success');
       closeSettings();
       for (var k = 0; k < STEP_DEFAULTS.length; k++) {
         STEP_DEFAULTS[k].enabled = steps.indexOf(STEP_DEFAULTS[k].key) >= 0;
       }
       _denoiseSteps = JSON.parse(JSON.stringify(STEP_DEFAULTS));
+      for (var k = 0; k < PV_STEP_DEFAULTS.length; k++) {
+        PV_STEP_DEFAULTS[k].enabled = pvSteps.indexOf(PV_STEP_DEFAULTS[k].key) >= 0;
+      }
+      _pvSteps = JSON.parse(JSON.stringify(PV_STEP_DEFAULTS));
     } else {
-      showToast('保存失败', 'error');
+      toast('保存失败', 'error');
     }
   }).catch(function(e) {
-    showToast('保存失败: ' + e.message, 'error');
+    toast('保存失败: ' + e.message, 'error');
   });
 }
 
@@ -8282,6 +8506,7 @@ var _pvPollTimer = null;
 var _pvFiles = [];
 var _pvSelected = {};
 var _pvFolders = [];  // [{path: str, name: str}]
+var _pvCollapsed = {}; // {folderPath: true} — collapsed state for file sections
 
 // Step configuration
 var PV_STEP_DEFAULTS = [
@@ -8390,39 +8615,28 @@ function pvGetEnabledSteps() {
 }
 
 function pvBrowseOutputDir() {
-  fetch(API + '/api/pipeline-video/browse-folder')
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (data.path) document.getElementById('pv-output-dir').value = data.path;
-    })
-    .catch(function(e) { toast('选择文件夹失败', 'error'); });
+  var current = document.getElementById('pv-output-dir').value || '';
+  openFolderPicker('选择输出目录', current).then(function(path) {
+    if (path) document.getElementById('pv-output-dir').value = path;
+  });
 }
 
 function pvBrowseFolder() {
   var btn = document.querySelector('#tab-pipelinevideo button[onclick="pvBrowseFolder()"]');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ 选择中...'; }
+  function resetBtn() { if (btn) { btn.disabled = false; btn.textContent = '浏览'; } }
 
-  fetch(API + '/api/pipeline-video/browse-folder')
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (!data.path) { resetBrowseBtn(); return; }
-      // Check for duplicates
-      for (var i = 0; i < _pvFolders.length; i++) {
-        if (_pvFolders[i].path === data.path) { resetBrowseBtn(); return; }
-      }
-      var name = data.path.replace(/\\/g, '/').split('/').pop() || data.path;
-      _pvFolders.push({ path: data.path, name: name });
-      pvRenderFolderList();
-      resetBrowseBtn();
-    })
-    .catch(function(e) {
-      toast('选择文件夹失败: ' + e.message, 'error');
-      resetBrowseBtn();
-    });
-
-  function resetBrowseBtn() {
-    if (btn) { btn.disabled = false; btn.textContent = '📁 添加文件夹'; }
-  }
+  var def = '/mnt/nas/Persons/jiangyichen/videodownload';
+  openFolderPicker('添加文件夹', def).then(function(path) {
+    if (!path) { resetBtn(); return; }
+    for (var i = 0; i < _pvFolders.length; i++) {
+      if (_pvFolders[i].path === path) { resetBtn(); return; }
+    }
+    var name = path.replace(/\\/g, '/').split('/').pop() || path;
+    _pvFolders.push({ path: path, name: name });
+    pvRenderFolderList();
+    resetBtn();
+  });
 }
 
 function pvRenderFolderList() {
@@ -8437,6 +8651,7 @@ function pvRenderFolderList() {
     // Also clear file list when all folders removed
     _pvFiles = [];
     _pvSelected = {};
+    _pvCollapsed = {};
     document.getElementById('pv-file-section').style.display = 'none';
     return;
   }
@@ -8465,6 +8680,7 @@ function pvRenderFolderList() {
 function pvRemoveFolder(idx) {
   var folderPath = _pvFolders[idx].path;
   _pvFolders.splice(idx, 1);
+  delete _pvCollapsed[folderPath];
   // Also remove files belonging to this folder
   _pvFiles = _pvFiles.filter(function(f) { return f.folder !== folderPath; });
   pvCleanSelected();
@@ -8557,8 +8773,13 @@ function pvRenderFileList() {
       var allChecked = folderSelCount === folderFiles.length && folderFiles.length > 0;
 
       // Folder section header
-      html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:6px 6px 0 0;' +
-        (gi > 0 ? 'margin-top:12px;' : '') + '">';
+      var collapsed = !!_pvCollapsed[folderPath];
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:' +
+        (collapsed ? '6px' : '6px 6px 0 0') + ';' + (gi > 0 ? 'margin-top:12px;' : '') + '">';
+      html += '<span class="pv-folder-toggle" data-pv-folder-toggle="' + gi +
+        '" data-pv-folder-path="' + escapeHtmlAttr(folderPath) +
+        '" style="cursor:pointer;font-size:12px;line-height:1;padding:2px 4px;border-radius:4px;user-select:none;" title="折叠/展开">' +
+        (collapsed ? '▶' : '▼') + '</span>';
       html += '<label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;">';
       html += '<input type="checkbox" class="pv-folder-cb" ' + (allChecked ? 'checked' : '') +
         ' data-pv-folder="' + escapeHtmlAttr(folderPath) + '" onchange="pvToggleFolder(this)" style="cursor:pointer;">';
@@ -8569,8 +8790,10 @@ function pvRenderFileList() {
         '" style="cursor:pointer;color:var(--text2);font-size:14px;line-height:1;padding:2px 6px;border-radius:4px;margin-left:auto;" title="移除此文件夹的全部文件">✕</span>';
       html += '</div>';
 
-      // File items
-      html += '<div style="border:1px solid var(--border);border-top:none;border-radius:0 0 6px 6px;margin-bottom:2px;">';
+      // File items — collapsible body
+      html += '<div class="pv-folder-body" data-pv-folder-body="' + gi +
+        '" style="border:1px solid var(--border);border-top:none;border-radius:0 0 6px 6px;margin-bottom:2px;' +
+        (collapsed ? 'display:none;' : '') + '">';
       for (var fi = 0; fi < folderFiles.length; fi++) {
         var f = folderFiles[fi];
         var checked = _pvSelected[f.path] ? 'checked' : '';
@@ -8594,9 +8817,19 @@ function pvRenderFileList() {
 
   container.innerHTML = html;
 
-  // Event delegation for remove buttons
+  // Event delegation for remove buttons, collapse toggle
   container.onclick = function(e) {
     var target = e.target;
+    // Folder collapse/expand toggle
+    if (target.classList.contains('pv-folder-toggle') || target.closest('.pv-folder-toggle')) {
+      var tog = target.classList.contains('pv-folder-toggle') ? target : target.closest('.pv-folder-toggle');
+      var fpath = tog.getAttribute('data-pv-folder-path');
+      if (_pvCollapsed[fpath]) { delete _pvCollapsed[fpath]; }
+      else { _pvCollapsed[fpath] = true; }
+      // Re-render to apply collapsed state consistently (handles border-radius etc.)
+      pvRenderFileList();
+      return;
+    }
     // File remove (by path, not index)
     if (target.classList.contains('pv-file-remove')) {
       var filePath = target.getAttribute('data-pv-file-path');

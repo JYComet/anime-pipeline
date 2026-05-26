@@ -165,6 +165,9 @@ def load_settings():
             steps = data.get('denoise_default_steps', None)
             if steps is not None:
                 globals()['DENOISE_DEFAULT_STEPS'] = steps
+            pv_steps = data.get('pv_default_steps', None)
+            if pv_steps is not None:
+                globals()['PV_DEFAULT_STEPS'] = pv_steps
             return
 
     for key, val in paths.items():
@@ -175,9 +178,12 @@ def load_settings():
     steps = data.get('denoise_default_steps', None)
     if steps is not None:
         globals()['DENOISE_DEFAULT_STEPS'] = steps
+    pv_steps = data.get('pv_default_steps', None)
+    if pv_steps is not None:
+        globals()['PV_DEFAULT_STEPS'] = pv_steps
 
 
-def save_settings(paths: dict, denoise_default_steps=None):
+def save_settings(paths: dict, denoise_default_steps=None, pv_default_steps=None):
     """Save settings to settings.json and patch module globals."""
     _register_path_vars()
     for key, val in paths.items():
@@ -186,10 +192,14 @@ def save_settings(paths: dict, denoise_default_steps=None):
             _PATH_VARS[key] = val
     if denoise_default_steps is not None:
         globals()['DENOISE_DEFAULT_STEPS'] = denoise_default_steps
+    if pv_default_steps is not None:
+        globals()['PV_DEFAULT_STEPS'] = pv_default_steps
 
     data = {'paths': {k: globals()[k] for k in _USER_PATH_KEYS if k in globals()}}
     if denoise_default_steps is not None or 'DENOISE_DEFAULT_STEPS' in globals():
         data['denoise_default_steps'] = globals().get('DENOISE_DEFAULT_STEPS', [])
+    if pv_default_steps is not None or 'PV_DEFAULT_STEPS' in globals():
+        data['pv_default_steps'] = globals().get('PV_DEFAULT_STEPS', [])
 
     os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
     tmp = SETTINGS_FILE + '.tmp'

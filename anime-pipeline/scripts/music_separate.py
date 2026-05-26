@@ -39,7 +39,7 @@ def separate_vocals(input_path: str, output_dir: str, device="cuda") -> str:
         input_path: Path to input WAV file.
         output_dir: Directory for output. The vocals file will be named
                     ``<basename>_vocals.wav``.
-        device: "cuda" or "cpu".
+        device: "cuda" or "cpu". Default is "cuda" — CPU fallback is disabled.
 
     Returns:
         Path to the vocals WAV file, or empty string on failure.
@@ -47,6 +47,9 @@ def separate_vocals(input_path: str, output_dir: str, device="cuda") -> str:
     After successful separation the drums/bass/other tracks are deleted
     from disk (only vocals is kept to save space).
     """
+    if device != "cpu" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA GPU is required for music separation (Demucs). CPU fallback is disabled.")
+
     base = os.path.splitext(os.path.basename(input_path))[0]
     vocals_path = os.path.join(output_dir, f"{base}_vocals.wav")
 

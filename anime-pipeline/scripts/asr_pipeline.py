@@ -17,7 +17,7 @@ import torch
 import concurrent.futures
 
 from config import (
-    COMICUT_ROOT, FFMPEG, FFPROBE, DATA_DIR, SUBTITLE_DIR,
+    COMICUT_ROOT, FFMPEG, FFPROBE, DATA_DIR, SUBTITLE_DIR, TEMP_DIR,
     ASR_DIR, ASR_AUDIO_DIR, ASR_SUBTITLE_DIR,
     ASR_COMPARE_DIR, ASR_COMPARE_SUBTITLE_DIR, ASR_COMPARE_AUDIO_DIR,
     ASR_COMPARE_OUTPUT_DIR, ASR_COMPARE_DISCARD_DIR,
@@ -27,6 +27,19 @@ from config import (
 _QUICKCUT_DIR = os.path.join(COMICUT_ROOT, "QuickCut")
 if os.path.isdir(_QUICKCUT_DIR) and _QUICKCUT_DIR not in os.environ.get("PATH", ""):
     os.environ["PATH"] = _QUICKCUT_DIR + os.pathsep + os.environ.get("PATH", "")
+
+# Extensions that soundfile (libsndfile) cannot decode — need ffmpeg pre-conversion
+_SF_UNSUPPORTED = {'.aac', '.mp3', '.m4a', '.wma', '.opus', '.wv'}
+
+
+def _convert_to_pcm_wav(input_path: str, output_path: str) -> None:
+    """Convert any audio to 16kHz mono s16le WAV via ffmpeg."""
+    subprocess.run(
+        [FFMPEG, '-y', '-i', input_path, '-ar', '16000', '-ac', '1',
+         '-sample_fmt', 's16', output_path],
+        capture_output=True, check=True,
+    )
+
 
 # --- Available ASR models ---
 ASR_MODELS = {
@@ -84,7 +97,7 @@ def _check_torch_compile():
     try:
         import os
         os.environ.setdefault("PYTHONUTF8", "1")  # fix GBK encoding on Chinese Windows
-        t = torch.tensor([1.0], device=("cuda" if torch.cuda.is_available() else "cpu"))
+        t = torch.tensor([1.0], device="cuda")
 
         @torch.compile(mode="default")
         def _test(x):
@@ -112,8 +125,10 @@ _QWEN3_LANG_MAP = {
 _TAG_RE = re.compile(r"<\|\s*([^|>]+)\s*\|>")
 
 
-def _get_vad_model(device="cpu"):
+def _get_vad_model(device="cuda"):
     """Load (or reuse) the VAD model. Thread-safe lazy singleton."""
+    if device != "cpu" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA GPU is required for VAD model. CPU fallback is disabled.")
     global _vad_model
     with _model_lock:
         if _vad_model is not None:
@@ -123,7 +138,7 @@ def _get_vad_model(device="cpu"):
         return _vad_model
 
 
-def _get_asr_model(model_key="qwen3-asr", device="cpu", use_fp16=True, use_flash_attn=True, use_compile=True):
+def _get_asr_model(model_key="qwen3-asr", device="cuda", use_fp16=True, use_flash_attn=True, use_compile=True):
     """Load (or reuse) the ASR model. Thread-safe lazy singleton, cached per model_key.
 
     Optimizations (all enabled by default, gracefully fall back):
@@ -131,6 +146,8 @@ def _get_asr_model(model_key="qwen3-asr", device="cpu", use_fp16=True, use_flash
       - use_flash_attn: enable FlashAttention 2 for faster transformer layers
       - use_compile: torch.compile for 30-50% faster repeated forward passes
     """
+    if device != "cpu" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA GPU is required for ASR model. CPU fallback is disabled.")
     with _model_lock:
         # Cache key encodes optimization flags so different configs don't collide
         cache_key = (model_key, device, use_fp16, use_flash_attn)
@@ -316,7 +333,7 @@ def _clean_tags(text: str) -> str:
     return _TAG_RE.sub("", text).strip()
 
 
-def run_vad(audio_path: str, device="cpu") -> list:
+def run_vad(audio_path: str, device="cuda") -> list:
     """Run VAD and return speech segments as [(start_ms, end_ms), ...] in chronological order."""
     vad = _get_vad_model(device=device)
     results = vad.generate(input=audio_path)
@@ -385,7 +402,7 @@ def _pad_and_batch(segments_with_times, audio, sr, max_batch_size=16, max_length
         i = batch_end
 
 
-def _preload_asr_model_async(model_key="qwen3-asr", device="cpu"):
+def _preload_asr_model_async(model_key="qwen3-asr", device="cuda"):
     """Start loading the ASR model in a background thread.
 
     Call this before running VAD so the model is ready (or nearly ready)
@@ -400,7 +417,7 @@ def vad_asr_pipeline(
     audio_path: str,
     model_key: str = "qwen3-asr",
     language: str = "ja",
-    device: str = "cpu",
+    device: str = "cuda",
     progress_callback=None,
 ) -> list:
     """Run VAD → split audio → ASR on each speech segment → return [{text, start_ms, end_ms}].
@@ -559,7 +576,7 @@ def run_asr_pipeline(
     video_path: str,
     model_key: str = "qwen3-asr",
     language: str = "ja",
-    device: str = "cpu",
+    device: str = "cuda",
     progress_callback=None,
 ) -> dict:
     """Full ASR pipeline: extract audio → VAD → ASR per segment → generate SRT.
@@ -640,7 +657,7 @@ def run_asr_on_audio(
     output_dir: str,
     model_key: str = "qwen3-asr",
     language: str = "ja",
-    device: str = "cpu",
+    device: str = "cuda",
     progress_callback=None,
 ) -> dict:
     """Run ASR directly on an audio file (no extraction step).
@@ -654,49 +671,69 @@ def run_asr_on_audio(
         raise FileNotFoundError(f"Audio not found: {audio_path}")
 
     base_name = os.path.splitext(os.path.basename(audio_path))[0]
+    ext = os.path.splitext(audio_path)[1].lower()
     t0 = time.time()
 
-    if progress_callback:
-        progress_callback("loading_models", "加载模型中...")
+    # Convert unsupported formats (AAC, MP3, etc.) to temp PCM WAV
+    work_path = audio_path
+    temp_wav = None
+    try:
+        if ext in _SF_UNSUPPORTED:
+            import uuid
+            os.makedirs(TEMP_DIR, exist_ok=True)
+            temp_wav = os.path.join(TEMP_DIR, f"asr_{uuid.uuid4().hex[:8]}.wav")
+            if progress_callback:
+                progress_callback("converting", f"转换音频: {ext} → wav")
+            _convert_to_pcm_wav(audio_path, temp_wav)
+            work_path = temp_wav
 
-    segments = vad_asr_pipeline(
-        audio_path,
-        model_key=model_key,
-        language=language,
-        device=device,
-        progress_callback=progress_callback,
-    )
-    t1 = time.time()
+        if progress_callback:
+            progress_callback("loading_models", "加载模型中...")
 
-    if progress_callback:
-        progress_callback("generating_srt", "生成字幕文件...")
+        segments = vad_asr_pipeline(
+            work_path,
+            model_key=model_key,
+            language=language,
+            device=device,
+            progress_callback=progress_callback,
+        )
+        t1 = time.time()
 
-    os.makedirs(output_dir, exist_ok=True)
-    srt_path = os.path.join(output_dir, base_name + ".srt")
+        if progress_callback:
+            progress_callback("generating_srt", "生成字幕文件...")
 
-    counter = 1
-    while os.path.exists(srt_path):
-        srt_path = os.path.join(output_dir, f"{base_name}_{counter}.srt")
-        counter += 1
+        os.makedirs(output_dir, exist_ok=True)
+        srt_path = os.path.join(output_dir, base_name + ".srt")
 
-    if segments:
-        segments_to_srt(segments, srt_path)
-    else:
-        with open(srt_path, "w", encoding="utf-8") as f:
-            f.write("")
+        counter = 1
+        while os.path.exists(srt_path):
+            srt_path = os.path.join(output_dir, f"{base_name}_{counter}.srt")
+            counter += 1
 
-    if progress_callback:
-        progress_callback("completed", "完成")
+        if segments:
+            segments_to_srt(segments, srt_path)
+        else:
+            with open(srt_path, "w", encoding="utf-8") as f:
+                f.write("")
 
-    model_label = ASR_MODELS.get(model_key, {}).get("name", model_key)
+        if progress_callback:
+            progress_callback("completed", "完成")
 
-    return {
-        "audio_name": os.path.basename(audio_path),
-        "srt_path": srt_path,
-        "segments_count": len(segments),
-        "model_name": model_label,
-        "duration_sec": round(t1 - t0, 1),
-    }
+        model_label = ASR_MODELS.get(model_key, {}).get("name", model_key)
+
+        return {
+            "audio_name": os.path.basename(audio_path),
+            "srt_path": srt_path,
+            "segments_count": len(segments),
+            "model_name": model_label,
+            "duration_sec": round(t1 - t0, 1),
+        }
+    finally:
+        if temp_wav and os.path.exists(temp_wav):
+            try:
+                os.remove(temp_wav)
+            except OSError:
+                pass
 
 
 # --- ASR Comparison ---
@@ -776,7 +813,7 @@ def compare_srt_texts(srt_path1: str, srt_path2: str) -> float:
 def compare_asr_pipeline(
     audio_path: str,
     language: str = "ja",
-    device: str = "cpu",
+    device: str = "cuda",
     progress_callback=None,
     source_dir: str = "",
     model_a: str = "qwen3-asr",

@@ -2601,6 +2601,44 @@ def denoise_review_stream(path: str = Query(..., description="Full path to media
     return FileResponse(path, media_type=mime_map.get(ext, "application/octet-stream"))
 
 
+def _display_available():
+    """True if the server can show GUI dialogs (needs desktop environment)."""
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
+@app.get("/api/list-dirs")
+def list_dirs(path: str = Query("", description="Directory path to list"),
+              root: str = Query("", description="Root path for navigation")):
+    """List subdirectories for browser-based folder picker."""
+    import platform as _platform
+    if not path or not os.path.isdir(path):
+        path = os.path.expanduser("~") if _platform.system() != "Windows" else "C:\\"
+    roots = []
+    if _platform.system() == "Windows":
+        import string as _string
+        for letter in _string.ascii_uppercase:
+            p = f"{letter}:\\"
+            if os.path.isdir(p):
+                roots.append({"name": f"{letter}:", "path": p})
+    else:
+        roots = [{"name": "/", "path": "/"}]
+    try:
+        entries = []
+        for name in sorted(os.listdir(path)):
+            full = os.path.join(path, name)
+            if os.path.isdir(full) and not name.startswith("."):
+                entries.append({"name": name, "path": full, "type": "dir"})
+        parent = os.path.dirname(path) if path not in ["/", "C:\\"] else None
+        return {
+            "path": path,
+            "parent": parent if parent and os.path.isdir(parent) else None,
+            "entries": entries,
+            "roots": roots,
+        }
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+
 @app.post("/api/open-folder")
 def open_folder_in_explorer(payload: dict = Body(...)):
     """Open a folder in the system file explorer.
@@ -2628,7 +2666,11 @@ def open_folder_in_explorer(payload: dict = Body(...)):
     if not path or not os.path.isdir(path):
         raise HTTPException(status_code=404, detail="文件夹不存在")
     try:
-        os.startfile(path)
+        import platform
+        if platform.system() == "Windows":
+            os.startfile(path)
+        else:
+            subprocess.run(["xdg-open", path], check=False)
         return {"status": "ok"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -2636,22 +2678,24 @@ def open_folder_in_explorer(payload: dict = Body(...)):
 
 @app.get("/api/settings")
 def get_settings():
-    """Return current path settings and denoise defaults."""
+    """Return current path settings and default step configs."""
     import config
     paths = {}
     for k in config._PATH_VARS:
         paths[k] = getattr(config, k, '')
     steps = getattr(config, 'DENOISE_DEFAULT_STEPS', None)
-    return {"paths": paths, "denoise_default_steps": steps}
+    pv_steps = getattr(config, 'PV_DEFAULT_STEPS', None)
+    return {"paths": paths, "denoise_default_steps": steps, "pv_default_steps": pv_steps}
 
 
 @app.post("/api/settings")
 def save_settings(payload: dict = Body(...)):
-    """Save path settings and/or denoise default steps."""
+    """Save path settings and/or default step configs."""
     from config import save_settings
     paths = payload.get("paths", {})
     steps = payload.get("denoise_default_steps", None)
-    save_settings(paths, steps)
+    pv_steps = payload.get("pv_default_steps", None)
+    save_settings(paths, steps, pv_steps)
     return {"status": "ok"}
 
 
@@ -2659,6 +2703,8 @@ def save_settings(payload: dict = Body(...)):
 def browse_folder_generic(title: str = "选择文件夹", initialdir: str = ""):
     """Open a native folder picker and return the selected path."""
     import subprocess, tempfile
+    if not _display_available():
+        return {"path": "", "error": "Server has no display — use manual path input instead."}
 
     if not initialdir or not os.path.isdir(initialdir):
         initialdir = DATA_DIR if os.path.isdir(DATA_DIR) else os.path.expanduser("~")
@@ -3695,9 +3741,9 @@ def browse_folder():
     """Open a native folder picker dialog and return the selected path.
 
     Launches a separate Python process with tkinter to show the dialog,
-    because the background server thread cannot reliably display Windows UI.
-    The chosen path is written to a temp file and read back.
-    """
+    because the background server thread cannot reliably display Windows UI."""
+    if not _display_available():
+        return {"path": "", "error": "Server has no display — use manual path input instead."}
     import subprocess, tempfile, os, sys
 
     # Write result path to a temp file (dialog runs in a separate process)
@@ -4336,6 +4382,8 @@ def _scan_single_folder(folder_path: str) -> dict:
 @app.get("/api/pipeline-video/browse-folder")
 def pv_browse_folder():
     """Open a native folder picker dialog and return the selected path."""
+    if not _display_available():
+        return {"path": "", "error": "Server has no display — use manual path input instead."}
     import subprocess as _subprocess
     import tempfile as _tempfile
     import sys as _sys
@@ -4344,9 +4392,8 @@ def pv_browse_folder():
     result_path = result_file.name
     result_file.close()
 
-    _preferred = "//RS3621/CompanyShare-Confidential/Persons/jiangyichen/videodownload"
-    if os.path.isdir(_preferred):
-        default_dir = _preferred
+    if os.path.isdir(PIPELINE_VIDEO_DIR):
+        default_dir = PIPELINE_VIDEO_DIR
     elif os.path.isdir(DATA_DIR):
         default_dir = DATA_DIR
     else:
@@ -4568,30 +4615,55 @@ def _run_pipeline_video(job_id: str):
     enabled_steps = [s["key"] for s in steps_config if s.get("enabled", True)]
     step_cfg_map = {s["key"]: s for s in steps_config}
 
+    # GPU sanity check — fail fast if any GPU step is enabled but CUDA is unavailable
+    _GPU_STEPS = {"music_separate", "enhance", "super_resolve", "asr"}
+    if any(s in _GPU_STEPS for s in enabled_steps):
+        import torch
+        if not torch.cuda.is_available():
+            gpu_steps = [s for s in enabled_steps if s in _GPU_STEPS]
+            for f in files:
+                f.status = "error"
+                f.error = f"GPU步骤 ({', '.join(gpu_steps)}) 需要CUDA GPU，但当前环境不可用"
+                f.steps.append({"step": "init", "status": "error",
+                                "message": f"CUDA不可用，无法执行GPU步骤: {', '.join(gpu_steps)}"})
+            _update_pipeline_job_progress(job)
+            return
+
     # Job-specific temp directory for intermediate files
     temp_dir = os.path.join(TEMP_DIR, "pipeline_video", job_id)
     os.makedirs(temp_dir, exist_ok=True)
 
-    # Per-step semaphores — tuned for RTX 5060 Ti (8 GB).
+    # Per-step semaphores — tuned for RTX 4090 (24 GB).
     #
-    # GPU budget (8.1 GB total, ~5 GB used by desktop):
-    #   Demucs HT        ≈ 0.5 GB   (model + working)
-    #   ClearVoice SE     ≈ 0.3 GB
-    #   ClearVoice SR     ≈ 0.3 GB
-    #   Qwen3-ASR-1.7B   ≈ 3.4 GB   (bf16, needs whole remaining GPU)
+    # GPU budget (23.5 GB total, ~2 GB reserved by desktop/CUDA context):
+    #   Demucs HT        ≈ 0.5 GB   (model) + 1.0 GB (working set)
+    #   ClearVoice SE     ≈ 0.3 GB   (model) + 0.5 GB (working set)
+    #   ClearVoice SR     ≈ 0.3 GB   (model) + 0.5 GB (working set)
+    #   Qwen3-ASR-1.7B   ≈ 3.4 GB   (model: bf16) + 2.0 GB (working set)
+    #   Concurrent peak:  (0.5+1.0) + (0.3+0.5) + (3.4+2.0) = 7.7 GB
+    #   Headroom:         23.5 - 7.7 = 15.8 GB (safe)
     #
     # "gpu" semaphore limits TOTAL concurrent GPU operations across all steps.
     # Non-GPU steps (split / convert / cut) do NOT acquire the gpu sem.
+    #
+    # Pipeline strategy: each GPU step uses a DIFFERENT singleton model, so they
+    # can overlap safely.  File A can run music_separate while File B runs enhance
+    # and File C runs asr — 3x GPU utilization vs the old 1-at-a-time config.
+    #
+    # Per-step semaphores are set to 1 because each model is a singleton (not
+    # reentrant-safe for concurrent inference).  Increasing "gpu" to 3 enables
+    # cross-file pipelining: as File A advances from music_separate → enhance,
+    # File B takes over the music_separate slot, keeping all models busy.
     _sem = {
-        "gpu":      threading.BoundedSemaphore(1),  # global GPU cap (8GB: 2 concurrent OOMs)
-        "ffmpeg":   threading.BoundedSemaphore(4),  # global ffmpeg cap
-        "convert":  threading.BoundedSemaphore(2),
-        "music_separate": threading.BoundedSemaphore(2),
-        "enhance":  threading.BoundedSemaphore(2),
-        "super_resolve": threading.BoundedSemaphore(1),
-        "asr":      threading.BoundedSemaphore(1),
-        "duration_split": threading.BoundedSemaphore(1),
-        "cut":      threading.BoundedSemaphore(2),
+        "gpu":      threading.BoundedSemaphore(3),  # global GPU cap: up to 3 concurrent (diff models)
+        "ffmpeg":   threading.BoundedSemaphore(6),  # global ffmpeg cap
+        "convert":  threading.BoundedSemaphore(4),
+        "music_separate": threading.BoundedSemaphore(1),  # singleton Demucs
+        "enhance":  threading.BoundedSemaphore(1),  # singleton ClearVoice SE
+        "super_resolve": threading.BoundedSemaphore(1),  # singleton ClearVoice SR
+        "asr":      threading.BoundedSemaphore(1),  # singleton Qwen3-ASR (3.4 GB)
+        "duration_split": threading.BoundedSemaphore(2),  # ffmpeg segment split
+        "cut":      threading.BoundedSemaphore(3),
     }
 
     file_state = {}

@@ -40,7 +40,7 @@ echo ""
 # ============================================================
 # Step 1 — Check Python
 # ============================================================
-echo "[1/8] Checking Python installation..."
+echo "[1/9] Checking Python installation..."
 
 PYTHON3=""
 for p in python3 python; do
@@ -70,7 +70,7 @@ fi
 # Step 2 — Create / activate virtual environment
 # ============================================================
 echo ""
-echo "[2/8] Setting up virtual environment..."
+echo "[2/9] Setting up virtual environment..."
 
 if [ -f "$PYTHON" ] && "$PYTHON" -m pip --version &>/dev/null 2>&1; then
     echo "        venv already exists and working."
@@ -164,7 +164,7 @@ fi
 # Step 3 — Install Python dependencies
 # ============================================================
 echo ""
-echo "[3/8] Installing Python dependencies..."
+echo "[3/9] Installing Python dependencies..."
 
 if [ -f "$SETUP_DONE_FILE" ]; then
     if "$PYTHON" -c "import fastapi" &>/dev/null 2>&1; then
@@ -222,7 +222,7 @@ fi
 # Step 4 — Optional ASR dependencies
 # ============================================================
 echo ""
-echo "[4/8] Optional ASR dependencies..."
+echo "[4/9] Optional ASR dependencies..."
 
 ASR_REQ="$PROJECT_ROOT/requirements-asr.txt"
 if [ -f "$ASR_REQ" ]; then
@@ -250,7 +250,7 @@ fi
 # Step 5 — System tools
 # ============================================================
 echo ""
-echo "[5/8] Checking system tools..."
+echo "[5/9] Checking system tools..."
 
 check_tool() {
     local name="$1"
@@ -293,7 +293,7 @@ fi
 # Step 6 — ClearerVoice-Studio (audio denoising)
 # ============================================================
 echo ""
-echo "[6/8] Checking ClearerVoice-Studio..."
+echo "[6/9] Checking ClearerVoice-Studio..."
 
 CV_DIR="$COMICUT_ROOT/ClearerVoice-Studio-main/ClearerVoice-Studio-main"
 CV_CLEARVOICE="$CV_DIR/clearvoice"
@@ -331,10 +331,43 @@ if [ -f "$CV_CLEARVOICE/clearvoice.py" ]; then
 fi
 
 # ============================================================
-# Step 7 — Clean up stale settings.json
+# Step 7 — Post-install fixes
 # ============================================================
 echo ""
-echo "[7/8] Checking configuration..."
+echo "[7/9] Post-install fixes..."
+
+# Fix torch GPU compatibility — downgrade to CPU if CUDA fails
+if "$PYTHON" -c "import torch; torch.cuda.is_available()" &>/dev/null 2>&1; then
+    echo "        torch GPU: OK"
+else
+    if "$PYTHON" -c "import torch" &>/dev/null 2>&1; then
+        cu_ver=$("$PYTHON" -c "import torch; print(torch.version.cuda)" 2>/dev/null || echo "none")
+        echo "        torch GPU not available (CUDA $cu_ver), checking driver..."
+        if "$PYTHON" -c "import torch; torch.cuda.init()" 2>/dev/null; then
+            echo "        GPU OK — will use CUDA."
+        else
+            echo -e "        ${YELLOW}GPU driver mismatch, switching to CPU torch...${NC}"
+            "$PIP" install torch torchaudio --index-url https://download.pytorch.org/whl/cpu --force-reinstall -q 2>/dev/null && echo "        Switched to torch CPU." || echo "        Could not switch — manual fix needed."
+        fi
+    fi
+fi
+
+# Pre-copy demucs models from project to cache
+MODEL_SRC="$PROJECT_ROOT/checkpoints/torch_hub"
+MODEL_DST="$HOME/.cache/torch/hub/checkpoints"
+if [ -d "$MODEL_SRC" ] && ls "$MODEL_SRC"/*.th &>/dev/null 2>&1; then
+    mkdir -p "$MODEL_DST"
+    cp -u "$MODEL_SRC"/*.th "$MODEL_DST/" 2>/dev/null || true
+    echo "        Demucs models: pre-loaded to cache."
+else
+    echo "        Demucs models: will download on first use."
+fi
+
+# ============================================================
+# Step 9 — Clean up stale settings.json
+# ============================================================
+echo ""
+echo "[8/9] Checking configuration..."
 
 SETTINGS_FILE="$PROJECT_ROOT/data/settings.json"
 if [ -f "$SETTINGS_FILE" ]; then
@@ -349,10 +382,10 @@ else
 fi
 
 # ============================================================
-# Step 8 — Launch server
+# Step 9 — Launch server
 # ============================================================
 echo ""
-echo "[8/8] Starting Anime Pipeline Server..."
+echo "[9/9] Starting Anime Pipeline Server..."
 
 if [ ! -f "$PYTHON" ]; then
     echo -e "${RED}[ERROR] Python not found in venv.${NC}"

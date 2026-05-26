@@ -17,3 +17,5 @@ rotary_embedding_torch>=0.8.0
 torchinfo>=1.8.0
 yamlargparse>=0.3.0
 python-multipart>=0.0.9
+# Music separation (BGM removal)
+demucs>=4.0
