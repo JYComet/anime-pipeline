@@ -1137,7 +1137,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
         <!-- Folder mode panel -->
         <div id="asr-folder-panel" style="display:none;">
           <div id="asr-folder-config-hint" style="margin-bottom:10px;padding:8px 12px;border-radius:6px;background:var(--accent);color:#fff;font-size:12px;text-align:center;font-weight:600;">
-            ⚙️ 识别参数（模型/语言/热词/设备）请在右侧面板设置 →
+            ⚙️ 识别参数（模型/语言/热词/设备/输出目录）请在右侧面板设置 →
           </div>
           <!-- In-page directory browser -->
           <div style="margin-bottom:12px;">
@@ -1157,14 +1157,6 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
               <span id="asr-folder-selected-count" style="font-size:11px;color:var(--text2);"></span>
             </div>
             <div id="asr-folder-file-list" class="file-list" style="display:none;max-height:250px;overflow-y:auto;margin-top:4px;border:1px solid var(--border);border-radius:8px;"></div>
-          </div>
-
-          <div style="margin-bottom:12px;">
-            <label style="display:block;font-size:12px;color:var(--text2);margin-bottom:4px;">输出目录（字幕按文件夹名归类）</label>
-            <div style="display:flex;gap:6px;">
-              <input id="asr-folder-output" type="text" placeholder="默认: data/asr/folder_output/" style="flex:1;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:12px;">
-              <button class="btn btn-secondary" onclick="browseAsrOutputDir()" style="font-size:11px;padding:4px 10px;white-space:nowrap;">浏览...</button>
-            </div>
           </div>
 
           <button class="btn btn-primary" id="btn-asr-folder-run" onclick="runAsrFolder()" style="width:100%;padding:10px;font-size:14px;" disabled>
@@ -1234,6 +1226,24 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
               <option value="cuda">GPU (CUDA)</option>
               <option value="cpu">CPU</option>
             </select>
+          </div>
+
+          <!-- Output directory - Video mode -->
+          <div id="asr-video-output-section" style="margin-bottom:16px;">
+            <label style="display:block;font-size:13px;color:var(--text2);margin-bottom:6px;">输出目录</label>
+            <div style="display:flex;gap:6px;">
+              <input id="asr-video-output" type="text" placeholder="默认使用全局 ASR 字幕目录" style="flex:1;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:14px;">
+              <button class="btn btn-secondary" onclick="browseAsrVideoOutputDir()" style="font-size:11px;padding:4px 10px;white-space:nowrap;">浏览...</button>
+            </div>
+          </div>
+
+          <!-- Output directory - Folder mode -->
+          <div id="asr-folder-output-section" style="display:none;margin-bottom:16px;">
+            <label style="display:block;font-size:13px;color:var(--text2);margin-bottom:6px;">输出目录（字幕按文件夹名归类）</label>
+            <div style="display:flex;gap:6px;">
+              <input id="asr-folder-output" type="text" placeholder="默认: data/asr/folder_output/" style="flex:1;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:14px;">
+              <button class="btn btn-secondary" onclick="browseAsrFolderOutputDir()" style="font-size:11px;padding:4px 10px;white-space:nowrap;">浏览...</button>
+            </div>
           </div>
 
           <!-- Audio preview -->
@@ -6638,6 +6648,7 @@ async function runAsrExtraction() {
   var lang = document.getElementById('asr-lang-select').value;
   var device = document.getElementById('asr-device-select').value;
   var hotwords = document.getElementById('asr-hotwords').value.trim();
+  var outputDir = document.getElementById('asr-video-output').value.trim();
 
   try {
     var url = API + '/api/asr/run?path=' + encodeURIComponent(_asrActiveVideo) +
@@ -6645,6 +6656,7 @@ async function runAsrExtraction() {
       '&language=' + encodeURIComponent(lang) +
       '&device=' + encodeURIComponent(device) +
       '&hotwords=' + encodeURIComponent(hotwords);
+    if (outputDir) url += '&output_dir=' + encodeURIComponent(outputDir);
     var resp = await fetch(url, { method: 'POST' });
     var data = await resp.json();
     if (data.status !== 'started') { toast('启动 ASR 失败', 'error'); return; }
@@ -6919,6 +6931,11 @@ function switchAsrMode(mode) {
   document.getElementById('asr-folder-panel').style.display = isFolder ? 'block' : 'none';
   document.getElementById('asr-mode-video-btn').className = isFolder ? 'btn btn-secondary' : 'btn btn-primary';
   document.getElementById('asr-mode-folder-btn').className = isFolder ? 'btn btn-primary' : 'btn btn-secondary';
+  // Toggle output dir sections
+  document.getElementById('asr-video-output-section').style.display = isFolder ? 'none' : 'block';
+  document.getElementById('asr-folder-output-section').style.display = isFolder ? 'block' : 'none';
+  // Toggle run buttons
+  document.getElementById('btn-asr-run').style.display = isFolder ? 'none' : 'block';
   if (isFolder) {
     document.getElementById('asr-current-video').textContent = '⚙️ ASR 语音识别配置（文件夹模式）';
     loadAsrModels();
@@ -6990,9 +7007,17 @@ function asrFolderGoUp() {
   }
 }
 
-async function browseAsrOutputDir() {
+async function browseAsrVideoOutputDir() {
+  var current = document.getElementById('asr-video-output').value || '';
+  var path = await openFolderPicker('选择 ASR 视频输出目录', current);
+  if (path) {
+    document.getElementById('asr-video-output').value = path;
+  }
+}
+
+async function browseAsrFolderOutputDir() {
   var current = document.getElementById('asr-folder-output').value || '';
-  var path = await openFolderPicker('选择 ASR 输出目录', current);
+  var path = await openFolderPicker('选择 ASR 文件夹输出目录', current);
   if (path) {
     document.getElementById('asr-folder-output').value = path;
   }
@@ -8962,7 +8987,7 @@ var SETTINGS_CATEGORIES = [
   {title:'通用 — 其他',keys:['PIPELINE_VIDEO_DIR']},
   {title:'降噪 — 已审核音频',keys:['APPROVED_DIR','CLEANED_DIR']},
   {title:'降噪 — 未审核音频',keys:['CLEANED_UNREVIEWED_DIR','DENOISED_APPROVED_DIR']},
-  {title:'ASR 语音识别',keys:['ASR_DIR','ASR_AUDIO_DIR','ASR_SUBTITLE_DIR']},
+  {title:'ASR 语音识别',keys:['ASR_DIR','ASR_AUDIO_DIR','ASR_SUBTITLE_DIR','HOTWORDS_DIR']},
   {title:'ASR 对比',keys:['ASR_COMPARE_DIR','ASR_COMPARE_SUBTITLE_DIR','ASR_COMPARE_AUDIO_DIR','ASR_COMPARE_OUTPUT_DIR','ASR_COMPARE_DISCARD_DIR']},
   {title:'情绪分类',keys:['EMOTION_DIR','EMOTION_DENOISE_DIR']}
 ];
@@ -8976,7 +9001,8 @@ var SETTINGS_PATH_LABELS = {
   'ASR_DIR':'ASR 根目录','ASR_AUDIO_DIR':'ASR 音频目录','ASR_SUBTITLE_DIR':'ASR 字幕目录',
   'ASR_COMPARE_DIR':'ASR 对比根目录','ASR_COMPARE_SUBTITLE_DIR':'ASR 对比字幕目录',
   'ASR_COMPARE_AUDIO_DIR':'ASR 对比音频目录','ASR_COMPARE_OUTPUT_DIR':'ASR 对比输出目录',
-  'ASR_COMPARE_DISCARD_DIR':'ASR 对比丢弃目录'
+  'ASR_COMPARE_DISCARD_DIR':'ASR 对比丢弃目录',
+  'HOTWORDS_DIR':'热词配置目录'
 };
 
 function openSettings() {
@@ -9358,7 +9384,7 @@ function deleteHotwordConfig(name) {
 
 // Pipeline Video (视频管线)
 // ============================================================
-var _pvJobId = null;
+var _pvQueue = [];        // [{job_id, folder_name, files, stepsConfig, outputDir, status, progress, created_at, expanded}]
 var _pvPollTimer = null;
 var _pvFiles = [];
 var _pvSelected = {};
@@ -9396,7 +9422,6 @@ function pvRenderStepConfig() {
   }
   cont.innerHTML = html;
 
-  // Checkbox toggles
   var toggles = cont.querySelectorAll('[data-pv-step-toggle]');
   for (var t = 0; t < toggles.length; t++) {
     toggles[t].onchange = function() {
@@ -9412,7 +9437,6 @@ function pvRenderStepConfig() {
     };
   }
 
-  // Drag and drop
   var items = cont.querySelectorAll('.pv-step-item');
   var dragIdx = -1;
   for (var d = 0; d < items.length; d++) {
@@ -9446,7 +9470,6 @@ function pvRenderStepConfig() {
     });
   }
 
-  // Show/hide duration config when duration_split is toggled
   var durCfg = document.getElementById('pv-duration-config');
   if (durCfg) {
     var dsEnabled = false;
@@ -9456,7 +9479,6 @@ function pvRenderStepConfig() {
     durCfg.style.display = dsEnabled ? 'flex' : 'none';
   }
 
-  // Show/hide ASR hotword config when asr step is toggled
   var hwCfg = document.getElementById('pv-asr-hotword-config');
   if (hwCfg) {
     var asrEnabled = false;
@@ -9466,21 +9488,6 @@ function pvRenderStepConfig() {
     hwCfg.style.display = asrEnabled ? 'flex' : 'none';
     if (asrEnabled) pvPopulateHotwordDropdown();
   }
-}
-
-function _savePvSteps() {
-  var map = {};
-  for (var i = 0; i < _pvSteps.length; i++) {
-    map[_pvSteps[i].key] = _pvSteps[i].enabled;
-  }
-  _uiState.pvSteps = map;
-  _saveUiState();
-}
-
-function pvResetSteps() {
-  _pvSteps = JSON.parse(JSON.stringify(PV_STEP_DEFAULTS));
-  _savePvSteps();
-  pvRenderStepConfig();
 }
 
 function pvPopulateHotwordDropdown() {
@@ -9531,395 +9538,26 @@ function pvBrowseOutputDir() {
   });
 }
 
-function pvBrowseFolder() {
-  var btn = document.querySelector('#tab-pipelinevideo button[onclick="pvBrowseFolder()"]');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ 选择中...'; }
-  function resetBtn() { if (btn) { btn.disabled = false; btn.textContent = '浏览'; } }
-
-  var def = '/mnt/nas/Persons/jiangyichen/videodownload';
-  openFolderPicker('添加文件夹', def).then(function(path) {
-    if (!path) { resetBtn(); return; }
-    for (var i = 0; i < _pvFolders.length; i++) {
-      if (_pvFolders[i].path === path) { resetBtn(); return; }
-    }
-    var name = path.replace(/\\/g, '/').split('/').pop() || path;
-    _pvFolders.push({ path: path, name: name });
-    pvRenderFolderList();
-    resetBtn();
-  });
-}
-
-function pvRenderFolderList() {
-  var container = document.getElementById('pv-folder-list');
-  var hint = document.getElementById('pv-folder-hint');
-  var scanBtn = document.getElementById('btn-pv-scan');
-  scanBtn.disabled = _pvFolders.length === 0;
-
-  if (_pvFolders.length === 0) {
-    hint.style.display = '';
-    container.innerHTML = '';
-    // Also clear file list when all folders removed
-    _pvFiles = [];
-    _pvSelected = {};
-    _pvCollapsed = {};
-    document.getElementById('pv-file-section').style.display = 'none';
-    return;
-  }
-  hint.style.display = 'none';
-  var html = '';
-  for (var i = 0; i < _pvFolders.length; i++) {
-    html += '<span class="pv-folder-chip" data-pv-folder-idx="' + i + '" style="display:inline-flex;align-items:center;gap:6px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:6px 12px;font-size:13px;">' +
-      '📁 ' + escapeHtml(_pvFolders[i].name) +
-      ' <span class="pv-folder-remove" data-pv-folder-idx="' + i + '" style="cursor:pointer;color:var(--text2);font-size:16px;line-height:1;padding:2px 4px;border-radius:4px;" title="移除此文件夹">✕</span>' +
-    '</span>';
-  }
-  container.innerHTML = html;
-
-  // Attach click handlers via event delegation
-  container.onclick = function(e) {
-    var target = e.target;
-    if (target.classList.contains('pv-folder-remove')) {
-      var idx = parseInt(target.getAttribute('data-pv-folder-idx'));
-      if (!isNaN(idx) && idx >= 0 && idx < _pvFolders.length) {
-        pvRemoveFolder(idx);
-      }
-    }
-  };
-}
-
-function pvRemoveFolder(idx) {
-  var folderPath = _pvFolders[idx].path;
-  _pvFolders.splice(idx, 1);
-  delete _pvCollapsed[folderPath];
-  // Also remove files belonging to this folder
-  _pvFiles = _pvFiles.filter(function(f) { return f.folder !== folderPath; });
-  pvCleanSelected();
-  pvRenderFolderList();
-}
-
-function pvScanFolders() {
-  if (!_pvFolders.length) { toast('请先添加文件夹', 'info'); return; }
-
-  var scanBtn = document.getElementById('btn-pv-scan');
-  if (scanBtn._scanning) return;  // Prevent double-click
-  scanBtn._scanning = true;
-  scanBtn.disabled = true;
-  scanBtn.textContent = '⏳ 扫描中...';
-
-  // Show loading state in file list area
-  document.getElementById('pv-file-section').style.display = 'block';
-  document.getElementById('pv-progress-section').style.display = 'none';
-  document.getElementById('pv-results-section').style.display = 'none';
-  document.getElementById('pv-player-bar').style.display = 'none';
-  document.getElementById('pv-file-list').innerHTML = '<div class="empty-state"><p>⏳ 正在扫描文件夹...</p></div>';
-
-  var paths = _pvFolders.map(function(f) { return f.path; });
-
-  fetch(API + '/api/pipeline-video/scan-folders', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ folder_paths: paths }),
-  })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      _pvFiles = data.files || [];
-      _pvSelected = {};
-      for (var i = 0; i < _pvFiles.length; i++) {
-        _pvSelected[_pvFiles[i].path] = true;
-      }
-      pvRenderStepConfig();
-      pvRenderFileList();
-      if (_pvFiles.length === 0) {
-        toast('所选文件夹中未找到视频或音频文件', 'info');
-      } else {
-        toast('扫描完成，找到 ' + _pvFiles.length + ' 个文件', 'success');
-      }
-      // Reset button
-      scanBtn._scanning = false;
-      scanBtn.disabled = false;
-      scanBtn.textContent = '🔍 扫描';
-    })
-    .catch(function(e) {
-      toast('扫描失败: ' + e.message, 'error');
-      document.getElementById('pv-file-section').style.display = 'none';
-      scanBtn._scanning = false;
-      scanBtn.disabled = false;
-      scanBtn.textContent = '🔍 扫描';
-    });
-}
-
-function pvRefreshScan() { pvScanFolders(); }
-
-function pvRenderFileList() {
-  var container = document.getElementById('pv-file-list');
-  var selectedCount = 0;
-
-  // Group files by folder, preserving folder order
-  var grouped = {};     // {folderPath: [files...]}
-  var folderOrder = []; // [folderPath, ...]
-  for (var i = 0; i < _pvFiles.length; i++) {
-    var f = _pvFiles[i];
-    if (_pvSelected[f.path]) selectedCount++;
-    var fp = f.folder || '';
-    if (!grouped[fp]) { grouped[fp] = []; folderOrder.push(fp); }
-    grouped[fp].push(f);
-  }
-
-  var html = '';
-
-  if (folderOrder.length === 0) {
-    html = '<div class="empty-state"><p>未找到媒体文件</p></div>';
-  } else {
-    for (var gi = 0; gi < folderOrder.length; gi++) {
-      var folderPath = folderOrder[gi];
-      var folderFiles = grouped[folderPath];
-      var folderName = folderPath.replace(/\\/g, '/').split('/').pop() || folderPath;
-
-      // Count selected in this folder
-      var folderSelCount = 0;
-      for (var fi = 0; fi < folderFiles.length; fi++) {
-        if (_pvSelected[folderFiles[fi].path]) folderSelCount++;
-      }
-      var allChecked = folderSelCount === folderFiles.length && folderFiles.length > 0;
-
-      // Folder section header
-      var collapsed = !!_pvCollapsed[folderPath];
-      html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:' +
-        (collapsed ? '6px' : '6px 6px 0 0') + ';' + (gi > 0 ? 'margin-top:12px;' : '') + '">';
-      html += '<span class="pv-folder-toggle" data-pv-folder-toggle="' + gi +
-        '" data-pv-folder-path="' + escapeHtmlAttr(folderPath) +
-        '" style="cursor:pointer;font-size:12px;line-height:1;padding:2px 4px;border-radius:4px;user-select:none;" title="折叠/展开">' +
-        (collapsed ? '▶' : '▼') + '</span>';
-      html += '<label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;">';
-      html += '<input type="checkbox" class="pv-folder-cb" ' + (allChecked ? 'checked' : '') +
-        ' data-pv-folder="' + escapeHtmlAttr(folderPath) + '" onchange="pvToggleFolder(this)" style="cursor:pointer;">';
-      html += '<span style="font-weight:600;color:var(--text);">📁 ' + escapeHtml(folderName) + '</span>';
-      html += '</label>';
-      html += '<span style="font-size:11px;color:var(--text2);">' + folderFiles.length + ' 个文件</span>';
-      html += '<span class="pv-folder-sec-remove" data-pv-folder-path="' + escapeHtmlAttr(folderPath) +
-        '" style="cursor:pointer;color:var(--text2);font-size:14px;line-height:1;padding:2px 6px;border-radius:4px;margin-left:auto;" title="移除此文件夹的全部文件">✕</span>';
-      html += '</div>';
-
-      // File items — collapsible body
-      html += '<div class="pv-folder-body" data-pv-folder-body="' + gi +
-        '" style="border:1px solid var(--border);border-top:none;border-radius:0 0 6px 6px;margin-bottom:2px;' +
-        (collapsed ? 'display:none;' : '') + '">';
-      for (var fi = 0; fi < folderFiles.length; fi++) {
-        var f = folderFiles[fi];
-        var checked = _pvSelected[f.path] ? 'checked' : '';
-        var isVideo = ['.mp4','.mkv','.avi','.mov','.wmv','.webm','.flv'].indexOf(f.ext) >= 0;
-        var icon = isVideo ? '🎬' : '🎵';
-        var durStr = f.duration_s > 0 ? pvFormatDuration(f.duration_s) : '';
-        html += '<div class="pv-file-item" style="padding-left:22px;">' +
-          '<input type="checkbox" class="pv-item-cb" ' + checked + ' onchange="pvToggleItem(this)" data-path="' + escapeHtmlAttr(f.path) + '">' +
-          '<span>' + icon + '</span>' +
-          '<span class="file-name" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(f.name) + '</span>' +
-          '<span class="file-size" style="font-size:12px;color:var(--text2);white-space:nowrap;">' + (f.size_mb || 0).toFixed(1) + ' MB</span>' +
-          '<span class="file-size" style="font-size:12px;color:var(--text2);white-space:nowrap;">' + (durStr || '') + '</span>' +
-          (isVideo ? '<button class="btn btn-secondary" style="font-size:10px;padding:2px 8px;white-space:nowrap;" onclick="pvPreviewFile(event, \'' + escapeHtmlAttr(f.path) + '\')">预览</button>' : '') +
-          ' <span class="pv-file-remove" data-pv-file-path="' + escapeHtmlAttr(f.path) +
-          '" style="cursor:pointer;color:var(--text2);font-size:16px;line-height:1;padding:2px 4px;border-radius:4px;flex-shrink:0;" title="从列表中移除">✕</span>' +
-        '</div>';
-      }
-      html += '</div>';
-    }
-  }
-
-  container.innerHTML = html;
-
-  // Event delegation for remove buttons, collapse toggle
-  container.onclick = function(e) {
-    var target = e.target;
-    // Folder collapse/expand toggle
-    if (target.classList.contains('pv-folder-toggle') || target.closest('.pv-folder-toggle')) {
-      var tog = target.classList.contains('pv-folder-toggle') ? target : target.closest('.pv-folder-toggle');
-      var fpath = tog.getAttribute('data-pv-folder-path');
-      if (_pvCollapsed[fpath]) { delete _pvCollapsed[fpath]; }
-      else { _pvCollapsed[fpath] = true; }
-      // Re-render to apply collapsed state consistently (handles border-radius etc.)
-      pvRenderFileList();
-      return;
-    }
-    // File remove (by path, not index)
-    if (target.classList.contains('pv-file-remove')) {
-      var filePath = target.getAttribute('data-pv-file-path');
-      if (filePath) {
-        _pvFiles = _pvFiles.filter(function(f) { return f.path !== filePath; });
-        delete _pvSelected[filePath];
-        pvRenderFileList();
-      }
-      return;
-    }
-    // Folder section remove
-    if (target.classList.contains('pv-folder-sec-remove')) {
-      var fPath = target.getAttribute('data-pv-folder-path');
-      if (fPath) {
-        _pvFiles = _pvFiles.filter(function(f) { return f.folder !== fPath; });
-        pvCleanSelected();
-        pvRenderFileList();
-      }
-      return;
-    }
-  };
-
-  document.getElementById('pv-selected-count').textContent = '已选 ' + selectedCount + ' 个';
-  document.getElementById('pv-total-files').textContent = '共 ' + _pvFiles.length + ' 个文件';
-  document.getElementById('pv-select-all-cb').checked = selectedCount === _pvFiles.length && _pvFiles.length > 0;
-  document.getElementById('btn-pv-start').disabled = selectedCount === 0;
-}
-
-function pvCleanSelected() {
-  var keep = {};
-  for (var i = 0; i < _pvFiles.length; i++) {
-    if (_pvSelected[_pvFiles[i].path]) keep[_pvFiles[i].path] = true;
-  }
-  _pvSelected = keep;
-}
-
-function pvToggleFolder(cb) {
-  var folderPath = cb.getAttribute('data-pv-folder');
-  var checked = cb.checked;
-  for (var i = 0; i < _pvFiles.length; i++) {
-    if (_pvFiles[i].folder === folderPath) {
-      if (checked) { _pvSelected[_pvFiles[i].path] = true; }
-      else { delete _pvSelected[_pvFiles[i].path]; }
-    }
-  }
-  pvRenderFileList();
-}
-
-function escapeHtmlAttr(str) {
-  return str.replace(/&/g, '&amp;').replace(/'/g, '&#39;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-function pvFormatDuration(sec) {
-  var m = Math.floor(sec / 60);
-  var s = Math.floor(sec % 60);
-  if (m > 0) return m + '分' + s + '秒';
-  return s + '秒';
-}
-
-function pvToggleItem(cb) {
-  var path = cb.getAttribute('data-path');
-  if (cb.checked) _pvSelected[path] = true;
-  else delete _pvSelected[path];
-  pvRenderFileList();
-}
-
-function pvToggleSelectAll() {
-  var checked = document.getElementById('pv-select-all-cb').checked;
-  if (checked) {
-    for (var i = 0; i < _pvFiles.length; i++) { _pvSelected[_pvFiles[i].path] = true; }
-  } else {
-    _pvSelected = {};
-  }
-  pvRenderFileList();
-}
-
-function pvPreviewFile(event, path) {
-  event.stopPropagation();
-  var player = document.getElementById('pv-video-player');
-  var bar = document.getElementById('pv-player-bar');
-  bar.style.display = 'block';
-  player.src = API + '/api/pipeline-video/stream?path=' + encodeURIComponent(path);
-  player.load();
-}
-
-var _denoiseJobsRestored = false;
-
-function pvRestoreJobs() {
-  fetch(API + '/api/pipeline-video/jobs')
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (!data.jobs || !data.jobs.length) return;
-      var running = null;
-      var interrupted = null;
-      var lastCompleted = null;
-      for (var i = 0; i < data.jobs.length; i++) {
-        if (data.jobs[i].status === 'running' && !running) running = data.jobs[i];
-        if (data.jobs[i].status === 'interrupted' && !interrupted) interrupted = data.jobs[i];
-        if (data.jobs[i].status === 'completed' && !lastCompleted) lastCompleted = data.jobs[i];
-      }
-      if (running) {
-        _pvJobId = running.job_id;
-        document.getElementById('pv-file-section').style.display = 'none';
-        document.getElementById('pv-step-config').style.display = 'none';
-        document.getElementById('pv-progress-section').style.display = 'block';
-        document.getElementById('pv-results-section').style.display = 'none';
-        document.getElementById('pv-interrupted-section').style.display = 'none';
-        pvUpdateUI(running);
-        startPvPolling();
-      } else if (interrupted) {
-        _pvJobId = interrupted.job_id;
-        document.getElementById('pv-file-section').style.display = 'none';
-        document.getElementById('pv-step-config').style.display = 'none';
-        document.getElementById('pv-progress-section').style.display = 'none';
-        document.getElementById('pv-results-section').style.display = 'none';
-        document.getElementById('pv-interrupted-section').style.display = 'block';
-        pvRenderInterrupted(interrupted);
-      } else if (lastCompleted) {
-        _pvJobId = lastCompleted.job_id;
-        document.getElementById('pv-file-section').style.display = 'none';
-        document.getElementById('pv-step-config').style.display = 'none';
-        document.getElementById('pv-progress-section').style.display = 'none';
-        document.getElementById('pv-results-section').style.display = 'block';
-        document.getElementById('pv-interrupted-section').style.display = 'none';
-        pvOnComplete(lastCompleted);
-      }
-    }).catch(function() {});
-}
-
-function pvRenderInterrupted(job) {
-  var completed = 0, pending = 0;
-  for (var i = 0; i < job.files.length; i++) {
-    if (job.files[i].status === 'completed') completed++;
-    else pending++;
-  }
-  var html = '<div style="background:var(--bg2);border:1px solid #ff6b6b;border-radius:8px;padding:16px;margin-bottom:12px;">';
-  html += '<div style="font-size:16px;font-weight:bold;color:#ff6b6b;margin-bottom:8px;">任务因服务器重启中断</div>';
-  html += '<div style="font-size:13px;color:var(--text2);margin-bottom:4px;">文件夹: ' + escapeHtml(job.folder_name) + '</div>';
-  html += '<div style="font-size:13px;color:var(--text2);margin-bottom:4px;">总文件数: ' + job.files.length + ' | 已完成: ' + completed + ' | 待处理: ' + pending + '</div>';
-  html += '<div style="font-size:13px;color:var(--text2);margin-bottom:12px;">进度: ' + (job.progress || 0).toFixed(0) + '%</div>';
-  html += '<div style="display:flex;gap:8px;">';
-  html += '<button class="btn btn-success" onclick="pvResumeInterrupted(\'' + job.job_id + '\')" style="background:var(--success);color:#000;">继续执行 (跳过已完成)</button>';
-  html += '<button class="btn btn-secondary" onclick="pvDiscardInterrupted(\'' + job.job_id + '\')" style="background:var(--danger);color:#fff;">丢弃任务</button>';
-  html += '</div></div>';
-  document.getElementById('pv-interrupted-section').innerHTML = html;
-}
-
-async function pvResumeInterrupted(jobId) {
-  if (!confirm('确定恢复此任务？将跳过已完成的文件继续处理。')) return;
+function _savePvSteps() {
   try {
-    var resp = await fetch(API + '/api/pipeline-video/job/' + jobId + '/resume', { method: 'POST' });
-    var data = await resp.json();
-    if (resp.ok) {
-      toast('任务已恢复执行', 'success');
-      document.getElementById('pv-interrupted-section').style.display = 'none';
-      document.getElementById('pv-progress-section').style.display = 'block';
-      _pvJobId = jobId;
-      startPvPolling();
-    } else {
-      toast('恢复失败: ' + (data.detail || ''), 'error');
+    var map = {};
+    for (var i = 0; i < _pvSteps.length; i++) {
+      map[_pvSteps[i].key] = _pvSteps[i].enabled;
     }
-  } catch(e) { toast('Error: ' + e.message, 'error'); }
+    localStorage.setItem('pv_steps_enabled', JSON.stringify(map));
+    localStorage.setItem('pv_steps_order', JSON.stringify(_pvSteps.map(function(s) { return s.key; })));
+  } catch(e) {}
 }
 
-async function pvDiscardInterrupted(jobId) {
-  if (!confirm('确定丢弃此中断的任务？')) return;
-  try {
-    var resp = await fetch(API + '/api/pipeline-video/job/' + jobId + '/discard', { method: 'POST' });
-    var data = await resp.json();
-    if (resp.ok) {
-      toast('已丢弃', 'info');
-      document.getElementById('pv-interrupted-section').style.display = 'none';
-      document.getElementById('pv-file-section').style.display = 'block';
-      document.getElementById('pv-step-config').style.display = 'block';
-      _pvJobId = null;
-    } else {
-      toast('丢弃失败: ' + (data.detail || ''), 'error');
-    }
-  } catch(e) { toast('Error: ' + e.message, 'error'); }
+function pvResetSteps() {
+  _pvSteps = JSON.parse(JSON.stringify(PV_STEP_DEFAULTS));
+  _savePvSteps();
+  pvRenderStepConfig();
 }
+
+// ============================================================
+// Queue-based pipeline execution
+// ============================================================
 
 function pvStartPipeline() {
   var selectedPaths = [];
@@ -9928,10 +9566,8 @@ function pvStartPipeline() {
   }
   if (!selectedPaths.length) { toast('请选择至少一个文件', 'info'); return; }
 
-  // Use the first folder name as the job folder name
   var folderName = _pvFolders.length > 0 ? _pvFolders[0].name : 'unknown';
 
-  // Get duration config if duration_split is enabled
   for (var d = 0; d < _pvSteps.length; d++) {
     if (_pvSteps[d].key === 'duration_split' && _pvSteps[d].enabled) {
       _pvSteps[d].config = _pvSteps[d].config || {};
@@ -9945,45 +9581,288 @@ function pvStartPipeline() {
   var stepsConfig = pvGetEnabledSteps();
   var outputDir = document.getElementById('pv-output-dir').value.trim();
 
+  var files = [];
+  for (var i = 0; i < selectedPaths.length; i++) {
+    files.push({
+      name: selectedPaths[i].replace(/\/g, '/').split('/').pop(),
+      input_path: selectedPaths[i],
+      wav_path: '',
+      status: 'pending',
+      current_step: '',
+      progress: 0,
+      steps: [],
+      output_clips: [],
+      error: ''
+    });
+  }
+
+  var queueItem = {
+    job_id: 'pending_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+    folder_name: folderName,
+    files: files,
+    stepsConfig: stepsConfig,
+    outputDir: outputDir,
+    status: 'pending',
+    progress: 0,
+    created_at: Date.now() / 1000,
+    expanded: false
+  };
+  _pvQueue.push(queueItem);
+
+  pvRenderQueue();
+
+  if (_pvQueue.length === 1) {
+    pvStartQueuedBackend(0);
+  } else {
+    toast('任务已加入队列（第 ' + _pvQueue.length + ' 位）', 'info');
+  }
+}
+
+function pvStartQueuedBackend(idx) {
+  if (idx >= _pvQueue.length) return;
+  var item = _pvQueue[idx];
+
   fetch(API + '/api/pipeline-video/start', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ folder_path: folderName, file_paths: selectedPaths, steps: stepsConfig, output_dir: outputDir }),
+    body: JSON.stringify({
+      folder_path: item.folder_name,
+      file_paths: item.files.map(function(f) { return f.input_path; }),
+      steps: item.stepsConfig,
+      output_dir: item.outputDir
+    }),
   })
   .then(function(r) { return r.json(); })
   .then(function(data) {
-    if (data.status !== 'ok') { toast('启动失败', 'error'); return; }
-    _pvJobId = data.job_id;
-    document.getElementById('pv-file-section').style.display = 'none';
-    document.getElementById('pv-step-config').style.display = 'none';
-    document.getElementById('pv-progress-section').style.display = 'block';
-    document.getElementById('pv-results-section').style.display = 'none';
+    if (data.status !== 'ok') { toast('启动失败', 'error'); pvRemoveFromQueue(idx); return; }
+    item.job_id = data.job_id;
+    item.status = 'running';
+    pvRenderQueue();
     startPvPolling();
   })
-  .catch(function(e) { toast('启动失败: ' + e.message, 'error'); });
+  .catch(function(e) {
+    toast('启动失败: ' + e.message, 'error');
+    pvRemoveFromQueue(idx);
+  });
+}
+
+function pvRemoveFromQueue(idx) {
+  _pvQueue.splice(idx, 1);
+  pvRenderQueue();
+  if (!_pvQueue.length) stopPvPolling();
 }
 
 function startPvPolling() {
   if (_pvPollTimer) clearInterval(_pvPollTimer);
-  _pvPollTimer = setInterval(pollPvJob, 1000);
-  pollPvJob();
+  _pvPollTimer = setInterval(pollPvJobs, 1500);
 }
 
 function stopPvPolling() {
   if (_pvPollTimer) { clearInterval(_pvPollTimer); _pvPollTimer = null; }
-  _pvJobId = null;
+  if (!_pvQueue.length || _pvQueue.every(function(q) { return q.status === 'completed' || q.status === 'cancelled'; })) {
+    document.getElementById('pv-queue-section').style.display = 'none';
+  }
 }
 
-async function pollPvJob() {
-  if (!_pvJobId) { stopPvPolling(); return; }
-  try {
-    var resp = await fetch(API + '/api/pipeline-video/job/' + _pvJobId);
-    if (!resp.ok) return;
-    var job = await resp.json();
-    pvUpdateUI(job);
-    if (job.status === 'completed') { stopPvPolling(); pvOnComplete(job); }
-  } catch(e) {}
+function pollPvJobs() {
+  var hasRunning = false;
+  for (var i = 0; i < _pvQueue.length; i++) {
+    var item = _pvQueue[i];
+    if (item.status === 'running') {
+      hasRunning = true;
+      fetch(API + '/api/pipeline-video/job/' + item.job_id)
+        .then(function(resp) { return resp.json(); })
+        .then(function(job) {
+          for (var k = 0; k < _pvQueue.length; k++) {
+            if (_pvQueue[k].job_id === job.job_id) {
+              _pvQueue[k].status = job.status;
+              _pvQueue[k].progress = job.progress;
+              _pvQueue[k].files = job.files;
+              _pvQueue[k].folder_name = job.folder_name;
+              pvRenderQueue();
+              break;
+            }
+          }
+        }).catch(function() {});
+    }
+  }
+
+  if (!hasRunning && _pvQueue.length > 0) {
+    pvProcessNextInQueue();
+  }
 }
+
+function pvProcessNextInQueue() {
+  while (_pvQueue.length > 0 && (_pvQueue[0].status === 'completed' || _pvQueue[0].status === 'cancelled')) {
+    _pvQueue.shift();
+  }
+  if (_pvQueue.length > 0 && _pvQueue[0].status === 'pending') {
+    pvStartQueuedBackend(0);
+  }
+  pvRenderQueue();
+}
+
+// ============================================================
+// Queue UI rendering
+// ============================================================
+
+function pvRenderQueue() {
+  var section = document.getElementById('pv-queue-section');
+  var container = document.getElementById('pv-queue-list');
+  if (!section || !container) return;
+
+  if (!_pvQueue.length) {
+    section.style.display = 'none';
+    return;
+  }
+
+  section.style.display = 'block';
+  var html = '';
+
+  for (var i = 0; i < _pvQueue.length; i++) {
+    var item = _pvQueue[i];
+    var isRunning = item.status === 'running';
+    var isCompleted = item.status === 'completed';
+    var isCancelled = item.status === 'cancelled';
+    var isPending = item.status === 'pending';
+
+    var cardBorder = isRunning ? 'var(--accent)' : (isCompleted ? 'var(--success)' : (isCancelled ? 'var(--danger)' : 'var(--border)'));
+    var statusLabel = isRunning ? '处理中' : (isCompleted ? '完成' : (isCancelled ? '已取消' : '排队中'));
+    var statusColor = isRunning ? 'var(--accent)' : (isCompleted ? 'var(--success)' : (isCancelled ? 'var(--danger)' : 'var(--text2)'));
+
+    var completedCount = 0;
+    for (var j = 0; j < item.files.length; j++) {
+      if (item.files[j].status === 'completed') completedCount++;
+    }
+
+    html += '<div style="border:1px solid ' + cardBorder + ';border-radius:8px;overflow:hidden;background:var(--bg2);">';
+
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;cursor:pointer;" onclick="pvToggleQueueItem(' + i + ')">';
+    html += '<div style="flex:1;min-width:0;">';
+    html += '<div style="display:flex;align-items:center;gap:8px;">';
+    html += '<span style="font-size:12px;color:var(--text2);">' + (item.expanded ? '▾' : '▸') + '</span>';
+    html += '<span style="font-size:13px;font-weight:600;color:var(--text);">#' + (i + 1) + ' ' + escapeHtml(item.folder_name) + '</span>';
+    html += '<span style="font-size:11px;color:' + statusColor + ';padding:1px 8px;border-radius:10px;background:var(--bg);">' + statusLabel + '</span>';
+    html += '<span style="font-size:11px;color:var(--text2);">' + item.files.length + ' 文件</span>';
+    if (completedCount > 0) {
+      html += '<span style="font-size:11px;color:var(--text2);">已完成 ' + completedCount + '/' + item.files.length + '</span>';
+    }
+    html += '</div>';
+    if (isRunning) {
+      html += '<div class="progress-bar" style="margin-top:6px;"><div class="progress-fill" style="width:' + Math.round(item.progress) + '%;"></div></div>';
+    }
+    html += '</div>';
+
+    html += '<div style="display:flex;gap:4px;flex-shrink:0;" onclick="event.stopPropagation();">';
+    if (isRunning) {
+      html += '<button class="btn btn-secondary" onclick="pvCancelQueuedJob(' + i + ')" style="font-size:10px;padding:2px 8px;background:var(--danger);color:#fff;">中止</button>';
+    }
+    if (isPending) {
+      html += '<button class="btn btn-secondary" onclick="pvDeleteQueuedJob(' + i + ')" style="font-size:10px;padding:2px 8px;color:var(--danger);">删除</button>';
+      html += '<button class="btn btn-primary" onclick="pvPromoteJob(' + i + ')" style="font-size:10px;padding:2px 8px;">提前执行</button>';
+    }
+    if (isCompleted || isCancelled) {
+      html += '<button class="btn btn-secondary" onclick="pvRemoveFromQueue(' + i + ');pvRenderQueue();" style="font-size:10px;padding:2px 8px;">移除</button>';
+    }
+    html += '</div></div>';
+
+    if (item.expanded) {
+      html += '<div style="border-top:1px solid var(--border);padding:12px 14px;max-height:400px;overflow-y:auto;">';
+      html += '<div style="margin-bottom:8px;display:flex;gap:4px;flex-wrap:wrap;">';
+      for (var s = 0; s < item.stepsConfig.length; s++) {
+        var st = item.stepsConfig[s];
+        if (st.enabled) {
+          html += '<span class="pv-step-label active">' + escapeHtml(st.key) + '</span>';
+        }
+      }
+      html += '</div>';
+      for (var f = 0; f < item.files.length; f++) {
+        var file = item.files[f];
+        var stepLabels = pvRenderStepLabels(file);
+        html += '<div class="pv-progress-card ' + file.status + '" style="margin-bottom:4px;">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+        html += '<span class="file-name" style="font-size:12px;">' + escapeHtml(file.name) + '</span>';
+        html += '<span class="job-status status-' + file.status + '" style="font-size:10px;">' + pvStatusText(file) + '</span>';
+        html += '</div>';
+        if (file.status === 'running' || file.status === 'converting') {
+          html += '<div class="progress-bar" style="margin:4px 0;"><div class="progress-fill" style="width:' + Math.round(file.progress) + '%;"></div></div>';
+        }
+        html += '<div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:3px;">' + stepLabels + '</div>';
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+
+    html += '</div>';
+  }
+
+  container.innerHTML = html;
+}
+
+function pvToggleQueueItem(idx) {
+  if (idx >= _pvQueue.length) return;
+  _pvQueue[idx].expanded = !_pvQueue[idx].expanded;
+  pvRenderQueue();
+}
+
+function pvCancelQueuedJob(idx) {
+  if (idx >= _pvQueue.length) return;
+  var item = _pvQueue[idx];
+  if (!confirm('确定中止任务 #' + (idx + 1) + ' (' + item.folder_name + ') 吗？')) return;
+
+  fetch(API + '/api/pipeline-video/job/' + item.job_id + '/cancel', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status === 'ok') {
+        item.status = 'cancelled';
+        toast('任务已中止', 'info');
+        pvRenderQueue();
+      } else {
+        toast('中止失败', 'error');
+      }
+    }).catch(function(e) {
+      toast('中止失败: ' + e.message, 'error');
+    });
+}
+
+function pvDeleteQueuedJob(idx) {
+  if (idx >= _pvQueue.length) return;
+  var item = _pvQueue[idx];
+  if (!confirm('确定删除队列中的任务 #' + (idx + 1) + ' (' + item.folder_name + ') 吗？')) return;
+
+  var jobId = item.job_id;
+  var isRealJob = jobId && !jobId.startsWith('pending_');
+
+  var doRemove = function() {
+    _pvQueue.splice(idx, 1);
+    pvRenderQueue();
+    if (!_pvQueue.length) stopPvPolling();
+    toast('任务已删除', 'info');
+  };
+
+  if (isRealJob) {
+    fetch(API + '/api/pipeline-video/job/' + jobId, { method: 'DELETE' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.status === 'ok') doRemove();
+        else toast('删除失败', 'error');
+      }).catch(function() { doRemove(); });
+  } else {
+    doRemove();
+  }
+}
+
+function pvPromoteJob(idx) {
+  if (idx <= 0 || idx >= _pvQueue.length) return;
+  var item = _pvQueue.splice(idx, 1)[0];
+  _pvQueue.splice(1, 0, item);
+  pvRenderQueue();
+  toast('已提前到队列第 2 位', 'info');
+}
+
+// ============================================================
+// UI helpers (shared)
+// ============================================================
 
 function pvUpdateUI(job) {
   document.getElementById('pv-progress-fill').style.width = Math.round(job.progress) + '%';
@@ -10013,8 +9892,8 @@ function pvUpdateUI(job) {
 }
 
 function pvRenderStepLabels(f) {
-  var stepNames = { 'music_separate': 'BGM分离', 'convert': 'WAV转换', 'enhance': '语音增强', 'super_resolve': '超分辨率', 'asr': 'ASR识别', 'cut': '音频切割' };
-  var steps = ['convert', 'music_separate', 'enhance', 'super_resolve', 'asr', 'cut'];
+  var stepNames = { 'music_separate': 'BGM分离', 'convert': 'WAV转换', 'enhance': '语音增强', 'super_resolve': '超分辨率', 'asr': 'ASR识别', 'cut': '音频切割', 'duration_split': '时长切分' };
+  var steps = ['duration_split', 'convert', 'music_separate', 'enhance', 'super_resolve', 'asr', 'cut'];
   var html = '';
   for (var i = 0; i < steps.length; i++) {
     var s = steps[i];
@@ -10053,7 +9932,7 @@ function pvOnComplete(job) {
     var f = job.files[i];
     for (var j = 0; j < (f.output_clips || []).length; j++) {
       var clipPath = f.output_clips[j];
-      var clipName = clipPath.replace(/\\/g, '/').split('/').pop();
+      var clipName = clipPath.replace(/\/g, '/').split('/').pop();
       allClips.push({ name: clipName, path: clipPath, source: f.name });
     }
   }
@@ -10067,17 +9946,108 @@ function pvOnComplete(job) {
     return;
   }
   var html = '';
-  for (var i = 0; i < allClips.length; i++) {
-    html += '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;">' +
-      '<div class="file-name" style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtmlAttr(allClips[i].name) + '">' + escapeHtml(allClips[i].name) + '</div>' +
-      '<div style="font-size:11px;color:var(--text2);margin:4px 0;">来源: ' + escapeHtml(allClips[i].source) + '</div>' +
-      '<audio controls style="width:100%;" src="' + API + '/api/pipeline-video/stream?path=' + encodeURIComponent(allClips[i].path) + '"></audio>' +
-    '</div>';
+  for (var k = 0; k < allClips.length; k++) {
+    var clip = allClips[k];
+    var streamUrl = API + '/api/pipeline-video/stream?path=' + encodeURIComponent(clip.path);
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;">';
+    html += '<div style="flex:1;min-width:0;"><div style="font-size:12px;color:var(--text);word-break:break-all;">' + escapeHtml(clip.name) + '</div>';
+    html += '<div style="font-size:10px;color:var(--text2);">来源: ' + escapeHtml(clip.source) + '</div></div>';
+    html += '<audio controls preload="none" style="width:280px;height:28px;" src="' + streamUrl + '"></audio></div>';
   }
   container.innerHTML = html;
   toast('视频管线处理完成！共生成 ' + allClips.length + ' 个音频片段', 'success');
 }
+
 // ============================================================
+// Job restore (page load / tab switch)
+// ============================================================
+
+function pvRestoreJobs() {
+  fetch(API + '/api/pipeline-video/jobs')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.jobs || !data.jobs.length) return;
+      var running = null, interrupted = null, lastCompleted = null;
+      for (var i = 0; i < data.jobs.length; i++) {
+        var j = data.jobs[i];
+        if (j.status === 'running' && !running) running = j;
+        if (j.status === 'interrupted' && !interrupted) interrupted = j;
+        if (j.status === 'completed' && !lastCompleted) lastCompleted = j;
+      }
+
+      if (running) {
+        var queueItem = {
+          job_id: running.job_id,
+          folder_name: running.folder_name,
+          files: running.files,
+          stepsConfig: [],
+          outputDir: '',
+          status: running.status,
+          progress: running.progress,
+          created_at: running.created_at || Date.now() / 1000,
+          expanded: false
+        };
+        _pvQueue = [queueItem];
+        document.getElementById('pv-queue-section').style.display = 'block';
+        pvRenderQueue();
+        startPvPolling();
+      } else if (interrupted) {
+        document.getElementById('pv-interrupted-section').style.display = 'block';
+        pvRenderInterrupted(interrupted);
+      } else if (lastCompleted) {
+        document.getElementById('pv-results-section').style.display = 'block';
+        document.getElementById('pv-interrupted-section').style.display = 'none';
+        pvOnComplete(lastCompleted);
+      }
+    }).catch(function() {});
+}
+
+function pvRenderInterrupted(job) {
+  var completed = 0, pending = 0;
+  for (var i = 0; i < job.files.length; i++) {
+    if (job.files[i].status === 'completed') completed++;
+    else pending++;
+  }
+  var html = '<div style="background:var(--bg2);border:1px solid #ff6b6b;border-radius:8px;padding:16px;margin-bottom:12px;">';
+  html += '<div style="font-size:16px;font-weight:bold;color:#ff6b6b;margin-bottom:8px;">任务因服务器重启中断</div>';
+  html += '<div style="font-size:13px;color:var(--text2);margin-bottom:4px;">文件夹: ' + escapeHtml(job.folder_name) + '</div>';
+  html += '<div style="font-size:13px;color:var(--text2);margin-bottom:4px;">总文件数: ' + job.files.length + ' | 已完成: ' + completed + ' | 待处理: ' + pending + '</div>';
+  html += '<div style="font-size:13px;color:var(--text2);margin-bottom:12px;">进度: ' + (job.progress || 0).toFixed(0) + '%</div>';
+  html += '<div style="display:flex;gap:8px;">';
+  html += '<button class="btn btn-success" onclick="pvResumeInterrupted(\'' + job.job_id + '\')" style="background:var(--success);color:#000;">继续执行 (跳过已完成)</button>';
+  html += '<button class="btn btn-secondary" onclick="pvDiscardInterrupted(\'' + job.job_id + '\')" style="background:var(--danger);color:#fff;">丢弃任务</button>';
+  html += '</div></div>';
+  document.getElementById('pv-interrupted-section').innerHTML = html;
+}
+
+async function pvResumeInterrupted(jobId) {
+  if (!confirm('确定恢复此任务？将跳过已完成的文件继续处理。')) return;
+  try {
+    var resp = await fetch(API + '/api/pipeline-video/job/' + jobId + '/resume', { method: 'POST' });
+    var data = await resp.json();
+    if (resp.ok) {
+      toast('任务已恢复执行', 'success');
+      document.getElementById('pv-interrupted-section').style.display = 'none';
+      var queueItem = {job_id: jobId, folder_name: '', files: [], stepsConfig: [], outputDir: '', status: 'running', progress: 0, created_at: Date.now() / 1000, expanded: false};
+      _pvQueue = [queueItem];
+      pvRenderQueue();
+      document.getElementById('pv-queue-section').style.display = 'block';
+      startPvPolling();
+    } else { toast('恢复失败: ' + (data.detail || ''), 'error'); }
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function pvDiscardInterrupted(jobId) {
+  if (!confirm('确定丢弃此中断的任务？')) return;
+  try {
+    var resp = await fetch(API + '/api/pipeline-video/job/' + jobId + '/discard', { method: 'POST' });
+    var data = await resp.json();
+    if (resp.ok) {
+      toast('已丢弃', 'info');
+      document.getElementById('pv-interrupted-section').style.display = 'none';
+    } else { toast('丢弃失败: ' + (data.detail || ''), 'error'); }
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+}
 // MFA Japanese Aligner
 // ============================================================
 var _mfaJobId = null;
