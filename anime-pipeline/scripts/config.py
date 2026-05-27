@@ -110,6 +110,23 @@ HEADERS = {
 STITCHED_DIR = os.path.join(DATA_DIR, "stitched")
 PIPELINE_VIDEO_DIR = os.path.join(DATA_DIR, "pipelinevideo")
 
+# --- MFA (Montreal Forced Aligner) directories ---
+MFA_DIR = os.path.join(DATA_DIR, "mfa")
+MFA_RAW_WAV_DIR = os.path.join(MFA_DIR, "raw_wav")
+MFA_WAV_DIR = os.path.join(MFA_DIR, "wav")
+MFA_TXT_DIR = os.path.join(MFA_DIR, "txt")
+MFA_ALIGNED_DIR = os.path.join(MFA_DIR, "aligned")
+MFA_POST_DIR = os.path.join(MFA_DIR, "post")
+MFA_FILTERED_DIR = os.path.join(MFA_DIR, "filtered")
+MFA_VALIDATE_DIR = os.path.join(MFA_DIR, "validate")
+MFA_SCRIPTS_DIR = os.path.join(COMICUT_ROOT, "demo", "scripts")
+MFA_MODELS_DIR = os.path.join(COMICUT_ROOT, "demo", "models", "mfa")
+MFA_TEMP_DIR = os.path.join(COMICUT_ROOT, "demo", "models", "temp")
+MFA_DICT_PATH = os.path.join(MFA_MODELS_DIR, "pretrained_models", "dictionary", "japanese_mfa.dict")
+
+# --- Hotword configurations ---
+HOTWORDS_FILE = os.path.join(DATA_DIR, "hotwords.json")
+
 # --- Settings overrides ---
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 
@@ -123,6 +140,9 @@ _USER_PATH_KEYS = {
     'ASR_COMPARE_DIR', 'ASR_COMPARE_SUBTITLE_DIR', 'ASR_COMPARE_AUDIO_DIR',
     'ASR_COMPARE_OUTPUT_DIR', 'ASR_COMPARE_DISCARD_DIR',
     'PIPELINE_VIDEO_DIR',
+    'MFA_RAW_WAV_DIR', 'MFA_WAV_DIR', 'MFA_TXT_DIR',
+    'MFA_ALIGNED_DIR', 'MFA_POST_DIR', 'MFA_FILTERED_DIR',
+    'MFA_VALIDATE_DIR', 'MFA_MODELS_DIR', 'MFA_TEMP_DIR', 'MFA_DICT_PATH',
 }
 
 # Non-path config keys stored in settings.json (model/language selections etc.)
@@ -132,6 +152,11 @@ _CONFIG_KEYS = {
     'ASR_COMPARE_MODEL_A': 'qwen3-asr',
     'ASR_COMPARE_MODEL_B': 'cohere-transcribe',
     'ASR_DEFAULT_HOTWORDS': '',
+    'FIRERED_ASR2_MODELS_DIR': os.path.join(DATA_DIR, "models", "firered_asr2"),
+    'MFA_PYTHON': 'python',
+    'MFA_DEFAULT_ACOUSTIC': 'japanese_mfa',
+    'MFA_DEFAULT_DICTIONARY': 'japanese_mfa',
+    'MFA_DEFAULT_NUM_JOBS': '8',
 }
 
 # Populate module-level defaults from _CONFIG_KEYS
@@ -248,7 +273,7 @@ ASR_COMPARE_OUTPUT_DIR = os.path.join(DATA_DIR, "asr_compare_output")
 ASR_COMPARE_DISCARD_DIR = os.path.join(ASR_COMPARE_DIR, "discarded")
 
 # Ensure all data directories exist
-for d in [DOWNLOAD_DIR, SUBTITLE_DIR, CLIPS_DIR, TEMP_DIR, APPROVED_DIR, CLEANED_DIR, CLEANED_UNREVIEWED_DIR, DENOISED_APPROVED_DIR, STITCHED_DIR, PIPELINE_VIDEO_DIR, ASR_DIR, ASR_AUDIO_DIR, ASR_SUBTITLE_DIR, ASR_COMPARE_DIR, ASR_COMPARE_SUBTITLE_DIR, ASR_COMPARE_AUDIO_DIR, ASR_COMPARE_OUTPUT_DIR, ASR_COMPARE_DISCARD_DIR, EMOTION_DIR, EMOTION_DENOISE_DIR]:
+for d in [DOWNLOAD_DIR, SUBTITLE_DIR, CLIPS_DIR, TEMP_DIR, APPROVED_DIR, CLEANED_DIR, CLEANED_UNREVIEWED_DIR, DENOISED_APPROVED_DIR, STITCHED_DIR, PIPELINE_VIDEO_DIR, ASR_DIR, ASR_AUDIO_DIR, ASR_SUBTITLE_DIR, ASR_COMPARE_DIR, ASR_COMPARE_SUBTITLE_DIR, ASR_COMPARE_AUDIO_DIR, ASR_COMPARE_OUTPUT_DIR, ASR_COMPARE_DISCARD_DIR, EMOTION_DIR, EMOTION_DENOISE_DIR, MFA_DIR, MFA_RAW_WAV_DIR, MFA_WAV_DIR, MFA_TXT_DIR, MFA_ALIGNED_DIR, MFA_POST_DIR, MFA_FILTERED_DIR, MFA_VALIDATE_DIR]:
     os.makedirs(d, exist_ok=True)
 
 

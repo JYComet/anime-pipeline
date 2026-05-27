@@ -23,6 +23,9 @@ from config import (
     ASR_COMPARE_DIR, ASR_COMPARE_SUBTITLE_DIR, ASR_COMPARE_AUDIO_DIR,
     ASR_COMPARE_OUTPUT_DIR, ASR_COMPARE_DISCARD_DIR,
     EMOTION_DIR, EMOTION_DENOISE_DIR,
+    MFA_SCRIPTS_DIR, MFA_MODELS_DIR, MFA_TEMP_DIR, MFA_DICT_PATH,
+    MFA_RAW_WAV_DIR, MFA_WAV_DIR, MFA_TXT_DIR,
+    MFA_ALIGNED_DIR, MFA_POST_DIR, MFA_FILTERED_DIR, MFA_VALIDATE_DIR,
     FFPROBE, FFMPEG
 )
 from pipeline import pipeline, PipelineJob, StepStatus
@@ -361,6 +364,7 @@ def startup_services():
     _load_pv_jobs()
     _load_asr_jobs()
     _load_asr_compare_jobs()
+    _load_mfa_jobs()
 
     # Preload ASR models in background so first request is fast
     def _preload_asr():
@@ -3027,6 +3031,110 @@ def save_settings(payload: dict = Body(...)):
     pv_steps = payload.get("pv_default_steps", None)
     config_vals = payload.get("config", None)
     save_settings(paths, steps, pv_steps, config_vals)
+    return {"status": "ok"}
+
+
+# ============================================================
+# Hotword Configurations API
+# ============================================================
+
+import time as _time
+from config import HOTWORDS_FILE
+
+
+def _load_hotwords_configs() -> dict:
+    """Load hotword configurations from disk. Returns {configs: [...], default_id: str|None}."""
+    if not os.path.exists(HOTWORDS_FILE):
+        return {"configs": [], "default_id": None}
+    try:
+        with open(HOTWORDS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"configs": [], "default_id": None}
+
+
+def _save_hotwords_configs(data: dict):
+    """Save hotword configurations to disk."""
+    os.makedirs(os.path.dirname(HOTWORDS_FILE), exist_ok=True)
+    tmp = HOTWORDS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, HOTWORDS_FILE)
+
+
+_hotwords_lock = threading.RLock()
+
+
+@app.get("/api/hotwords/configs")
+def list_hotwords_configs():
+    """List all hotword configurations."""
+    data = _load_hotwords_configs()
+    return {"configs": data.get("configs", []), "default_id": data.get("default_id")}
+
+
+@app.post("/api/hotwords/configs")
+def save_hotwords_config(payload: dict = Body(...)):
+    """Create or update a hotword configuration. Provide 'id' to update, omit to create."""
+    with _hotwords_lock:
+        data = _load_hotwords_configs()
+        configs = data.get("configs", [])
+        cfg_id = payload.get("id")
+        name = (payload.get("name") or "").strip()
+        hotwords = (payload.get("hotwords") or "").strip()
+
+        if not name:
+            raise HTTPException(status_code=400, detail="名称不能为空")
+        if not hotwords:
+            raise HTTPException(status_code=400, detail="热词不能为空")
+
+        if cfg_id:
+            # Update existing
+            for c in configs:
+                if c["id"] == cfg_id:
+                    c["name"] = name
+                    c["hotwords"] = hotwords
+                    break
+            else:
+                raise HTTPException(status_code=404, detail="配置不存在")
+        else:
+            # Create new
+            cfg_id = uuid.uuid4().hex[:12]
+            configs.append({
+                "id": cfg_id,
+                "name": name,
+                "hotwords": hotwords,
+                "created_at": _time.time(),
+            })
+
+        data["configs"] = configs
+        _save_hotwords_configs(data)
+    return {"status": "ok", "id": cfg_id}
+
+
+@app.delete("/api/hotwords/configs/{config_id}")
+def delete_hotwords_config(config_id: str):
+    """Delete a hotword configuration. Clears default_id if it matches."""
+    with _hotwords_lock:
+        data = _load_hotwords_configs()
+        configs = data.get("configs", [])
+        configs = [c for c in configs if c["id"] != config_id]
+        data["configs"] = configs
+        if data.get("default_id") == config_id:
+            data["default_id"] = None
+        _save_hotwords_configs(data)
+    return {"status": "ok"}
+
+
+@app.put("/api/hotwords/default/{config_id}")
+def set_default_hotwords_config(config_id: str):
+    """Set a hotword configuration as the default."""
+    with _hotwords_lock:
+        data = _load_hotwords_configs()
+        configs = data.get("configs", [])
+        if not any(c["id"] == config_id for c in configs):
+            raise HTTPException(status_code=404, detail="配置不存在")
+        data["default_id"] = config_id
+        _save_hotwords_configs(data)
     return {"status": "ok"}
 
 
@@ -6349,8 +6457,698 @@ def _srt_time_to_sec(t: str) -> float:
 
 
 # ============================================================
-# Static frontend serving
+# MFA (Montreal Forced Aligner) endpoints
 # ============================================================
+
+_MFA_JOBS_FILE = os.path.join(DATA_DIR, "mfa_jobs.json")
+_mfa_jobs: dict[str, dict] = {}
+_mfa_lock = threading.RLock()
+
+
+def _save_mfa_jobs():
+    """Persist MFA jobs to disk."""
+    try:
+        with _mfa_lock:
+            data = {k: dict(v) for k, v in _mfa_jobs.items()}
+        tmp = _MFA_JOBS_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, _MFA_JOBS_FILE)
+    except Exception as e:
+        print(f"[mfa] Failed to save jobs: {e}")
+
+
+def _load_mfa_jobs():
+    """Restore MFA jobs from disk on startup. Mark running jobs as interrupted."""
+    if not os.path.exists(_MFA_JOBS_FILE):
+        return
+    try:
+        with open(_MFA_JOBS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        for job_id, jd in data.items():
+            if jd.get("status") == "running":
+                jd["status"] = "interrupted"
+                jd["current_step"] = "服务器重启中断"
+            _mfa_jobs[job_id] = jd
+        print(f"[startup] Restored {len(_mfa_jobs)} MFA jobs from disk")
+    except Exception as e:
+        print(f"[startup] Failed to load MFA jobs: {e}")
+
+
+def _run_mfa_subprocess(job_id: str, cmd: list[str], env_extra: dict = None,
+                         step_label: str = "", progress_total_pat: str = ""):
+    """Run a subprocess for an MFA job, capturing stdout and updating progress.
+
+    progress_total_pat: if set, regex pattern to extract progress like "Found N wav files"
+      or "[N/total]" to compute percentage.
+    """
+    import re as _mfa_re
+    with _mfa_lock:
+        job = _mfa_jobs.get(job_id)
+        if not job:
+            return
+        job["status"] = "running"
+        job["current_step"] = step_label or "处理中..."
+        _save_mfa_jobs()
+
+    try:
+        process_env = os.environ.copy()
+        if env_extra:
+            process_env.update(env_extra)
+
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            cwd=PROJECT_ROOT,
+            env=process_env,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+        )
+
+        stdout_lines = []
+        # Progress parsing patterns
+        re_progress = _mfa_re.compile(r'\[(\d+)/(\d+)\]')  # [N/total]
+        re_found = _mfa_re.compile(r'Found (\d+) wav files')
+        total = 0
+
+        for line in iter(process.stdout.readline, ''):
+            stdout_lines.append(line)
+            with _mfa_lock:
+                j = _mfa_jobs.get(job_id)
+                if j:
+                    j["stdout"] = "".join(stdout_lines[-300:])
+                    # Try to parse progress
+                    m = re_progress.search(line)
+                    if m:
+                        current = int(m.group(1))
+                        total = int(m.group(2))
+                        if total > 0:
+                            j["progress"] = round(current / total * 100)
+                    elif re_found.search(line):
+                        total_match = re_found.search(line)
+                        if total_match:
+                            total = int(total_match.group(1))
+                    elif "Done." in line and "written" in line:
+                        j["progress"] = 100
+                    _save_mfa_jobs()
+
+            with _mfa_lock:
+                j = _mfa_jobs.get(job_id)
+                if j and j.get("cancelled"):
+                    process.kill()
+                    j["status"] = "cancelled"
+                    j["current_step"] = "已取消"
+                    j["stdout"] = "".join(stdout_lines)
+                    _save_mfa_jobs()
+                    return
+
+        process.wait()
+
+        with _mfa_lock:
+            j = _mfa_jobs.get(job_id)
+            if j and not j.get("cancelled"):
+                j["stdout"] = "".join(stdout_lines)
+                if process.returncode == 0:
+                    j["status"] = "completed"
+                    j["progress"] = 100
+                    j["current_step"] = "完成"
+                else:
+                    j["status"] = "failed"
+                    j["error"] = "".join(stdout_lines[-10:]) if stdout_lines else f"Exit code: {process.returncode}"
+                    j["current_step"] = f"失败 (exit {process.returncode})"
+                _save_mfa_jobs()
+    except Exception as e:
+        with _mfa_lock:
+            j = _mfa_jobs.get(job_id)
+            if j:
+                j["status"] = "failed"
+                j["error"] = str(e)
+                j["current_step"] = "异常退出"
+                _save_mfa_jobs()
+
+
+def _get_mfa_config(key: str, default=None):
+    """Get an MFA config value from module globals (loaded from settings)."""
+    val = globals().get(key)
+    if val is not None:
+        return val
+    from config import _CONFIG_KEYS
+    cfg = _CONFIG_KEYS
+    return cfg.get(key, default)
+
+
+# Step 1: Trim Silence
+@app.post("/api/mfa/trim-silence")
+def mfa_trim_silence(
+    input_dir: str = Query(..., description="Raw WAV input directory"),
+    output_dir: str = Query(..., description="Trimmed WAV output directory"),
+    max_silence_sec: float = Query(1.0),
+    sil_vol_threshold: float = Query(0.001),
+    sil_len_threshold: float = Query(0.08),
+    normalize_edges: bool = Query(True),
+    target_edge_silence_sec: float = Query(0.5),
+    edge_silence_threshold: float = Query(0.001),
+    edge_frame_length: int = Query(1024),
+    workers: int = Query(8),
+):
+    """Step 1: Batch trim silence from WAV files."""
+    job_id = uuid.uuid4().hex[:12]
+    python_exe = _get_mfa_config("MFA_PYTHON", "python")
+    script = os.path.join(MFA_SCRIPTS_DIR, "trim_silence_batch.py")
+
+    cmd = [
+        python_exe, script,
+        "--input-dir", input_dir,
+        "--output-dir", output_dir,
+        "--max-silence-sec", str(max_silence_sec),
+        "--sil-vol-threshold", str(sil_vol_threshold),
+        "--sil-len-threshold", str(sil_len_threshold),
+        "--workers", str(workers),
+    ]
+    if normalize_edges:
+        cmd.extend(["--normalize-edges",
+                     "--target-edge-silence-sec", str(target_edge_silence_sec),
+                     "--edge-silence-threshold", str(edge_silence_threshold),
+                     "--edge-frame-length", str(edge_frame_length)])
+
+    with _mfa_lock:
+        _mfa_jobs[job_id] = {
+            "job_id": job_id, "type": "trim-silence", "status": "pending",
+            "progress": 0, "current_step": "等待开始", "stdout": "", "error": None,
+            "created_at": time.time(),
+            "params": {"input_dir": input_dir, "output_dir": output_dir},
+        }
+        _save_mfa_jobs()
+
+    threading.Thread(target=_run_mfa_subprocess,
+                     args=(job_id, cmd),
+                     kwargs={"step_label": "裁剪静音中...", "env_extra": None},
+                     daemon=True).start()
+    return {"status": "ok", "job_id": job_id}
+
+
+# Step 2: Generate TXT
+@app.post("/api/mfa/generate-txt")
+def mfa_generate_txt(
+    jsonl_path: str = Query(..., description="JSONL file path"),
+    output_dir: str = Query(..., description="TXT output directory"),
+    text_key: str = Query("text"),
+    wav_key: str = Query("wav_file"),
+    mode: str = Query("A"),
+    overwrite: bool = Query(True),
+    dict_path: str = Query("", description="Optional MFA dictionary path"),
+    max_merge_tokens: int = Query(5),
+    oov_report: str = Query("", description="Optional custom OOV report path"),
+):
+    """Step 2: Generate MFA TXT transcript files from JSONL using SudachiPy."""
+    job_id = uuid.uuid4().hex[:12]
+    python_exe = _get_mfa_config("MFA_PYTHON", "python")
+    script = os.path.join(MFA_SCRIPTS_DIR, "generate_wav_txt.py")
+
+    cmd = [
+        python_exe, script,
+        "--jsonl", jsonl_path,
+        "--output-dir", output_dir,
+        "--text-key", text_key,
+        "--wav-key", wav_key,
+        "--mode", mode.upper(),
+        "--max-merge-tokens", str(max_merge_tokens),
+    ]
+    if overwrite:
+        cmd.append("--overwrite")
+    if dict_path:
+        cmd.extend(["--dict-path", dict_path])
+    if oov_report:
+        cmd.extend(["--oov-report", oov_report])
+
+    with _mfa_lock:
+        _mfa_jobs[job_id] = {
+            "job_id": job_id, "type": "generate-txt", "status": "pending",
+            "progress": 0, "current_step": "等待开始", "stdout": "", "error": None,
+            "created_at": time.time(),
+            "params": {"jsonl_path": jsonl_path, "output_dir": output_dir, "mode": mode},
+        }
+        _save_mfa_jobs()
+
+    threading.Thread(target=_run_mfa_subprocess,
+                     args=(job_id, cmd),
+                     kwargs={"step_label": "生成TXT中..."},
+                     daemon=True).start()
+    return {"status": "ok", "job_id": job_id}
+
+
+# Step 3a: MFA Validate
+@app.post("/api/mfa/validate")
+def mfa_validate(
+    txt_dir: str = Query(..., description="TXT corpus directory"),
+    wav_dir: str = Query("", description="WAV audio directory (if separate from txt)"),
+    output_dir: str = Query(..., description="Validate output directory"),
+    acoustic_model: str = Query("japanese_mfa"),
+    dictionary: str = Query("japanese_mfa"),
+    temp_dir: str = Query(""),
+    num_jobs: int = Query(8),
+    clean: bool = Query(True),
+    overwrite: bool = Query(True),
+):
+    """Step 3a: Run MFA validate to check data readiness."""
+    job_id = uuid.uuid4().hex[:12]
+    models_root = _get_mfa_config("MFA_MODELS_DIR", MFA_MODELS_DIR)
+    temp = temp_dir or _get_mfa_config("MFA_TEMP_DIR", MFA_TEMP_DIR)
+
+    cmd = [
+        "mfa", "validate",
+        txt_dir,
+        dictionary,
+        "--acoustic_model_path", acoustic_model,
+        "--output_directory", output_dir,
+        "--temporary_directory", temp,
+        "--num_jobs", str(num_jobs),
+    ]
+    if wav_dir:
+        cmd.extend(["--audio_directory", wav_dir])
+    if clean:
+        cmd.append("--clean")
+    if overwrite:
+        cmd.append("--overwrite")
+
+    with _mfa_lock:
+        _mfa_jobs[job_id] = {
+            "job_id": job_id, "type": "mfa-validate", "status": "pending",
+            "progress": 0, "current_step": "等待开始", "stdout": "", "error": None,
+            "created_at": time.time(),
+            "params": {"txt_dir": txt_dir, "output_dir": output_dir},
+        }
+        _save_mfa_jobs()
+
+    threading.Thread(target=_run_mfa_subprocess,
+                     args=(job_id, cmd),
+                     kwargs={"step_label": "MFA Validate 中...",
+                             "env_extra": {"MFA_ROOT_DIR": models_root}},
+                     daemon=True).start()
+    return {"status": "ok", "job_id": job_id}
+
+
+# Step 3b: MFA Align
+@app.post("/api/mfa/align")
+def mfa_align(
+    txt_dir: str = Query(..., description="TXT corpus directory"),
+    dictionary: str = Query("japanese_mfa"),
+    acoustic_model: str = Query("japanese_mfa"),
+    output_dir: str = Query(..., description="Aligned TextGrid output directory"),
+    wav_dir: str = Query("", description="WAV audio directory (if separate from txt)"),
+    temp_dir: str = Query(""),
+    num_jobs: int = Query(8),
+    clean: bool = Query(True),
+    overwrite: bool = Query(True),
+    output_format: str = Query("long_textgrid"),
+    no_tokenization: bool = Query(True),
+    no_textgrid_cleanup: bool = Query(True),
+):
+    """Step 3b: Run MFA align to produce TextGrid files."""
+    job_id = uuid.uuid4().hex[:12]
+    models_root = _get_mfa_config("MFA_MODELS_DIR", MFA_MODELS_DIR)
+    temp = temp_dir or _get_mfa_config("MFA_TEMP_DIR", MFA_TEMP_DIR)
+
+    cmd = [
+        "mfa", "align",
+        txt_dir,
+        dictionary,
+        acoustic_model,
+        output_dir,
+        "--output_format", output_format,
+        "--temporary_directory", temp,
+        "--num_jobs", str(num_jobs),
+    ]
+    if wav_dir:
+        cmd.extend(["--audio_directory", wav_dir])
+    if clean:
+        cmd.append("--clean")
+    if overwrite:
+        cmd.append("--overwrite")
+    if no_tokenization:
+        cmd.append("--no_tokenization")
+    if no_textgrid_cleanup:
+        cmd.append("--no_textgrid_cleanup")
+
+    with _mfa_lock:
+        _mfa_jobs[job_id] = {
+            "job_id": job_id, "type": "mfa-align", "status": "pending",
+            "progress": 0, "current_step": "等待开始", "stdout": "", "error": None,
+            "created_at": time.time(),
+            "params": {"txt_dir": txt_dir, "output_dir": output_dir},
+        }
+        _save_mfa_jobs()
+
+    threading.Thread(target=_run_mfa_subprocess,
+                     args=(job_id, cmd),
+                     kwargs={"step_label": "MFA Align 中...",
+                             "env_extra": {"MFA_ROOT_DIR": models_root}},
+                     daemon=True).start()
+    return {"status": "ok", "job_id": job_id}
+
+
+# Step 4: Post-process TextGrid
+@app.post("/api/mfa/postprocess")
+def mfa_postprocess(
+    jsonl_path: str = Query(..., description="JSONL file path"),
+    txt_dir: str = Query(..., description="Generated TXT directory"),
+    textgrid_dir: str = Query(..., description="MFA aligned TextGrid input directory"),
+    output_dir: str = Query(..., description="Post-processed TextGrid output directory"),
+    filtered_dir: str = Query(..., description="Filtered (bad) TextGrid output directory"),
+    wav_dir: str = Query("", description="WAV directory for energy-based fix"),
+    text_key: str = Query("text"),
+    wav_key: str = Query("wav_file"),
+    overwrite: bool = Query(True),
+    fix_short_multi_unit: bool = Query(True),
+    filter_suspicious_alignment: bool = Query(True),
+    copy_errors: bool = Query(False),
+):
+    """Step 4: Post-process MFA TextGrid output (add tiers, fix alignment, filter)."""
+    job_id = uuid.uuid4().hex[:12]
+    python_exe = _get_mfa_config("MFA_PYTHON", "python")
+    script = os.path.join(MFA_SCRIPTS_DIR, "postprocess_textgrids.py")
+
+    cmd = [
+        python_exe, script,
+        "--jsonl", jsonl_path,
+        "--txt-dir", txt_dir,
+        "--textgrid-dir", textgrid_dir,
+        "--output-dir", output_dir,
+        "--filtered-dir", filtered_dir,
+        "--text-key", text_key,
+        "--wav-key", wav_key,
+    ]
+    if wav_dir:
+        cmd.extend(["--wav-dir", wav_dir])
+    if overwrite:
+        cmd.append("--overwrite")
+    if fix_short_multi_unit:
+        cmd.append("--fix-short-multi-unit")
+    else:
+        cmd.append("--no-fix-short-multi-unit")
+    if filter_suspicious_alignment:
+        cmd.append("--filter-suspicious-alignment")
+    else:
+        cmd.append("--no-filter-suspicious-alignment")
+    if copy_errors:
+        cmd.append("--copy-errors")
+
+    with _mfa_lock:
+        _mfa_jobs[job_id] = {
+            "job_id": job_id, "type": "mfa-postprocess", "status": "pending",
+            "progress": 0, "current_step": "等待开始", "stdout": "", "error": None,
+            "created_at": time.time(),
+            "params": {"textgrid_dir": textgrid_dir, "output_dir": output_dir},
+        }
+        _save_mfa_jobs()
+
+    threading.Thread(target=_run_mfa_subprocess,
+                     args=(job_id, cmd),
+                     kwargs={"step_label": "后处理 TextGrid 中..."},
+                     daemon=True).start()
+    return {"status": "ok", "job_id": job_id}
+
+
+# Run all 4 steps sequentially
+@app.post("/api/mfa/run-all")
+def mfa_run_all(payload: dict = Body(...)):
+    """Run all 4 MFA pipeline steps sequentially.
+
+    Body keys match the individual step params, prefixed by the step number:
+    trim_*  for step 1, gen_* for step 2, align_* for step 3, post_* for step 4.
+    """
+    job_id = uuid.uuid4().hex[:12]
+
+    with _mfa_lock:
+        _mfa_jobs[job_id] = {
+            "job_id": job_id, "type": "mfa-run-all", "status": "pending",
+            "progress": 0, "current_step": "等待开始", "stdout": "", "error": None,
+            "created_at": time.time(), "cancelled": False,
+            "params": payload,
+        }
+        _save_mfa_jobs()
+
+    def _run_all():
+        python_exe = _get_mfa_config("MFA_PYTHON", "python")
+        model_root = _get_mfa_config("MFA_MODELS_DIR", MFA_MODELS_DIR)
+        all_stdout = []
+
+        steps = [
+            {
+                "name": "trim",
+                "label": "步骤 1/4: 裁剪静音",
+                "script": os.path.join(MFA_SCRIPTS_DIR, "trim_silence_batch.py"),
+                "build_cmd": lambda: _build_trim_cmd(python_exe, payload),
+            },
+            {
+                "name": "generate",
+                "label": "步骤 2/4: 生成TXT",
+                "script": os.path.join(MFA_SCRIPTS_DIR, "generate_wav_txt.py"),
+                "build_cmd": lambda: _build_generate_cmd(python_exe, payload),
+            },
+            {
+                "name": "align",
+                "label": "步骤 3/4: MFA对齐",
+                "build_cmd": lambda: _build_align_cmd(payload),
+                "env": {"MFA_ROOT_DIR": model_root},
+            },
+            {
+                "name": "postprocess",
+                "label": "步骤 4/4: 后处理",
+                "script": os.path.join(MFA_SCRIPTS_DIR, "postprocess_textgrids.py"),
+                "build_cmd": lambda: _build_postprocess_cmd(python_exe, payload),
+            },
+        ]
+
+        for i, step_info in enumerate(steps):
+            with _mfa_lock:
+                j = _mfa_jobs.get(job_id)
+                if not j or j.get("cancelled"):
+                    return
+                j["current_step"] = step_info["label"]
+                j["progress"] = (i / 4) * 100
+                _save_mfa_jobs()
+
+            try:
+                cmd = step_info["build_cmd"]()
+                env = step_info.get("env", None)
+                process_env = os.environ.copy()
+                if env:
+                    process_env.update(env)
+
+                process = subprocess.Popen(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    cwd=PROJECT_ROOT, env=process_env,
+                    text=True, encoding='utf-8', errors='replace',
+                )
+                step_stdout = []
+                for line in iter(process.stdout.readline, ''):
+                    step_stdout.append(line)
+                    all_stdout.append(line)
+                    with _mfa_lock:
+                        j = _mfa_jobs.get(job_id)
+                        if j:
+                            j["stdout"] = "".join(all_stdout[-500:])
+                            j["progress"] = round((i + 0.5) / 4 * 100)
+                            _save_mfa_jobs()
+                    # Check cancellation
+                    with _mfa_lock:
+                        j = _mfa_jobs.get(job_id)
+                        if j and j.get("cancelled"):
+                            process.kill()
+                            j["status"] = "cancelled"
+                            j["current_step"] = "已取消"
+                            _save_mfa_jobs()
+                            return
+
+                process.wait()
+                if process.returncode != 0:
+                    with _mfa_lock:
+                        j = _mfa_jobs.get(job_id)
+                        if j and not j.get("cancelled"):
+                            j["status"] = "failed"
+                            j["error"] = f"步骤 {i+1} 失败: exit code {process.returncode}\n" + "".join(step_stdout[-20:])
+                            j["current_step"] = f"步骤 {i+1} 失败"
+                            j["stdout"] = "".join(all_stdout)
+                            _save_mfa_jobs()
+                    return
+            except Exception as e:
+                with _mfa_lock:
+                    j = _mfa_jobs.get(job_id)
+                    if j and not j.get("cancelled"):
+                        j["status"] = "failed"
+                        j["error"] = f"步骤 {i+1} 异常: {e}"
+                        j["current_step"] = f"步骤 {i+1} 异常"
+                        j["stdout"] = "".join(all_stdout)
+                        _save_mfa_jobs()
+                return
+
+        # All steps completed
+        with _mfa_lock:
+            j = _mfa_jobs.get(job_id)
+            if j and not j.get("cancelled"):
+                j["status"] = "completed"
+                j["progress"] = 100
+                j["current_step"] = "全部完成"
+                j["stdout"] = "".join(all_stdout)
+                _save_mfa_jobs()
+
+    threading.Thread(target=_run_all, daemon=True).start()
+    return {"status": "ok", "job_id": job_id}
+
+
+def _build_trim_cmd(python_exe, payload):
+    script = os.path.join(MFA_SCRIPTS_DIR, "trim_silence_batch.py")
+    cmd = [
+        python_exe, script,
+        "--input-dir", payload.get("trim_input_dir", ""),
+        "--output-dir", payload.get("trim_output_dir", ""),
+        "--max-silence-sec", str(payload.get("trim_max_silence_sec", 1.0)),
+        "--sil-vol-threshold", str(payload.get("trim_sil_vol_threshold", 0.001)),
+        "--sil-len-threshold", str(payload.get("trim_sil_len_threshold", 0.08)),
+        "--workers", str(payload.get("trim_workers", 8)),
+    ]
+    if payload.get("trim_normalize_edges", True):
+        cmd.extend([
+            "--normalize-edges",
+            "--target-edge-silence-sec", str(payload.get("trim_target_edge_silence_sec", 0.5)),
+            "--edge-silence-threshold", str(payload.get("trim_edge_silence_threshold", 0.001)),
+            "--edge-frame-length", str(payload.get("trim_edge_frame_length", 1024)),
+        ])
+    return cmd
+
+
+def _build_generate_cmd(python_exe, payload):
+    script = os.path.join(MFA_SCRIPTS_DIR, "generate_wav_txt.py")
+    cmd = [
+        python_exe, script,
+        "--jsonl", payload.get("gen_jsonl_path", ""),
+        "--output-dir", payload.get("gen_output_dir", ""),
+        "--text-key", payload.get("gen_text_key", "text"),
+        "--wav-key", payload.get("gen_wav_key", "wav_file"),
+        "--mode", payload.get("gen_mode", "A"),
+        "--max-merge-tokens", str(payload.get("gen_max_merge_tokens", 5)),
+    ]
+    if payload.get("gen_overwrite", True):
+        cmd.append("--overwrite")
+    dict_p = payload.get("gen_dict_path", "")
+    if dict_p:
+        cmd.extend(["--dict-path", dict_p])
+    oov = payload.get("gen_oov_report", "")
+    if oov:
+        cmd.extend(["--oov-report", oov])
+    return cmd
+
+
+def _build_align_cmd(payload):
+    wav_dir = payload.get("align_wav_dir", "")
+    temp = payload.get("align_temp_dir", "") or _get_mfa_config("MFA_TEMP_DIR", MFA_TEMP_DIR)
+    output_format = payload.get("align_output_format", "long_textgrid")
+    num_jobs = int(payload.get("align_num_jobs", 8))
+    clean = payload.get("align_clean", True)
+    overwrite = payload.get("align_overwrite", True)
+    no_tokenization = payload.get("align_no_tokenization", True)
+    no_textgrid_cleanup = payload.get("align_no_textgrid_cleanup", True)
+
+    cmd = [
+        "mfa", "align",
+        payload.get("align_txt_dir", ""),
+        payload.get("align_dictionary", "japanese_mfa"),
+        payload.get("align_acoustic_model", "japanese_mfa"),
+        payload.get("align_output_dir", ""),
+        "--output_format", output_format,
+        "--temporary_directory", temp,
+        "--num_jobs", str(num_jobs),
+    ]
+    if wav_dir:
+        cmd.extend(["--audio_directory", wav_dir])
+    if clean:
+        cmd.append("--clean")
+    if overwrite:
+        cmd.append("--overwrite")
+    if no_tokenization:
+        cmd.append("--no_tokenization")
+    if no_textgrid_cleanup:
+        cmd.append("--no_textgrid_cleanup")
+    return cmd
+
+
+def _build_postprocess_cmd(python_exe, payload):
+    script = os.path.join(MFA_SCRIPTS_DIR, "postprocess_textgrids.py")
+    cmd = [
+        python_exe, script,
+        "--jsonl", payload.get("post_jsonl_path", ""),
+        "--txt-dir", payload.get("post_txt_dir", ""),
+        "--textgrid-dir", payload.get("post_textgrid_dir", ""),
+        "--output-dir", payload.get("post_output_dir", ""),
+        "--filtered-dir", payload.get("post_filtered_dir", ""),
+        "--text-key", payload.get("post_text_key", "text"),
+        "--wav-key", payload.get("post_wav_key", "wav_file"),
+    ]
+    wav_dir = payload.get("post_wav_dir", "")
+    if wav_dir:
+        cmd.extend(["--wav-dir", wav_dir])
+    if payload.get("post_overwrite", True):
+        cmd.append("--overwrite")
+    if payload.get("post_fix_short_multi_unit", True):
+        cmd.append("--fix-short-multi-unit")
+    else:
+        cmd.append("--no-fix-short-multi-unit")
+    if payload.get("post_filter_suspicious_alignment", True):
+        cmd.append("--filter-suspicious-alignment")
+    else:
+        cmd.append("--no-filter-suspicious-alignment")
+    if payload.get("post_copy_errors", False):
+        cmd.append("--copy-errors")
+    return cmd
+
+
+# Job polling and management
+@app.get("/api/mfa/job/{job_id}")
+def get_mfa_job(job_id: str):
+    """Poll MFA job status."""
+    with _mfa_lock:
+        job = _mfa_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@app.get("/api/mfa/jobs")
+def list_mfa_jobs():
+    """List all MFA jobs (latest 20)."""
+    with _mfa_lock:
+        jobs = sorted(_mfa_jobs.values(), key=lambda j: j.get("created_at", 0), reverse=True)[:20]
+    return {"jobs": jobs, "count": len(jobs)}
+
+
+@app.delete("/api/mfa/job/{job_id}")
+def cancel_mfa_job(job_id: str):
+    """Cancel a running MFA job."""
+    with _mfa_lock:
+        job = _mfa_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job["status"] not in ("pending", "running"):
+        raise HTTPException(status_code=400, detail=f"Job is {job['status']}, not running")
+    job["cancelled"] = True
+    job["status"] = "cancelled"
+    job["current_step"] = "已取消"
+    _save_mfa_jobs()
+    return {"status": "ok"}
+
+
+@app.delete("/api/mfa/jobs")
+def clear_mfa_jobs(status: str = Query("completed", description="Status filter: completed, failed, cancelled")):
+    """Clear MFA jobs by status."""
+    with _mfa_lock:
+        to_delete = [jid for jid, j in _mfa_jobs.items() if j.get("status") == status]
+        for jid in to_delete:
+            del _mfa_jobs[jid]
+        _save_mfa_jobs()
+    return {"status": "ok", "deleted": len(to_delete)}
 
 FRONTEND_DIR = os.path.join(PROJECT_ROOT, "frontend")
 

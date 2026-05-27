@@ -215,6 +215,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
 .fp-drive { padding:4px 12px; border-radius:4px; cursor:pointer; font-size:12px; background:var(--bg3); color:var(--accent); }
 .fp-drive:hover { background:var(--accent); color:#fff; }
 
+.mfa-input { padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px; }
 .toast-container { position: fixed; top: 16px; right: 16px; z-index: 1000; display: flex; flex-direction: column; gap: 8px; }
 .toast {
   padding: 12px 20px; border-radius: 8px; font-size: 14px;
@@ -543,6 +544,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
     <button data-tab="stitch">音频拼接</button>
     <button data-tab="split">视频切割</button>
     <button data-tab="pipelinevideo">视频管线</button>
+    <button data-tab="hotwords">热词配置</button>
+    <button data-tab="mfa">MFA对齐</button>
   </nav>
   <div class="header-right">
     <button class="btn-settings" title="设置" onclick="openSettings()">⚙</button>
@@ -1120,6 +1123,9 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
 
         <!-- Folder mode panel -->
         <div id="asr-folder-panel" style="display:none;">
+          <div id="asr-folder-config-hint" style="margin-bottom:10px;padding:8px 12px;border-radius:6px;background:var(--accent);color:#fff;font-size:12px;text-align:center;font-weight:600;">
+            ⚙️ 识别参数（模型/语言/热词/设备）请在右侧面板设置 →
+          </div>
           <div style="margin-bottom:12px;">
             <label style="display:block;font-size:12px;color:var(--text2);margin-bottom:4px;">音频文件夹路径</label>
             <div style="display:flex;gap:6px;">
@@ -1144,30 +1150,6 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
               <input id="asr-folder-output" type="text" placeholder="默认: data/asr/folder_output/" style="flex:1;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:12px;">
               <button class="btn btn-secondary" onclick="browseAsrOutputDir()" style="font-size:11px;padding:4px 10px;white-space:nowrap;">浏览...</button>
             </div>
-          </div>
-
-          <div style="display:flex;gap:12px;margin-bottom:12px;">
-            <div style="flex:1;">
-              <label style="display:block;font-size:12px;color:var(--text2);margin-bottom:4px;">ASR 模型</label>
-              <select id="asr-folder-model-select" style="width:100%;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:12px;">
-                <option value="">加载中...</option>
-              </select>
-            </div>
-            <div style="flex:1;">
-              <label style="display:block;font-size:12px;color:var(--text2);margin-bottom:4px;">语言</label>
-              <select id="asr-folder-lang-select" style="width:100%;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:12px;">
-                <option value="zh" selected>中文</option>
-                <option value="auto">自动检测</option>
-                <option value="ja">日本語</option>
-                <option value="en">English</option>
-                <option value="ko">한국어</option>
-              </select>
-            </div>
-          </div>
-
-          <div style="margin-bottom:12px;">
-            <label style="display:block;font-size:12px;color:var(--text2);margin-bottom:4px;">热词/专有名词</label>
-            <input id="asr-folder-hotwords" type="text" placeholder="例如: 雪狐桑, 原神, 刻晴" style="width:100%;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:12px;">
           </div>
 
           <button class="btn btn-primary" id="btn-asr-folder-run" onclick="runAsrFolder()" style="width:100%;padding:10px;font-size:14px;" disabled>
@@ -1198,8 +1180,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
 
       <!-- Right: Config + Results -->
       <div style="flex:1;min-width:350px;">
-        <div id="asr-config-panel" style="display:none;">
-          <h3 style="margin:0 0 12px 0;" id="asr-current-video">ASR 语音识别</h3>
+        <div id="asr-config-panel" style="display:block;">
+          <h3 style="margin:0 0 12px 0;" id="asr-current-video">⚙️ ASR 语音识别配置</h3>
 
           <!-- Model selection -->
           <div style="margin-bottom:12px;">
@@ -1224,7 +1206,10 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
           <!-- Hotwords -->
           <div style="margin-bottom:16px;">
             <label style="display:block;font-size:13px;color:var(--text2);margin-bottom:6px;">热词/专有名词（提示模型关注特定词汇）</label>
-            <input id="asr-hotwords" type="text" placeholder="例如: 雪狐桑, 原神, 刻晴" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:14px;">
+            <select id="asr-hotwords-select" onchange="onHotwordSelect('asr')" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:14px;margin-bottom:6px;">
+              <option value="" selected>不使用热词</option>
+            </select>
+            <input id="asr-hotwords" type="text" placeholder="或直接输入热词，如: 雪狐桑, 原神, 刻晴" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:14px;">
           </div>
 
           <!-- Device selection -->
@@ -1260,8 +1245,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
           </div>
         </div>
 
-        <!-- Empty state -->
-        <div id="asr-empty-state" style="text-align:center;padding:80px 20px;color:var(--text2);">
+        <!-- Empty state (shown only when config not ready) -->
+        <div id="asr-empty-state" style="display:none;text-align:center;padding:80px 20px;color:var(--text2);">
           <p style="font-size:48px;margin-bottom:12px;">🎙️</p>
           <p>选择左侧视频文件进行 ASR 语音识别</p>
           <p style="font-size:12px;margin-top:8px;">支持 MP4 / MKV / AVI 等常见视频格式</p>
@@ -1343,9 +1328,12 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
                 <option value="cpu">CPU</option>
               </select>
             </div>
-            <div style="flex:1;min-width:180px;">
+            <div style="flex:1;min-width:200px;">
               <label style="display:block;font-size:13px;color:var(--text2);margin-bottom:4px;">热词/专有名词</label>
-              <input id="cmp-hotwords" type="text" placeholder="例如: 雪狐桑, 原神" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;">
+              <select id="cmp-hotwords-select" onchange="onHotwordSelect('cmp')" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;margin-bottom:4px;">
+                <option value="" selected>不使用热词</option>
+              </select>
+              <input id="cmp-hotwords" type="text" placeholder="或直接输入" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;">
             </div>
             <div>
               <button class="btn btn-primary" id="btn-cmp-run" onclick="runAsrCompareAll()" style="padding:8px 24px;font-size:14px;white-space:nowrap;" disabled>
@@ -1722,6 +1710,213 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
     </div>
     <div id="pv-interrupted-section" style="display:none;"></div>
   </div>
+  <!-- 热词配置 -->
+  <div id="tab-hotwords" class="tab">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 style="margin:0;">热词配置</h3>
+      <button class="btn btn-primary" onclick="addHotwordConfig()" style="padding:6px 16px;font-size:13px;">+ 新建配置</button>
+    </div>
+    <p style="font-size:12px;color:var(--text2);margin-bottom:16px;">预设热词配置，在 ASR 提取时选择使用。热词帮助模型更准确识别特定词汇（如角色名、专有名词等）。</p>
+
+    <div id="hw-page-edit" style="display:none;padding:14px;border-radius:8px;background:var(--bg2);border:1px solid var(--border);margin-bottom:16px;">
+      <input type="hidden" id="hw-edit-id" value="">
+      <div style="margin-bottom:10px;">
+        <label style="display:block;font-size:13px;color:var(--text2);margin-bottom:4px;">配置名称</label>
+        <input id="hw-edit-name" placeholder="例如: 原神角色" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;">
+      </div>
+      <div style="margin-bottom:12px;">
+        <label style="display:block;font-size:13px;color:var(--text2);margin-bottom:4px;">热词（逗号分隔）</label>
+        <textarea id="hw-edit-hotwords" placeholder="例如: 刻晴, 甘雨, 钟离, 雷电将军" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;min-height:80px;resize:vertical;"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-primary" onclick="saveHotwordConfig()" style="padding:6px 20px;font-size:13px;">保存</button>
+        <button class="btn btn-secondary" onclick="cancelEditHotword()" style="padding:6px 16px;font-size:13px;">取消</button>
+      </div>
+    </div>
+
+    <div id="hw-page-list" style="display:flex;flex-direction:column;gap:10px;">
+      <div style="text-align:center;padding:60px 20px;color:var(--text2);">
+        <p style="font-size:48px;margin-bottom:12px;">🏷️</p>
+        <p>加载中...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- MFA 对齐 -->
+  <div id="tab-mfa" class="tab">
+    <h3 style="margin:0 0 16px 0;">MFA 日语强制对齐</h3>
+
+    <!-- Step indicator -->
+    <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;" id="mfa-step-indicator">
+      <div class="step-dot legend-dot" style="width:auto;padding:6px 14px;border-radius:8px;font-size:12px;">1. 裁剪静音</div>
+      <span style="align-self:center;color:var(--text2);">→</span>
+      <div class="step-dot legend-dot" style="width:auto;padding:6px 14px;border-radius:8px;font-size:12px;">2. 生成TXT</div>
+      <span style="align-self:center;color:var(--text2);">→</span>
+      <div class="step-dot legend-dot" style="width:auto;padding:6px 14px;border-radius:8px;font-size:12px;">3. MFA对齐</div>
+      <span style="align-self:center;color:var(--text2);">→</span>
+      <div class="step-dot legend-dot" style="width:auto;padding:6px 14px;border-radius:8px;font-size:12px;">4. 后处理</div>
+    </div>
+
+    <!-- Step 1: Trim Silence -->
+    <details open id="mfa-section-1" style="margin-bottom:12px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px 18px;">
+      <summary style="cursor:pointer;font-size:15px;font-weight:600;margin-bottom:10px;color:var(--accent);">步骤 1: 裁剪静音 (trim_silence_batch.py)</summary>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;margin-top:8px;">
+        <div><label style="font-size:12px;color:var(--text2);">输入目录 (原始WAV)</label>
+          <div style="display:flex;gap:4px;"><input id="mfa-trim-input" style="flex:1;" class="mfa-input" placeholder="data/mfa/raw_wav"><button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaPickFolder('mfa-trim-input')">浏览</button></div></div>
+        <div><label style="font-size:12px;color:var(--text2);">输出目录 (裁剪后WAV)</label>
+          <div style="display:flex;gap:4px;"><input id="mfa-trim-output" style="flex:1;" class="mfa-input" placeholder="data/mfa/wav"><button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaPickFolder('mfa-trim-output')">浏览</button></div></div>
+        <div><label style="font-size:12px;color:var(--text2);">最长保留静音 (秒)</label><input id="mfa-trim-max-silence" class="mfa-input" value="1.0" style="width:100%;"></div>
+        <div><label style="font-size:12px;color:var(--text2);">静音能量阈值</label><input id="mfa-trim-sil-vol" class="mfa-input" value="0.001" style="width:100%;"></div>
+        <div><label style="font-size:12px;color:var(--text2);">静音长度阈值 (秒)</label><input id="mfa-trim-sil-len" class="mfa-input" value="0.08" style="width:100%;"></div>
+        <div><label style="font-size:12px;color:var(--text2);">并行线程数</label><input id="mfa-trim-workers" class="mfa-input" value="8" style="width:100%;"></div>
+        <div style="display:flex;align-items:center;gap:8px;padding-top:8px;">
+          <input type="checkbox" id="mfa-trim-normalize-edges" checked onchange="mfaToggleTrimEdges()">
+          <label style="font-size:12px;color:var(--text2);">规范化首尾静音</label></div>
+        <div><label style="font-size:12px;color:var(--text2);">目标首尾静音 (秒)</label><input id="mfa-trim-target-edge" class="mfa-input" value="0.5" style="width:100%;"></div>
+        <div><label style="font-size:12px;color:var(--text2);">首尾静音检测阈值</label><input id="mfa-trim-edge-threshold" class="mfa-input" value="0.001" style="width:100%;"></div>
+        <div><label style="font-size:12px;color:var(--text2);">首尾静音帧长</label><input id="mfa-trim-edge-frame" class="mfa-input" value="1024" style="width:100%;"></div>
+      </div>
+      <button class="btn btn-primary" onclick="mfaRunStep('trim')" id="btn-mfa-trim" style="margin-top:10px;">执行步骤 1</button>
+    </details>
+
+    <!-- Step 2: Generate TXT -->
+    <details id="mfa-section-2" style="margin-bottom:12px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px 18px;">
+      <summary style="cursor:pointer;font-size:15px;font-weight:600;margin-bottom:10px;color:var(--accent);">步骤 2: 生成 TXT 转写 (generate_wav_txt.py)</summary>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;margin-top:8px;">
+        <div style="grid-column:1/-1;"><label style="font-size:12px;color:var(--text2);">JSONL 文件路径</label>
+          <div style="display:flex;gap:4px;"><input id="mfa-gen-jsonl" style="flex:1;" class="mfa-input" placeholder="data/wav/generated.jsonl"><button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaPickFolder('mfa-gen-jsonl')">浏览</button></div></div>
+        <div><label style="font-size:12px;color:var(--text2);">输出目录 (TXT)</label>
+          <div style="display:flex;gap:4px;"><input id="mfa-gen-output" style="flex:1;" class="mfa-input" placeholder="data/mfa/txt"><button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaPickFolder('mfa-gen-output')">浏览</button></div></div>
+        <div><label style="font-size:12px;color:var(--text2);">MFA 字典路径 (可选)</label>
+          <div style="display:flex;gap:4px;"><input id="mfa-gen-dict" style="flex:1;" class="mfa-input" placeholder="models/mfa/.../japanese_mfa.dict"><button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaPickFolder('mfa-gen-dict')">浏览</button></div></div>
+        <div><label style="font-size:12px;color:var(--text2);">文本字段名</label><input id="mfa-gen-text-key" class="mfa-input" value="text" style="width:100%;"></div>
+        <div><label style="font-size:12px;color:var(--text2);">WAV路径字段名</label><input id="mfa-gen-wav-key" class="mfa-input" value="wav_file" style="width:100%;"></div>
+        <div><label style="font-size:12px;color:var(--text2);">分词模式</label><select id="mfa-gen-mode" class="mfa-input" style="width:100%;"><option value="A" selected>A (最细)</option><option value="B">B (中等)</option><option value="C">C (最粗)</option></select></div>
+        <div><label style="font-size:12px;color:var(--text2);">最大合并 token 数</label><input id="mfa-gen-max-merge" class="mfa-input" value="5" style="width:100%;"></div>
+        <div><label style="font-size:12px;color:var(--text2);">OOV 报告路径 (可选)</label><input id="mfa-gen-oov" class="mfa-input" placeholder="留空自动生成" style="width:100%;"></div>
+        <div style="display:flex;align-items:center;gap:8px;padding-top:8px;">
+          <input type="checkbox" id="mfa-gen-overwrite" checked><label style="font-size:12px;color:var(--text2);">覆盖已有文件</label></div>
+      </div>
+      <button class="btn btn-primary" onclick="mfaRunStep('generate')" id="btn-mfa-gen" style="margin-top:10px;">执行步骤 2</button>
+    </details>
+
+    <!-- Step 3: MFA Align -->
+    <details id="mfa-section-3" style="margin-bottom:12px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px 18px;">
+      <summary style="cursor:pointer;font-size:15px;font-weight:600;margin-bottom:10px;color:var(--accent);">步骤 3: MFA 对齐 (mfa align / mfa validate)</summary>
+      <!-- Sub-tabs -->
+      <div style="display:flex;gap:4px;margin-bottom:12px;">
+        <button id="mfa-subtab-align" class="btn btn-primary" style="font-size:12px;padding:4px 12px;" onclick="mfaSwitchMfaSub('align')">MFA Align</button>
+        <button id="mfa-subtab-validate" class="btn btn-secondary" style="font-size:12px;padding:4px 12px;" onclick="mfaSwitchMfaSub('validate')">MFA Validate</button>
+      </div>
+
+      <!-- Align panel -->
+      <div id="mfa-align-panel">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;">
+          <div><label style="font-size:12px;color:var(--text2);">TXT 语料目录</label>
+            <div style="display:flex;gap:4px;"><input id="mfa-align-txt-dir" style="flex:1;" class="mfa-input" placeholder="data/mfa/txt"><button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaPickFolder('mfa-align-txt-dir')">浏览</button></div></div>
+          <div><label style="font-size:12px;color:var(--text2);">WAV 音频目录 (txt和wav分开放时)</label>
+            <div style="display:flex;gap:4px;"><input id="mfa-align-wav-dir" style="flex:1;" class="mfa-input" placeholder="data/mfa/wav"><button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaPickFolder('mfa-align-wav-dir')">浏览</button></div></div>
+          <div><label style="font-size:12px;color:var(--text2);">对齐输出目录</label>
+            <div style="display:flex;gap:4px;"><input id="mfa-align-output" style="flex:1;" class="mfa-input" placeholder="data/mfa/aligned"><button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaPickFolder('mfa-align-output')">浏览</button></div></div>
+          <div><label style="font-size:12px;color:var(--text2);">临时目录</label>
+            <div style="display:flex;gap:4px;"><input id="mfa-align-temp" style="flex:1;" class="mfa-input" placeholder="demo/models/temp"><button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaPickFolder('mfa-align-temp')">浏览</button></div></div>
+          <div><label style="font-size:12px;color:var(--text2);">声学模型</label><input id="mfa-align-acoustic" class="mfa-input" value="japanese_mfa" style="width:100%;"></div>
+          <div><label style="font-size:12px;color:var(--text2);">发音字典</label><input id="mfa-align-dict" class="mfa-input" value="japanese_mfa" style="width:100%;"></div>
+          <div><label style="font-size:12px;color:var(--text2);">输出格式</label><select id="mfa-align-format" class="mfa-input" style="width:100%;"><option value="long_textgrid" selected>long_textgrid</option><option value="short_textgrid">short_textgrid</option><option value="textgrid">textgrid</option></select></div>
+          <div><label style="font-size:12px;color:var(--text2);">并行任务数</label><input id="mfa-align-jobs" class="mfa-input" value="8" style="width:100%;"></div>
+          <div style="display:flex;align-items:center;gap:8px;padding-top:4px;">
+            <input type="checkbox" id="mfa-align-clean" checked><label style="font-size:12px;color:var(--text2);">--clean</label></div>
+          <div style="display:flex;align-items:center;gap:8px;padding-top:4px;">
+            <input type="checkbox" id="mfa-align-overwrite" checked><label style="font-size:12px;color:var(--text2);">--overwrite</label></div>
+          <div style="display:flex;align-items:center;gap:8px;padding-top:4px;">
+            <input type="checkbox" id="mfa-align-no-tokenization" checked><label style="font-size:12px;color:var(--text2);">--no_tokenization</label></div>
+          <div style="display:flex;align-items:center;gap:8px;padding-top:4px;">
+            <input type="checkbox" id="mfa-align-no-cleanup" checked><label style="font-size:12px;color:var(--text2);">--no_textgrid_cleanup</label></div>
+        </div>
+        <button class="btn btn-primary" onclick="mfaRunStep('align')" id="btn-mfa-align" style="margin-top:10px;">执行 Align</button>
+      </div>
+
+      <!-- Validate panel (hidden by default) -->
+      <div id="mfa-validate-panel" style="display:none;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;">
+          <div><label style="font-size:12px;color:var(--text2);">TXT 语料目录</label>
+            <div style="display:flex;gap:4px;"><input id="mfa-val-txt-dir" style="flex:1;" class="mfa-input" placeholder="data/mfa/txt"><button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaPickFolder('mfa-val-txt-dir')">浏览</button></div></div>
+          <div><label style="font-size:12px;color:var(--text2);">WAV 音频目录</label>
+            <div style="display:flex;gap:4px;"><input id="mfa-val-wav-dir" style="flex:1;" class="mfa-input" placeholder="data/mfa/wav"><button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaPickFolder('mfa-val-wav-dir')">浏览</button></div></div>
+          <div><label style="font-size:12px;color:var(--text2);">Validate 输出目录</label>
+            <div style="display:flex;gap:4px;"><input id="mfa-val-output" style="flex:1;" class="mfa-input" placeholder="data/mfa/validate"><button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaPickFolder('mfa-val-output')">浏览</button></div></div>
+          <div><label style="font-size:12px;color:var(--text2);">临时目录</label>
+            <div style="display:flex;gap:4px;"><input id="mfa-val-temp" style="flex:1;" class="mfa-input" placeholder="demo/models/temp"><button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaPickFolder('mfa-val-temp')">浏览</button></div></div>
+          <div><label style="font-size:12px;color:var(--text2);">声学模型</label><input id="mfa-val-acoustic" class="mfa-input" value="japanese_mfa" style="width:100%;"></div>
+          <div><label style="font-size:12px;color:var(--text2);">发音字典</label><input id="mfa-val-dict" class="mfa-input" value="japanese_mfa" style="width:100%;"></div>
+          <div><label style="font-size:12px;color:var(--text2);">并行任务数</label><input id="mfa-val-jobs" class="mfa-input" value="8" style="width:100%;"></div>
+          <div style="display:flex;align-items:center;gap:8px;padding-top:4px;">
+            <input type="checkbox" id="mfa-val-clean" checked><label style="font-size:12px;color:var(--text2);">--clean</label></div>
+          <div style="display:flex;align-items:center;gap:8px;padding-top:4px;">
+            <input type="checkbox" id="mfa-val-overwrite" checked><label style="font-size:12px;color:var(--text2);">--overwrite</label></div>
+        </div>
+        <button class="btn btn-secondary" onclick="mfaRunStep('validate')" id="btn-mfa-validate" style="margin-top:10px;">执行 Validate</button>
+      </div>
+    </details>
+
+    <!-- Step 4: Postprocess -->
+    <details id="mfa-section-4" style="margin-bottom:12px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px 18px;">
+      <summary style="cursor:pointer;font-size:15px;font-weight:600;margin-bottom:10px;color:var(--accent);">步骤 4: 后处理 TextGrid (postprocess_textgrids.py)</summary>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;margin-top:8px;">
+        <div style="grid-column:1/-1;"><label style="font-size:12px;color:var(--text2);">JSONL 文件路径</label>
+          <div style="display:flex;gap:4px;"><input id="mfa-post-jsonl" style="flex:1;" class="mfa-input" placeholder="data/wav/generated.jsonl"><button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaPickFolder('mfa-post-jsonl')">浏览</button></div></div>
+        <div><label style="font-size:12px;color:var(--text2);">TXT 目录</label>
+          <div style="display:flex;gap:4px;"><input id="mfa-post-txt-dir" style="flex:1;" class="mfa-input" placeholder="data/mfa/txt"><button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaPickFolder('mfa-post-txt-dir')">浏览</button></div></div>
+        <div><label style="font-size:12px;color:var(--text2);">TextGrid 输入目录</label>
+          <div style="display:flex;gap:4px;"><input id="mfa-post-textgrid-dir" style="flex:1;" class="mfa-input" placeholder="data/mfa/aligned"><button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaPickFolder('mfa-post-textgrid-dir')">浏览</button></div></div>
+        <div><label style="font-size:12px;color:var(--text2);">输出目录</label>
+          <div style="display:flex;gap:4px;"><input id="mfa-post-output" style="flex:1;" class="mfa-input" placeholder="data/mfa/post"><button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaPickFolder('mfa-post-output')">浏览</button></div></div>
+        <div><label style="font-size:12px;color:var(--text2);">过滤输出目录</label>
+          <div style="display:flex;gap:4px;"><input id="mfa-post-filtered" style="flex:1;" class="mfa-input" placeholder="data/mfa/filtered"><button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaPickFolder('mfa-post-filtered')">浏览</button></div></div>
+        <div><label style="font-size:12px;color:var(--text2);">WAV 目录 (可选, 能量修复用)</label>
+          <div style="display:flex;gap:4px;"><input id="mfa-post-wav-dir" style="flex:1;" class="mfa-input" placeholder="data/mfa/wav"><button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaPickFolder('mfa-post-wav-dir')">浏览</button></div></div>
+        <div><label style="font-size:12px;color:var(--text2);">文本字段名</label><input id="mfa-post-text-key" class="mfa-input" value="text" style="width:100%;"></div>
+        <div><label style="font-size:12px;color:var(--text2);">WAV路径字段名</label><input id="mfa-post-wav-key" class="mfa-input" value="wav_file" style="width:100%;"></div>
+        <div style="display:flex;align-items:center;gap:8px;padding-top:4px;">
+          <input type="checkbox" id="mfa-post-overwrite" checked><label style="font-size:12px;color:var(--text2);">覆盖已有输出</label></div>
+        <div style="display:flex;align-items:center;gap:8px;padding-top:4px;">
+          <input type="checkbox" id="mfa-post-fix-short" checked><label style="font-size:12px;color:var(--text2);">修复短词错位</label></div>
+        <div style="display:flex;align-items:center;gap:8px;padding-top:4px;">
+          <input type="checkbox" id="mfa-post-filter-suspicious" checked><label style="font-size:12px;color:var(--text2);">过滤可疑对齐</label></div>
+        <div style="display:flex;align-items:center;gap:8px;padding-top:4px;">
+          <input type="checkbox" id="mfa-post-copy-errors"><label style="font-size:12px;color:var(--text2);">错误时复制到filtered</label></div>
+      </div>
+      <button class="btn btn-primary" onclick="mfaRunStep('postprocess')" id="btn-mfa-post" style="margin-top:10px;">执行步骤 4</button>
+    </details>
+
+    <!-- Run-all button -->
+    <div style="display:flex;gap:10px;margin-bottom:16px;align-items:center;">
+      <button class="btn btn-success" onclick="mfaRunAll()" id="btn-mfa-runall" style="padding:8px 24px;font-size:14px;">运行完整管线 (1→2→3→4)</button>
+      <span style="font-size:12px;color:var(--text2);">自动按顺序执行全部 4 个步骤</span>
+    </div>
+
+    <!-- Progress panel -->
+    <div id="mfa-progress-panel" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <strong id="mfa-progress-title" style="font-size:14px;">任务状态</strong>
+        <span id="mfa-progress-pct" style="font-size:12px;color:var(--text2);">0%</span>
+      </div>
+      <div class="progress-bar"><div id="mfa-progress-fill" class="progress-fill" style="width:0;"></div></div>
+      <div id="mfa-progress-status" style="font-size:12px;color:var(--text2);margin-top:6px;">等待开始...</div>
+      <details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12px;color:var(--text2);">查看输出日志</summary>
+        <pre id="mfa-stdout" style="max-height:300px;overflow-y:auto;background:#000;color:#0f0;padding:8px;border-radius:4px;font-size:11px;white-space:pre-wrap;word-break:break-all;margin-top:4px;"></pre>
+      </details>
+    </div>
+
+    <!-- Job history -->
+    <div style="margin-bottom:20px;">
+      <h4 style="font-size:14px;margin-bottom:8px;">任务历史</h4>
+      <div id="mfa-jobs-list">
+        <div class="empty-state"><p>暂无任务</p></div>
+      </div>
+    </div>
+  </div>
+
 </main>
 
 <!-- player bars deployed inside respective tabs below -->
@@ -2102,8 +2297,8 @@ function switchTab(name) {
   if (name === 'denoise') { loadDenoiseDirs(); loadUnreviewedDirs(); }
   if (name === 'denoise-review') { loadDreviewBaseDirs(); loadEmotionCounts('dreview-emotion-bar', '/api/denoise-review/emotion-counts'); }
   if (name === 'extract') { loadExtractFiles(); loadExtractedSubs(); }
-  if (name === 'asr') { loadAsrVideos(); loadAsrModels(); loadAsrResults(); restoreAsrInterruptedJobs(); }
-  if (name === 'asr-compare') { if (!_cmpLoaded) { loadAsrCompareFiles(); loadAsrCompareModels(); _cmpLoaded = true; } restoreAsrCompareInterruptedJobs(); }
+  if (name === 'asr') { loadAsrVideos(); loadAsrModels(); loadAsrResults(); restoreAsrInterruptedJobs(); loadHotwordConfigs(); }
+  if (name === 'asr-compare') { if (!_cmpLoaded) { loadAsrCompareFiles(); loadAsrCompareModels(); _cmpLoaded = true; } restoreAsrCompareInterruptedJobs(); loadHotwordConfigs(); }
   if (name === 'stitch') loadStitchVideos();
   if (name === 'split') {
     if (!window._splitLoaded) { loadSplitVideos(); loadSplitClipDirs(); window._splitLoaded = true; }
@@ -2112,9 +2307,11 @@ function switchTab(name) {
     pvRenderStepConfig();
     pvRestoreJobs();
   }
+  if (name === 'hotwords') { loadHotwordConfigs(); }
   if (name === 'denoise') {
     if (!_denoiseJobsRestored) { restoreDenoiseJobs(); _denoiseJobsRestored = true; }
   }
+  if (name === 'mfa') { loadMfaJobs(); }
 }
 
 // ============================================================
@@ -6271,8 +6468,6 @@ function processNextAsrInQueue() {
   var hotwords = document.getElementById('asr-hotwords').value.trim();
 
   // Update UI
-  document.getElementById('asr-empty-state').style.display = 'none';
-  document.getElementById('asr-config-panel').style.display = 'block';
   document.getElementById('asr-current-video').textContent = 'ASR 语音识别 — ' + item.name;
   document.getElementById('asr-status').style.display = 'block';
   document.getElementById('asr-status-text').textContent = '启动队列任务 ' + (_asrQueueIndex + 1) + '/' + _asrQueue.length + '...';
@@ -6314,8 +6509,6 @@ async function selectAsrVideo(path) {
   _asrJobId = null;
   if (_asrPollTimer) { clearInterval(_asrPollTimer); _asrPollTimer = null; }
   document.getElementById('asr-status').style.display = 'none';
-  document.getElementById('asr-empty-state').style.display = 'none';
-  document.getElementById('asr-config-panel').style.display = 'block';
   document.getElementById('asr-current-video').textContent = 'ASR 语音识别 — ' + (path.split('/').pop().split('\\').pop());
 
   // Highlight
@@ -6661,39 +6854,33 @@ function switchAsrMode(mode) {
   document.getElementById('asr-folder-panel').style.display = isFolder ? 'block' : 'none';
   document.getElementById('asr-mode-video-btn').className = isFolder ? 'btn btn-secondary' : 'btn btn-primary';
   document.getElementById('asr-mode-folder-btn').className = isFolder ? 'btn btn-primary' : 'btn btn-secondary';
+  var cfgPanel = document.getElementById('asr-config-panel');
+  var deviceDiv = document.getElementById('asr-device-select').parentElement;
+  var audioDiv = document.getElementById('btn-asr-play-audio').parentElement.parentElement;
   if (isFolder) {
-    document.getElementById('asr-config-panel').style.display = 'block';
-    document.getElementById('asr-current-video').textContent = 'ASR 语音识别 — 文件夹模式';
-    document.getElementById('asr-empty-state').style.display = 'none';
+    cfgPanel.style.border = '2px solid var(--accent)';
+    cfgPanel.style.borderRadius = '12px';
+    cfgPanel.style.padding = '16px';
+    cfgPanel.style.background = 'var(--bg2)';
+    document.getElementById('asr-current-video').textContent = '⚙️ 文件夹模式 — ASR 识别配置';
+    document.getElementById('asr-current-video').style.color = 'var(--accent)';
     document.getElementById('btn-asr-run').style.display = 'none';
     document.getElementById('asr-audio-status').textContent = '批量处理音频文件';
     loadAsrModels();
-    loadAsrFolderModels();
+    deviceDiv.style.display = 'none';
+    audioDiv.style.display = 'none';
   } else {
-    document.getElementById('asr-config-panel').style.display = 'none';
-    document.getElementById('asr-empty-state').style.display = '';
+    cfgPanel.style.border = '';
+    cfgPanel.style.borderRadius = '';
+    cfgPanel.style.padding = '';
+    cfgPanel.style.background = '';
+    document.getElementById('asr-current-video').style.color = '';
+    document.getElementById('asr-current-video').textContent = '⚙️ ASR 语音识别配置';
     document.getElementById('btn-asr-run').style.display = '';
-    document.getElementById('asr-current-video').textContent = 'ASR 语音识别';
+    document.getElementById('asr-audio-status').textContent = '—';
+    deviceDiv.style.display = '';
+    audioDiv.style.display = '';
   }
-}
-
-async function loadAsrFolderModels() {
-  try {
-    var resp = await fetch(API + '/api/asr/models');
-    if (!resp.ok) return;
-    var data = await resp.json();
-    var models = data.models || [];
-    var sel = document.getElementById('asr-folder-model-select');
-    var html = '';
-    for (var i = 0; i < models.length; i++) {
-      var m = models[i];
-      var selAttr = m.key === 'qwen3-asr' ? ' selected' : '';
-      html += '<option value="' + safeAttr(m.key) + '"' + selAttr + '>' + escapeHtml(m.name) + '</option>';
-    }
-    if (!html) html = '<option value="">无可用模型</option>';
-    sel.innerHTML = html;
-    document.getElementById('btn-asr-folder-run').disabled = !models.length;
-  } catch(e) { console.error('loadAsrFolderModels:', e); }
 }
 
 async function browseAsrFolder() {
@@ -6833,11 +7020,11 @@ async function runAsrFolder() {
   }
   if (!selectedFiles.length) { toast('请至少选择一个音频文件', 'info'); return; }
 
-  var model = document.getElementById('asr-folder-model-select').value;
-  var language = document.getElementById('asr-folder-lang-select').value;
-  var device = 'cuda';
+  var model = document.getElementById('asr-model-select').value;
+  var language = document.getElementById('asr-lang-select').value;
+  var device = document.getElementById('asr-device-select').value;
   var outputDir = document.getElementById('asr-folder-output').value.trim();
-  var hotwords = document.getElementById('asr-folder-hotwords').value.trim();
+  var hotwords = document.getElementById('asr-hotwords').value.trim();
 
   if (!model) { toast('请选择ASR模型', 'error'); document.getElementById('btn-asr-folder-run').disabled = false; document.getElementById('btn-asr-folder-run').textContent = '开始批量语音识别'; return; }
   if (!language) { toast('请选择语言', 'error'); document.getElementById('btn-asr-folder-run').disabled = false; document.getElementById('btn-asr-folder-run').textContent = '开始批量语音识别'; return; }
@@ -7027,6 +7214,8 @@ document.addEventListener('DOMContentLoaded', function() {
   setTimeout(loadSavedSettings, 200);
   // Restore UI state from localStorage
   setTimeout(restoreUiState, 150);
+  // Load hotword configurations for dropdowns
+  setTimeout(loadHotwordConfigs, 300);
 });
 
 function restoreUiState() {
@@ -8988,6 +9177,193 @@ function saveSettings() {
 }
 
 // ============================================================
+// Hotword Configuration Management
+// ============================================================
+
+var _hotwordConfigs = [];
+var _hotwordDefaultId = null;
+
+function loadHotwordConfigs() {
+  fetch(API + '/api/hotwords/configs').then(function(r) { return r.json(); }).then(function(data) {
+    _hotwordConfigs = data.configs || [];
+    _hotwordDefaultId = data.default_id || null;
+    renderHotwordsPage();
+    populateHotwordDropdowns();
+  }).catch(function(e) {
+    console.error('Failed to load hotword configs:', e);
+  });
+}
+
+function renderHotwordsPage() {
+  var listEl = document.getElementById('hw-page-list');
+  if (!listEl) return;
+
+  if (!_hotwordConfigs.length) {
+    listEl.innerHTML = '<div style="text-align:center;padding:40px 20px;color:var(--text2);"><p style="font-size:24px;margin-bottom:8px;">🏷️</p><p>暂无热词配置，点击右上角「新建配置」开始</p></div>';
+    return;
+  }
+
+  var html = '';
+  for (var i = 0; i < _hotwordConfigs.length; i++) {
+    var c = _hotwordConfigs[i];
+    var isDefault = c.id === _hotwordDefaultId;
+    html += '<div style="padding:14px 18px;border-radius:8px;background:var(--bg2);border:1px solid ' + (isDefault ? 'var(--accent)' : 'var(--border)') + ';display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">';
+    html += '<div style="flex:1;min-width:0;">';
+    html += '<div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;">' + escapeHtml(c.name) + (isDefault ? ' <span style="color:var(--accent);font-size:11px;">默认</span>' : '') + '</div>';
+    html += '<div style="font-size:12px;color:var(--text2);word-break:break-all;">' + escapeHtml(c.hotwords) + '</div>';
+    html += '</div>';
+    html += '<div style="display:flex;gap:6px;flex-shrink:0;">';
+    if (!isDefault) {
+      html += '<button class="btn btn-secondary" onclick="setDefaultHotword(\'' + c.id + '\')" style="font-size:11px;padding:4px 10px;">设为默认</button>';
+    }
+    html += '<button class="btn btn-secondary" onclick="editHotwordConfig(\'' + c.id + '\')" style="font-size:11px;padding:4px 10px;">编辑</button>';
+    html += '<button class="btn btn-secondary" onclick="deleteHotwordConfig(\'' + c.id + '\')" style="font-size:11px;padding:4px 10px;color:var(--danger);">删除</button>';
+    html += '</div></div>';
+  }
+  listEl.innerHTML = html;
+}
+
+function populateHotwordDropdowns() {
+  var prefixList = ['asr', 'asr-folder', 'cmp'];
+  for (var p = 0; p < prefixList.length; p++) {
+    var sel = document.getElementById(prefixList[p] + '-hotwords-select');
+    if (!sel) continue;
+    var currentVal = sel.value;
+    var opts = '<option value="">不使用热词</option>';
+    for (var i = 0; i < _hotwordConfigs.length; i++) {
+      var c = _hotwordConfigs[i];
+      var isDefault = c.id === _hotwordDefaultId;
+      opts += '<option value="' + safeAttr(c.id) + '"' + ((c.id === currentVal) || (!currentVal && isDefault) ? ' selected' : '') + '>' + escapeHtml(c.name) + '</option>';
+    }
+    opts += '<option value="__custom__">自定义输入</option>';
+    sel.innerHTML = opts;
+
+    // Auto-fill text input with default config's hotwords
+    if (_hotwordDefaultId && !currentVal) {
+      for (var i = 0; i < _hotwordConfigs.length; i++) {
+        if (_hotwordConfigs[i].id === _hotwordDefaultId) {
+          sel.value = _hotwordDefaultId;
+          var input = document.getElementById(prefixList[p] + '-hotwords');
+          if (input && !input.value.trim()) {
+            input.value = _hotwordConfigs[i].hotwords;
+          }
+          break;
+        }
+      }
+    }
+  }
+}
+
+function onHotwordSelect(prefix) {
+  var sel = document.getElementById(prefix + '-hotwords-select');
+  var input = document.getElementById(prefix + '-hotwords');
+  if (!sel || !input) return;
+
+  var val = sel.value;
+  if (val === '__custom__') {
+    input.value = '';
+    input.focus();
+    return;
+  }
+  if (!val) {
+    input.value = '';
+    return;
+  }
+  for (var i = 0; i < _hotwordConfigs.length; i++) {
+    if (_hotwordConfigs[i].id === val) {
+      input.value = _hotwordConfigs[i].hotwords;
+      break;
+    }
+  }
+}
+
+function addHotwordConfig() {
+  document.getElementById('hw-page-edit').style.display = 'block';
+  document.getElementById('hw-edit-id').value = '';
+  document.getElementById('hw-edit-name').value = '';
+  document.getElementById('hw-edit-hotwords').value = '';
+  document.getElementById('hw-edit-name').focus();
+}
+
+function editHotwordConfig(id) {
+  for (var i = 0; i < _hotwordConfigs.length; i++) {
+    if (_hotwordConfigs[i].id === id) {
+      document.getElementById('hw-page-edit').style.display = 'block';
+      document.getElementById('hw-edit-id').value = id;
+      document.getElementById('hw-edit-name').value = _hotwordConfigs[i].name;
+      document.getElementById('hw-edit-hotwords').value = _hotwordConfigs[i].hotwords;
+      document.getElementById('hw-edit-name').focus();
+      return;
+    }
+  }
+}
+
+function cancelEditHotword() {
+  document.getElementById('hw-page-edit').style.display = 'none';
+  document.getElementById('hw-edit-id').value = '';
+  document.getElementById('hw-edit-name').value = '';
+  document.getElementById('hw-edit-hotwords').value = '';
+}
+
+function saveHotwordConfig() {
+  var id = document.getElementById('hw-edit-id').value.trim();
+  var name = document.getElementById('hw-edit-name').value.trim();
+  var hotwords = document.getElementById('hw-edit-hotwords').value.trim();
+
+  if (!name) { toast('请输入配置名称', 'error'); return; }
+  if (!hotwords) { toast('请输入热词', 'error'); return; }
+
+  var payload = { name: name, hotwords: hotwords };
+  if (id) payload.id = id;
+
+  fetch(API + '/api/hotwords/configs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }).then(function(r) { return r.json(); }).then(function(data) {
+    if (data.status === 'ok') {
+      toast(id ? '热词配置已更新' : '热词配置已创建', 'success');
+      cancelEditHotword();
+      loadHotwordConfigs();
+    } else {
+      toast('保存失败', 'error');
+    }
+  }).catch(function(e) {
+    toast('保存失败: ' + e.message, 'error');
+  });
+}
+
+function deleteHotwordConfig(id) {
+  if (!confirm('确定要删除此热词配置吗？')) return;
+  fetch(API + '/api/hotwords/configs/' + encodeURIComponent(id), { method: 'DELETE' })
+    .then(function(r) { return r.json(); }).then(function(data) {
+      if (data.status === 'ok') {
+        toast('热词配置已删除', 'success');
+        loadHotwordConfigs();
+      } else {
+        toast('删除失败', 'error');
+      }
+    }).catch(function(e) {
+      toast('删除失败: ' + e.message, 'error');
+    });
+}
+
+function setDefaultHotword(id) {
+  fetch(API + '/api/hotwords/default/' + encodeURIComponent(id), { method: 'PUT' })
+    .then(function(r) { return r.json(); }).then(function(data) {
+      if (data.status === 'ok') {
+        _hotwordDefaultId = id;
+        renderHotwordsPage();
+        populateHotwordDropdowns();
+        toast('已设为默认配置', 'success');
+      } else {
+        toast('设置失败', 'error');
+      }
+    }).catch(function(e) {
+      toast('设置失败: ' + e.message, 'error');
+    });
+}
+
 // Pipeline Video (视频管线)
 // ============================================================
 var _pvJobId = null;
@@ -9664,6 +10040,266 @@ function pvOnComplete(job) {
   container.innerHTML = html;
   toast('视频管线处理完成！共生成 ' + allClips.length + ' 个音频片段', 'success');
 }
+// ============================================================
+// MFA Japanese Aligner
+// ============================================================
+var _mfaJobId = null;
+var _mfaPollTimer = null;
+
+function mfaToggleTrimEdges() {
+  var on = document.getElementById('mfa-trim-normalize-edges').checked;
+  var ids = ['mfa-trim-target-edge', 'mfa-trim-edge-threshold', 'mfa-trim-edge-frame'];
+  for (var i = 0; i < ids.length; i++) {
+    var el = document.getElementById(ids[i]);
+    if (el) el.disabled = !on;
+  }
+}
+
+async function mfaPickFolder(inputId) {
+  var el = document.getElementById(inputId);
+  var current = el.value || '/mnt/project/ComicCut/anime-pipeline/data/';
+  var path = await openFolderPicker('选择目录', current);
+  if (path) el.value = path;
+}
+
+function mfaSwitchMfaSub(sub) {
+  document.getElementById('mfa-subtab-align').className = sub === 'align' ? 'btn btn-primary' : 'btn btn-secondary';
+  document.getElementById('mfa-subtab-validate').className = sub === 'validate' ? 'btn btn-primary' : 'btn btn-secondary';
+  document.getElementById('mfa-align-panel').style.display = sub === 'align' ? 'block' : 'none';
+  document.getElementById('mfa-validate-panel').style.display = sub === 'validate' ? 'block' : 'none';
+}
+
+async function mfaRunStep(step) {
+  var params = new URLSearchParams();
+  var label = '';
+  var url = '';
+
+  if (step === 'trim') {
+    url = API + '/api/mfa/trim-silence';
+    params.set('input_dir', document.getElementById('mfa-trim-input').value);
+    params.set('output_dir', document.getElementById('mfa-trim-output').value);
+    params.set('max_silence_sec', document.getElementById('mfa-trim-max-silence').value || '1.0');
+    params.set('sil_vol_threshold', document.getElementById('mfa-trim-sil-vol').value || '0.001');
+    params.set('sil_len_threshold', document.getElementById('mfa-trim-sil-len').value || '0.08');
+    params.set('normalize_edges', document.getElementById('mfa-trim-normalize-edges').checked ? 'true' : 'false');
+    params.set('target_edge_silence_sec', document.getElementById('mfa-trim-target-edge').value || '0.5');
+    params.set('edge_silence_threshold', document.getElementById('mfa-trim-edge-threshold').value || '0.001');
+    params.set('edge_frame_length', document.getElementById('mfa-trim-edge-frame').value || '1024');
+    params.set('workers', document.getElementById('mfa-trim-workers').value || '8');
+    label = '步骤 1: 裁剪静音';
+  } else if (step === 'generate') {
+    url = API + '/api/mfa/generate-txt';
+    params.set('jsonl_path', document.getElementById('mfa-gen-jsonl').value);
+    params.set('output_dir', document.getElementById('mfa-gen-output').value);
+    params.set('text_key', document.getElementById('mfa-gen-text-key').value || 'text');
+    params.set('wav_key', document.getElementById('mfa-gen-wav-key').value || 'wav_file');
+    params.set('mode', document.getElementById('mfa-gen-mode').value || 'A');
+    params.set('overwrite', document.getElementById('mfa-gen-overwrite').checked ? 'true' : 'false');
+    params.set('max_merge_tokens', document.getElementById('mfa-gen-max-merge').value || '5');
+    if (document.getElementById('mfa-gen-dict').value) params.set('dict_path', document.getElementById('mfa-gen-dict').value);
+    if (document.getElementById('mfa-gen-oov').value) params.set('oov_report', document.getElementById('mfa-gen-oov').value);
+    label = '步骤 2: 生成TXT';
+  } else if (step === 'align') {
+    url = API + '/api/mfa/align';
+    params.set('txt_dir', document.getElementById('mfa-align-txt-dir').value);
+    params.set('output_dir', document.getElementById('mfa-align-output').value);
+    params.set('dictionary', document.getElementById('mfa-align-dict').value || 'japanese_mfa');
+    params.set('acoustic_model', document.getElementById('mfa-align-acoustic').value || 'japanese_mfa');
+    if (document.getElementById('mfa-align-wav-dir').value) params.set('wav_dir', document.getElementById('mfa-align-wav-dir').value);
+    if (document.getElementById('mfa-align-temp').value) params.set('temp_dir', document.getElementById('mfa-align-temp').value);
+    params.set('num_jobs', document.getElementById('mfa-align-jobs').value || '8');
+    params.set('clean', document.getElementById('mfa-align-clean').checked ? 'true' : 'false');
+    params.set('overwrite', document.getElementById('mfa-align-overwrite').checked ? 'true' : 'false');
+    params.set('output_format', document.getElementById('mfa-align-format').value);
+    params.set('no_tokenization', document.getElementById('mfa-align-no-tokenization').checked ? 'true' : 'false');
+    params.set('no_textgrid_cleanup', document.getElementById('mfa-align-no-cleanup').checked ? 'true' : 'false');
+    label = '步骤 3: MFA Align';
+  } else if (step === 'validate') {
+    url = API + '/api/mfa/validate';
+    params.set('txt_dir', document.getElementById('mfa-val-txt-dir').value);
+    params.set('output_dir', document.getElementById('mfa-val-output').value);
+    params.set('acoustic_model', document.getElementById('mfa-val-acoustic').value || 'japanese_mfa');
+    params.set('dictionary', document.getElementById('mfa-val-dict').value || 'japanese_mfa');
+    if (document.getElementById('mfa-val-wav-dir').value) params.set('wav_dir', document.getElementById('mfa-val-wav-dir').value);
+    if (document.getElementById('mfa-val-temp').value) params.set('temp_dir', document.getElementById('mfa-val-temp').value);
+    params.set('num_jobs', document.getElementById('mfa-val-jobs').value || '8');
+    params.set('clean', document.getElementById('mfa-val-clean').checked ? 'true' : 'false');
+    params.set('overwrite', document.getElementById('mfa-val-overwrite').checked ? 'true' : 'false');
+    label = '步骤 3: MFA Validate';
+  } else if (step === 'postprocess') {
+    url = API + '/api/mfa/postprocess';
+    params.set('jsonl_path', document.getElementById('mfa-post-jsonl').value);
+    params.set('txt_dir', document.getElementById('mfa-post-txt-dir').value);
+    params.set('textgrid_dir', document.getElementById('mfa-post-textgrid-dir').value);
+    params.set('output_dir', document.getElementById('mfa-post-output').value);
+    params.set('filtered_dir', document.getElementById('mfa-post-filtered').value);
+    if (document.getElementById('mfa-post-wav-dir').value) params.set('wav_dir', document.getElementById('mfa-post-wav-dir').value);
+    params.set('text_key', document.getElementById('mfa-post-text-key').value || 'text');
+    params.set('wav_key', document.getElementById('mfa-post-wav-key').value || 'wav_file');
+    params.set('overwrite', document.getElementById('mfa-post-overwrite').checked ? 'true' : 'false');
+    params.set('fix_short_multi_unit', document.getElementById('mfa-post-fix-short').checked ? 'true' : 'false');
+    params.set('filter_suspicious_alignment', document.getElementById('mfa-post-filter-suspicious').checked ? 'true' : 'false');
+    params.set('copy_errors', document.getElementById('mfa-post-copy-errors').checked ? 'true' : 'false');
+    label = '步骤 4: 后处理';
+  }
+
+  if (!url) return;
+
+  try {
+    var resp = await fetch(url + '?' + params.toString(), { method: 'POST' });
+    var data = await resp.json();
+    if (data.status !== 'ok') { toast('启动失败', 'error'); return; }
+    _mfaJobId = data.job_id;
+    document.getElementById('mfa-progress-panel').style.display = 'block';
+    document.getElementById('mfa-progress-title').textContent = label;
+    document.getElementById('mfa-progress-status').textContent = '启动中...';
+    document.getElementById('mfa-progress-pct').textContent = '0%';
+    document.getElementById('mfa-progress-fill').style.width = '0%';
+    startMfaPolling();
+    toast(label + ' 已启动', 'info');
+  } catch(e) { toast('启动失败: ' + e.message, 'error'); }
+}
+
+async function mfaRunAll() {
+  var payload = {
+    trim_input_dir: document.getElementById('mfa-trim-input').value,
+    trim_output_dir: document.getElementById('mfa-trim-output').value,
+    trim_max_silence_sec: parseFloat(document.getElementById('mfa-trim-max-silence').value) || 1.0,
+    trim_sil_vol_threshold: parseFloat(document.getElementById('mfa-trim-sil-vol').value) || 0.001,
+    trim_sil_len_threshold: parseFloat(document.getElementById('mfa-trim-sil-len').value) || 0.08,
+    trim_workers: parseInt(document.getElementById('mfa-trim-workers').value) || 8,
+    trim_normalize_edges: document.getElementById('mfa-trim-normalize-edges').checked,
+    trim_target_edge_silence_sec: parseFloat(document.getElementById('mfa-trim-target-edge').value) || 0.5,
+    trim_edge_silence_threshold: parseFloat(document.getElementById('mfa-trim-edge-threshold').value) || 0.001,
+    trim_edge_frame_length: parseInt(document.getElementById('mfa-trim-edge-frame').value) || 1024,
+
+    gen_jsonl_path: document.getElementById('mfa-gen-jsonl').value,
+    gen_output_dir: document.getElementById('mfa-gen-output').value,
+    gen_text_key: document.getElementById('mfa-gen-text-key').value || 'text',
+    gen_wav_key: document.getElementById('mfa-gen-wav-key').value || 'wav_file',
+    gen_mode: document.getElementById('mfa-gen-mode').value || 'A',
+    gen_overwrite: document.getElementById('mfa-gen-overwrite').checked,
+    gen_dict_path: document.getElementById('mfa-gen-dict').value,
+    gen_max_merge_tokens: parseInt(document.getElementById('mfa-gen-max-merge').value) || 5,
+    gen_oov_report: document.getElementById('mfa-gen-oov').value,
+
+    align_txt_dir: document.getElementById('mfa-align-txt-dir').value,
+    align_wav_dir: document.getElementById('mfa-align-wav-dir').value,
+    align_output_dir: document.getElementById('mfa-align-output').value,
+    align_acoustic_model: document.getElementById('mfa-align-acoustic').value || 'japanese_mfa',
+    align_dictionary: document.getElementById('mfa-align-dict').value || 'japanese_mfa',
+    align_temp_dir: document.getElementById('mfa-align-temp').value,
+    align_num_jobs: parseInt(document.getElementById('mfa-align-jobs').value) || 8,
+    align_clean: document.getElementById('mfa-align-clean').checked,
+    align_overwrite: document.getElementById('mfa-align-overwrite').checked,
+    align_output_format: document.getElementById('mfa-align-format').value,
+    align_no_tokenization: document.getElementById('mfa-align-no-tokenization').checked,
+    align_no_textgrid_cleanup: document.getElementById('mfa-align-no-cleanup').checked,
+
+    post_jsonl_path: document.getElementById('mfa-post-jsonl').value,
+    post_txt_dir: document.getElementById('mfa-post-txt-dir').value,
+    post_textgrid_dir: document.getElementById('mfa-post-textgrid-dir').value,
+    post_output_dir: document.getElementById('mfa-post-output').value,
+    post_filtered_dir: document.getElementById('mfa-post-filtered').value,
+    post_wav_dir: document.getElementById('mfa-post-wav-dir').value,
+    post_text_key: document.getElementById('mfa-post-text-key').value || 'text',
+    post_wav_key: document.getElementById('mfa-post-wav-key').value || 'wav_file',
+    post_overwrite: document.getElementById('mfa-post-overwrite').checked,
+    post_fix_short_multi_unit: document.getElementById('mfa-post-fix-short').checked,
+    post_filter_suspicious_alignment: document.getElementById('mfa-post-filter-suspicious').checked,
+    post_copy_errors: document.getElementById('mfa-post-copy-errors').checked,
+  };
+
+  try {
+    var resp = await fetch(API + '/api/mfa/run-all', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    var data = await resp.json();
+    if (data.status !== 'ok') { toast('启动失败', 'error'); return; }
+    _mfaJobId = data.job_id;
+    document.getElementById('mfa-progress-panel').style.display = 'block';
+    document.getElementById('mfa-progress-title').textContent = '完整管线';
+    document.getElementById('mfa-progress-status').textContent = '启动中...';
+    document.getElementById('mfa-progress-pct').textContent = '0%';
+    document.getElementById('mfa-progress-fill').style.width = '0%';
+    startMfaPolling();
+    toast('完整管线已启动', 'info');
+  } catch(e) { toast('启动失败: ' + e.message, 'error'); }
+}
+
+function startMfaPolling() {
+  stopMfaPolling();
+  _mfaPollTimer = setInterval(pollMfaJob, 2000);
+  pollMfaJob();
+}
+
+function stopMfaPolling() {
+  if (_mfaPollTimer) { clearInterval(_mfaPollTimer); _mfaPollTimer = null; }
+}
+
+async function pollMfaJob() {
+  if (!_mfaJobId) { stopMfaPolling(); return; }
+  try {
+    var resp = await fetch(API + '/api/mfa/job/' + _mfaJobId);
+    if (!resp.ok) { stopMfaPolling(); return; }
+    var job = await resp.json();
+    var pct = job.progress || 0;
+    document.getElementById('mfa-progress-fill').style.width = pct + '%';
+    document.getElementById('mfa-progress-pct').textContent = pct + '%';
+    document.getElementById('mfa-progress-status').textContent = job.current_step || '';
+    document.getElementById('mfa-progress-title').textContent = (job.type || 'MFA任务') + ' - ' + job.status;
+    var stdout = document.getElementById('mfa-stdout');
+    if (stdout && job.stdout) stdout.textContent = job.stdout;
+    if (job.status === 'completed') { stopMfaPolling(); toast('MFA 任务完成', 'success'); loadMfaJobs(); }
+    else if (job.status === 'failed') { stopMfaPolling(); toast('MFA 任务失败', 'error'); loadMfaJobs(); }
+    else if (job.status === 'cancelled') { stopMfaPolling(); toast('任务已取消', 'info'); loadMfaJobs(); }
+  } catch(e) { console.error(e); }
+}
+
+async function loadMfaJobs() {
+  try {
+    var resp = await fetch(API + '/api/mfa/jobs');
+    var data = await resp.json();
+    var jobs = data.jobs || [];
+    var container = document.getElementById('mfa-jobs-list');
+    if (!jobs.length) { container.innerHTML = '<div class="empty-state"><p>暂无任务</p></div>'; return; }
+    var html = '';
+    for (var i = 0; i < jobs.length; i++) {
+      var j = jobs[i];
+      var statusClass = 'status-pending';
+      if (j.status === 'completed') statusClass = 'status-completed';
+      else if (j.status === 'running') statusClass = 'status-running';
+      else if (j.status === 'failed') statusClass = 'status-failed';
+      else if (j.status === 'cancelled' || j.status === 'interrupted') statusClass = 'status-cancelled';
+      html += '<div class="job-card" style="padding:10px 14px;">' +
+        '<div class="job-header">' +
+          '<div><span class="job-title" style="font-size:13px;">' + escapeHtml(j.type || 'MFA') + '</span>' +
+          '<span style="font-size:11px;color:var(--text2);margin-left:8px;">' + escapeHtml(j.job_id) + '</span></div>' +
+          '<div style="display:flex;gap:4px;align-items:center;">' +
+            '<span class="job-status ' + statusClass + '">' + escapeHtml(j.status) + '</span>';
+      if (j.status === 'running' || j.status === 'pending') {
+        html += '<button class="btn btn-secondary" style="font-size:10px;padding:2px 8px;" onclick="mfaCancelJob(\'' + j.job_id + '\')">取消</button>';
+      }
+      html += '</div></div>';
+      html += '<div style="font-size:12px;color:var(--text2);">' + escapeHtml(j.current_step || '') + '</div>';
+      if (j.error) html += '<div style="font-size:11px;color:var(--danger);margin-top:4px;">' + escapeHtml(String(j.error).substring(0, 200)) + '</div>';
+      html += '<div class="progress-bar" style="margin-top:6px;"><div class="progress-fill" style="width:' + (j.progress || 0) + '%;"></div></div>';
+      html += '</div>';
+    }
+    container.innerHTML = html;
+  } catch(e) { console.error(e); }
+}
+
+async function mfaCancelJob(jobId) {
+  try {
+    var resp = await fetch(API + '/api/mfa/job/' + jobId, { method: 'DELETE' });
+    var data = await resp.json();
+    if (data.status === 'ok') { toast('任务已取消', 'info'); loadMfaJobs(); }
+  } catch(e) { toast('取消失败: ' + e.message, 'error'); }
+}
+
 </script>
 </body>
 </html>

@@ -73,10 +73,18 @@ ASR_MODELS = {
         "abbr": "cohere",
         "framework": "transformers",
     },
+    "firered-asr2": {
+        "name": "FireRedASR2-AED",
+        "model_id": "FireRedTeam/FireRedASR2-AED",
+        "description": "FireRedASR2 工业级多合一ASR系统（内置VAD/语种识别/标点），支持中/英/方言/中英混",
+        "languages": ["auto", "zh", "en"],
+        "abbr": "firered2",
+        "framework": "firered",
+    },
 }
 
 # Models used for ASR comparison
-COMPARE_MODELS = ["qwen3-asr", "cohere-transcribe"]
+COMPARE_MODELS = ["qwen3-asr", "cohere-transcribe", "firered-asr2"]
 
 # --- Model singletons ---
 _asr_models: dict[tuple, object] = {}  # keyed by (model_key, device, use_fp16, use_flash_attn)
@@ -235,6 +243,37 @@ def _get_asr_model(model_key="qwen3-asr", device="cuda", use_fp16=True, use_flas
                 **load_kwargs,
             )
             _asr_models[cache_key] = (model, processor)
+        elif model_info.get("framework") == "firered":
+            import config as _cfg
+            models_dir = getattr(_cfg, 'FIRERED_ASR2_MODELS_DIR', os.path.join(DATA_DIR, "models", "firered_asr2"))
+
+            from fireredasr2s import FireRedAsr2System, FireRedAsr2SystemConfig
+            from fireredasr2s.fireredasr2 import FireRedAsr2Config
+            from fireredasr2s.fireredvad import FireRedVadConfig
+            from fireredasr2s.fireredlid import FireRedLidConfig
+            from fireredasr2s.fireredpunc import FireRedPuncConfig
+
+            gpu = device != "cpu"
+            vad_cfg = FireRedVadConfig(use_gpu=gpu)
+            lid_cfg = FireRedLidConfig(use_gpu=gpu)
+            asr_cfg = FireRedAsr2Config(
+                use_gpu=gpu,
+                use_half=use_fp16 and gpu,
+                return_timestamp=True,
+            )
+            punc_cfg = FireRedPuncConfig(use_gpu=gpu)
+
+            sys_cfg = FireRedAsr2SystemConfig(
+                os.path.join(models_dir, "FireRedVAD", "VAD"),
+                os.path.join(models_dir, "FireRedLID"),
+                "aed",
+                os.path.join(models_dir, "FireRedASR2-AED"),
+                os.path.join(models_dir, "FireRedPunc"),
+                vad_cfg, lid_cfg, asr_cfg, punc_cfg,
+                enable_vad=1, enable_lid=1, enable_punc=1,
+            )
+            model = FireRedAsr2System(sys_cfg)
+            _asr_models[cache_key] = model
         else:
             from funasr import AutoModel
             model = AutoModel(
@@ -606,6 +645,39 @@ def _transformers_asr_pipeline(audio_path: str, model_key: str, language: str, d
     return [{"text": text, "start_ms": 0, "end_ms": duration_ms}]
 
 
+def _firered_asr_pipeline(audio_path: str, model_key: str, language: str, device: str) -> list:
+    """Run FireRedASR2 on the full audio file and return timestamped segments.
+
+    FireRedASR2S includes built-in VAD, so it handles segmentation internally.
+    Returns a list of {text, start_ms, end_ms} dicts.
+    """
+    asr_model = _get_asr_model(model_key, device=device)
+    result = asr_model.process(audio_path)
+
+    segments = []
+    for sent in result.get("sentences", []):
+        text = sent.get("text", "").strip()
+        if text:
+            segments.append({
+                "text": text,
+                "start_ms": sent["start_ms"],
+                "end_ms": sent["end_ms"],
+            })
+
+    # Fallback: if sentences is empty, use top-level text + vad_segments_ms
+    if not segments and result.get("text"):
+        vad_segs = result.get("vad_segments_ms", [])
+        full_text = result["text"].strip()
+        if vad_segs and len(vad_segs) == 1:
+            segments.append({
+                "text": full_text,
+                "start_ms": vad_segs[0][0],
+                "end_ms": vad_segs[0][1],
+            })
+
+    return segments
+
+
 def segments_to_srt(segments: list, output_srt: str) -> str:
     """Write segments to an SRT subtitle file. Returns the file path."""
     os.makedirs(os.path.dirname(output_srt), exist_ok=True)
@@ -663,14 +735,22 @@ def run_asr_pipeline(
     if progress_callback:
         progress_callback("loading_models", 7)
 
-    segments = vad_asr_pipeline(
-        audio_path,
-        model_key=model_key,
-        language=language,
-        device=device,
-        progress_callback=progress_callback,
-        hotwords=hotwords,
-    )
+    framework = ASR_MODELS[model_key].get("framework", "funasr")
+    if framework == "nemo":
+        segments = _nemo_asr_pipeline(audio_path, model_key, language, device)
+    elif framework == "transformers":
+        segments = _transformers_asr_pipeline(audio_path, model_key, language, device)
+    elif framework == "firered":
+        segments = _firered_asr_pipeline(audio_path, model_key, language, device)
+    else:
+        segments = vad_asr_pipeline(
+            audio_path,
+            model_key=model_key,
+            language=language,
+            device=device,
+            progress_callback=progress_callback,
+            hotwords=hotwords,
+        )
     t2 = time.time()
 
     # Step 3: Generate SRT
@@ -754,14 +834,22 @@ def run_asr_on_audio(
         if progress_callback:
             progress_callback("loading_models", "加载模型中...")
 
-        segments = vad_asr_pipeline(
-            work_path,
-            model_key=model_key,
-            language=language,
-            device=device,
-            progress_callback=progress_callback,
-            hotwords=hotwords,
-        )
+        framework = ASR_MODELS[model_key].get("framework", "funasr")
+        if framework == "nemo":
+            segments = _nemo_asr_pipeline(work_path, model_key, language, device)
+        elif framework == "transformers":
+            segments = _transformers_asr_pipeline(work_path, model_key, language, device)
+        elif framework == "firered":
+            segments = _firered_asr_pipeline(work_path, model_key, language, device)
+        else:
+            segments = vad_asr_pipeline(
+                work_path,
+                model_key=model_key,
+                language=language,
+                device=device,
+                progress_callback=progress_callback,
+                hotwords=hotwords,
+            )
         t1 = time.time()
 
         if progress_callback:
@@ -926,6 +1014,13 @@ def compare_asr_pipeline(
             )
         elif framework == "transformers":
             segments = _transformers_asr_pipeline(
+                audio_path,
+                model_key=model_key,
+                language=language,
+                device=device,
+            )
+        elif framework == "firered":
+            segments = _firered_asr_pipeline(
                 audio_path,
                 model_key=model_key,
                 language=language,
