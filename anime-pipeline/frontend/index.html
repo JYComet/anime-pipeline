@@ -216,6 +216,19 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
 .fp-drive:hover { background:var(--accent); color:#fff; }
 
 .mfa-input { padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px; }
+.mfa-browser-item {
+  display:flex;align-items:center;gap:8px;padding:7px 12px;
+  cursor:pointer;font-size:13px;border-bottom:1px solid var(--border);
+  transition:background .15s;
+}
+.mfa-browser-item:hover { background:var(--bg3); }
+.mfa-browser-item.dir { color:var(--accent); }
+.mfa-browser-item.file { color:var(--text); }
+.mfa-browser-item.selected { background:rgba(78,204,163,0.15);border-left:3px solid var(--success); }
+.mfa-browser-item .mfa-folder-icon { font-size:16px;flex-shrink:0; }
+.mfa-browser-item .mfa-file-icon { font-size:14px;flex-shrink:0; }
+.mfa-browser-item .mfa-item-name { flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.mfa-browser-item .mfa-item-size { font-size:11px;color:var(--text2);flex-shrink:0; }
 .toast-container { position: fixed; top: 16px; right: 16px; z-index: 1000; display: flex; flex-direction: column; gap: 8px; }
 .toast {
   padding: 12px 20px; border-radius: 8px; font-size: 14px;
@@ -1126,14 +1139,16 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
           <div id="asr-folder-config-hint" style="margin-bottom:10px;padding:8px 12px;border-radius:6px;background:var(--accent);color:#fff;font-size:12px;text-align:center;font-weight:600;">
             ⚙️ 识别参数（模型/语言/热词/设备）请在右侧面板设置 →
           </div>
+          <!-- In-page directory browser -->
           <div style="margin-bottom:12px;">
-            <label style="display:block;font-size:12px;color:var(--text2);margin-bottom:4px;">音频文件夹路径</label>
-            <div style="display:flex;gap:6px;">
-              <input id="asr-folder-path" type="text" placeholder="选择或输入文件夹路径..." style="flex:1;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:12px;">
-              <button class="btn btn-secondary" onclick="browseAsrFolder()" style="font-size:11px;padding:4px 10px;white-space:nowrap;">浏览...</button>
+            <div id="asr-folder-breadcrumb" style="display:flex;align-items:center;gap:6px;margin-bottom:8px;padding:6px 10px;border-radius:6px;background:var(--bg2);border:1px solid var(--border);font-size:12px;">
+              <button class="btn btn-secondary" onclick="asrFolderGoUp()" style="font-size:11px;padding:2px 8px;flex-shrink:0;" id="btn-asr-folder-up" disabled>⬆ 上级</button>
+              <span id="asr-folder-current-path" style="flex:1;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left;">加载中...</span>
             </div>
-            <div id="asr-folder-file-info" style="display:none;margin-top:6px;padding:6px 10px;border-radius:6px;background:var(--bg2);border:1px solid var(--border);font-size:12px;color:var(--text2);">
+            <div id="asr-folder-subdirs" class="file-list" style="max-height:400px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;">
+              <div class="empty-state"><p>加载中...</p></div>
             </div>
+            <div id="asr-folder-file-info" style="display:none;margin-top:6px;padding:6px 10px;border-radius:6px;background:var(--bg2);border:1px solid var(--border);font-size:12px;color:var(--text2);"></div>
             <div id="asr-folder-select-bar" style="display:none;margin-top:6px;align-items:center;gap:8px;">
               <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;">
                 <input type="checkbox" id="asr-folder-select-all-cb" onchange="asrFolderToggleSelectAll()" style="cursor:pointer;">
@@ -1141,7 +1156,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
               </label>
               <span id="asr-folder-selected-count" style="font-size:11px;color:var(--text2);"></span>
             </div>
-            <div id="asr-folder-file-list" class="file-list" style="display:none;max-height:300px;overflow-y:auto;margin-top:4px;border:1px solid var(--border);border-radius:8px;"></div>
+            <div id="asr-folder-file-list" class="file-list" style="display:none;max-height:250px;overflow-y:auto;margin-top:4px;border:1px solid var(--border);border-radius:8px;"></div>
           </div>
 
           <div style="margin-bottom:12px;">
@@ -1650,6 +1665,13 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
         <input id="pv-duration-sec" type="number" value="600" min="10" step="60" style="width:100px;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:13px;">
         <span style="font-size:11px;color:var(--text2);">默认 600 秒 = 10 分钟</span>
       </div>
+      <div id="pv-asr-hotword-config" style="display:none;margin-top:8px;gap:8px;align-items:center;">
+        <label style="font-size:12px;color:var(--text2);white-space:nowrap;">ASR热词:</label>
+        <select id="pv-asr-hotword-select" style="padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;min-width:180px;">
+          <option value="">不使用热词</option>
+        </select>
+        <span id="pv-asr-hotword-preview" style="font-size:11px;color:var(--text2);"></span>
+      </div>
     </div>
 
     <!-- Output directory -->
@@ -1657,6 +1679,12 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
       <span style="font-size:12px;color:var(--text2);white-space:nowrap;">输出目录:</span>
       <input id="pv-output-dir" type="text" placeholder="默认: data/pipelinevideo" style="flex:1;min-width:280px;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px;">
       <button class="btn btn-secondary" onclick="pvBrowseOutputDir()" style="font-size:11px;padding:4px 10px;white-space:nowrap;">浏览</button>
+    </div>
+
+    <!-- Task Queue -->
+    <div id="pv-queue-section" style="display:none;margin-bottom:12px;">
+      <h4 style="margin:0 0 8px 0;font-size:13px;color:var(--text2);">任务队列</h4>
+      <div id="pv-queue-list" style="display:flex;flex-direction:column;gap:8px;"></div>
     </div>
 
     <!-- File list section -->
@@ -1719,7 +1747,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
     <p style="font-size:12px;color:var(--text2);margin-bottom:16px;">预设热词配置，在 ASR 提取时选择使用。热词帮助模型更准确识别特定词汇（如角色名、专有名词等）。</p>
 
     <div id="hw-page-edit" style="display:none;padding:14px;border-radius:8px;background:var(--bg2);border:1px solid var(--border);margin-bottom:16px;">
-      <input type="hidden" id="hw-edit-id" value="">
+
       <div style="margin-bottom:10px;">
         <label style="display:block;font-size:13px;color:var(--text2);margin-bottom:4px;">配置名称</label>
         <input id="hw-edit-name" placeholder="例如: 原神角色" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;">
@@ -1745,6 +1773,42 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
   <!-- MFA 对齐 -->
   <div id="tab-mfa" class="tab">
     <h3 style="margin:0 0 16px 0;">MFA 日语强制对齐</h3>
+
+    <!-- SRT Import Tool -->
+    <details id="mfa-srt-tool" style="margin-bottom:12px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px 18px;">
+      <summary style="cursor:pointer;font-size:14px;font-weight:600;color:var(--success);">🔧 SRT 字幕导入 (生成 JSONL)</summary>
+      <p style="font-size:12px;color:var(--text2);margin:8px 0;">从 SRT 字幕文件提取纯文本，生成 MFA 管线需要的 JSONL 条目。点击文件夹进入，点击 SRT 文件选中后可导入。</p>
+
+      <!-- Directory browser -->
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+        <button id="mfa-srt-back" class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaSrtNavigate('..')" disabled>⬆ 上级</button>
+        <div id="mfa-srt-breadcrumb" style="flex:1;font-size:11px;color:var(--text2);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;"></div>
+        <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaSrtBrowseOther()">浏览其他目录</button>
+      </div>
+      <div id="mfa-srt-file-list" style="max-height:250px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;background:var(--bg);margin-bottom:8px;">
+        <div class="empty-state" style="padding:30px;"><p>加载中...</p></div>
+      </div>
+
+      <!-- Selected file info -->
+      <div id="mfa-srt-selected" style="display:none;padding:8px 12px;background:rgba(78,204,163,0.1);border:1px solid var(--success);border-radius:6px;margin-bottom:8px;font-size:12px;">
+        <span style="color:var(--success);">✓ 已选中: </span><span id="mfa-srt-selected-name" style="color:var(--text);"></span>
+        <button onclick="mfaSrtClearSelection()" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:11px;margin-left:8px;">取消</button>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;">
+        <div><label style="font-size:12px;color:var(--text2);">对应 WAV 文件名</label><input id="mfa-srt-wav-file" class="mfa-input" value="audio.wav" style="width:100%;" placeholder="e.g. 00001.wav"></div>
+        <div><label style="font-size:12px;color:var(--text2);">JSONL 输出路径 (留空同 SRT 目录)</label><input id="mfa-srt-jsonl-path" class="mfa-input" style="width:100%;" placeholder="留空自动生成 generated.jsonl"></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;align-items:center;">
+        <button class="btn btn-success" onclick="mfaSrtImport()" id="btn-mfa-srt-import" disabled>导入到 JSONL</button>
+        <span id="mfa-srt-status" style="font-size:12px;color:var(--text2);"></span>
+      </div>
+      <div id="mfa-srt-preview" style="display:none;margin-top:10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px;">
+        <div style="font-size:11px;color:var(--accent);margin-bottom:4px;">提取的文本预览:</div>
+        <pre id="mfa-srt-preview-text" style="white-space:pre-wrap;word-break:break-all;font-size:13px;margin:0;max-height:120px;overflow-y:auto;"></pre>
+        <div style="font-size:11px;color:var(--text2);margin-top:6px;">JSONL 路径: <span id="mfa-srt-jsonl-out"></span> | 总条目: <span id="mfa-srt-jsonl-count"></span></div>
+      </div>
+    </details>
 
     <!-- Step indicator -->
     <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;" id="mfa-step-indicator">
@@ -2306,12 +2370,13 @@ function switchTab(name) {
   if (name === 'pipelinevideo') {
     pvRenderStepConfig();
     pvRestoreJobs();
+    loadHotwordConfigs();
   }
   if (name === 'hotwords') { loadHotwordConfigs(); }
   if (name === 'denoise') {
     if (!_denoiseJobsRestored) { restoreDenoiseJobs(); _denoiseJobsRestored = true; }
   }
-  if (name === 'mfa') { loadMfaJobs(); }
+  if (name === 'mfa') { loadMfaJobs(); if (!_mfaSrtDir) mfaSrtLoadDir(''); }
 }
 
 // ============================================================
@@ -6854,41 +6919,74 @@ function switchAsrMode(mode) {
   document.getElementById('asr-folder-panel').style.display = isFolder ? 'block' : 'none';
   document.getElementById('asr-mode-video-btn').className = isFolder ? 'btn btn-secondary' : 'btn btn-primary';
   document.getElementById('asr-mode-folder-btn').className = isFolder ? 'btn btn-primary' : 'btn btn-secondary';
-  var cfgPanel = document.getElementById('asr-config-panel');
-  var deviceDiv = document.getElementById('asr-device-select').parentElement;
-  var audioDiv = document.getElementById('btn-asr-play-audio').parentElement.parentElement;
   if (isFolder) {
-    cfgPanel.style.border = '2px solid var(--accent)';
-    cfgPanel.style.borderRadius = '12px';
-    cfgPanel.style.padding = '16px';
-    cfgPanel.style.background = 'var(--bg2)';
-    document.getElementById('asr-current-video').textContent = '⚙️ 文件夹模式 — ASR 识别配置';
-    document.getElementById('asr-current-video').style.color = 'var(--accent)';
-    document.getElementById('btn-asr-run').style.display = 'none';
-    document.getElementById('asr-audio-status').textContent = '批量处理音频文件';
+    document.getElementById('asr-current-video').textContent = '⚙️ ASR 语音识别配置（文件夹模式）';
     loadAsrModels();
-    deviceDiv.style.display = 'none';
-    audioDiv.style.display = 'none';
+    loadFolderBrowser(_asrFolderPath || '');
   } else {
-    cfgPanel.style.border = '';
-    cfgPanel.style.borderRadius = '';
-    cfgPanel.style.padding = '';
-    cfgPanel.style.background = '';
-    document.getElementById('asr-current-video').style.color = '';
     document.getElementById('asr-current-video').textContent = '⚙️ ASR 语音识别配置';
-    document.getElementById('btn-asr-run').style.display = '';
-    document.getElementById('asr-audio-status').textContent = '—';
-    deviceDiv.style.display = '';
-    audioDiv.style.display = '';
   }
 }
 
-async function browseAsrFolder() {
-  var current = document.getElementById('asr-folder-path').value || '/mnt/project/ComicCut/anime-pipeline/data/';
-  var path = await openFolderPicker('选择 ASR 文件夹', current);
-  if (path) {
-    document.getElementById('asr-folder-path').value = path;
-    detectAsrFolderFiles(path);
+async function loadFolderBrowser(path) {
+  if (!path) path = '';
+  try {
+    var resp = await fetch(API + '/api/asr/dir-browse?path=' + encodeURIComponent(path));
+    if (!resp.ok) { console.error('dir-browse failed:', resp.status); return; }
+    var data = await resp.json();
+    _asrFolderPath = data.current_path;
+    _asrFolderFiles = data.audio_files || [];
+    _asrFolderSelected = {};
+    for (var i = 0; i < _asrFolderFiles.length; i++) {
+      _asrFolderSelected[_asrFolderFiles[i].name] = true;
+    }
+
+    // Breadcrumb
+    document.getElementById('asr-folder-current-path').textContent = _asrFolderPath || '/';
+    var upBtn = document.getElementById('btn-asr-folder-up');
+    upBtn.disabled = !data.parent_path;
+
+    // Subdirs list
+    var subdirsHtml = '';
+    if (data.subdirs.length) {
+      for (var i = 0; i < data.subdirs.length; i++) {
+        var subPath = (_asrFolderPath ? _asrFolderPath + '/' + data.subdirs[i] : data.subdirs[i]);
+        subdirsHtml += '<div class="file-item" onclick="loadFolderBrowser(\'' + safeAttr(subPath) + '\')" style="cursor:pointer;display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--accent);">';
+        subdirsHtml += '<span style="font-size:14px;">📁</span>';
+        subdirsHtml += '<span style="font-size:12px;">' + escapeHtml(data.subdirs[i]) + '</span>';
+        subdirsHtml += '</div>';
+      }
+    } else {
+      subdirsHtml = '<div class="empty-state" style="padding:16px;"><p style="font-size:12px;">此目录下没有子文件夹</p></div>';
+    }
+    document.getElementById('asr-folder-subdirs').innerHTML = subdirsHtml;
+
+    // Audio files list
+    var infoEl = document.getElementById('asr-folder-file-info');
+    var barEl = document.getElementById('asr-folder-select-bar');
+    var listEl = document.getElementById('asr-folder-file-list');
+    if (_asrFolderFiles.length) {
+      infoEl.style.display = 'block';
+      var totalMb = 0;
+      for (var i = 0; i < _asrFolderFiles.length; i++) { totalMb += _asrFolderFiles[i].size_mb || 0; }
+      infoEl.textContent = '发现 ' + _asrFolderFiles.length + ' 个音频文件 (' + totalMb.toFixed(1) + ' MB)';
+      barEl.style.display = 'flex';
+      document.getElementById('btn-asr-folder-run').disabled = false;
+      _asrRenderFolderFileList();
+    } else {
+      infoEl.style.display = 'block';
+      infoEl.textContent = data.has_audio ? '' : '此目录下没有音频文件（支持 wav, mp3, flac, m4a, aac, ogg, wma, opus）';
+      barEl.style.display = 'none';
+      listEl.style.display = 'none';
+      document.getElementById('btn-asr-folder-run').disabled = true;
+    }
+  } catch(e) { console.error('loadFolderBrowser:', e); }
+}
+
+function asrFolderGoUp() {
+  if (_asrFolderPath) {
+    var parent = _asrFolderPath.substring(0, _asrFolderPath.lastIndexOf('/'));
+    loadFolderBrowser(parent);
   }
 }
 
@@ -6898,57 +6996,6 @@ async function browseAsrOutputDir() {
   if (path) {
     document.getElementById('asr-folder-output').value = path;
   }
-}
-
-async function detectAsrFolderFiles(folderPath) {
-  if (!folderPath) {
-    document.getElementById('asr-folder-file-info').style.display = 'none';
-    document.getElementById('asr-folder-select-bar').style.display = 'none';
-    document.getElementById('btn-asr-folder-run').disabled = true;
-    return;
-  }
-  try {
-    var resp = await fetch(API + '/api/asr/folder-detect', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: folderPath }),
-    });
-    var data = await resp.json();
-    _asrFolderFiles = data.files || [];
-    _asrFolderPath = folderPath;
-    _asrFolderSelected = {};
-    // Select all by default
-    for (var i = 0; i < _asrFolderFiles.length; i++) {
-      _asrFolderSelected[_asrFolderFiles[i].name] = true;
-    }
-    var infoEl = document.getElementById('asr-folder-file-info');
-    var barEl = document.getElementById('asr-folder-select-bar');
-    var listEl = document.getElementById('asr-folder-file-list');
-    if (data._debug) { console.log('folder-detect debug:', JSON.stringify(data._debug)); }
-
-    if (_asrFolderFiles.length) {
-      infoEl.style.display = 'block';
-      infoEl.textContent = '发现 ' + _asrFolderFiles.length + ' 个音频文件 (' + data.total_size_mb + ' MB)';
-      barEl.style.display = 'flex';
-      document.getElementById('btn-asr-folder-run').disabled = false;
-
-      _asrRenderFolderFileList();
-    } else {
-      infoEl.style.display = 'block';
-      var msg = '未找到音频文件（支持 wav, mp3, flac, m4a, aac, ogg, wma, opus）';
-      if (data._debug) {
-        if (data._debug.error) {
-          msg = '错误: ' + data._debug.error + ' | 路径: ' + (data._debug.path_received || '');
-        } else if (data._debug.raw_entry_count > 0) {
-          msg = '文件夹中有 ' + data._debug.raw_entry_count + ' 个项目，但无匹配的音频文件。前几项: ' + (data._debug.raw_sample || []).join(', ');
-        }
-      }
-      infoEl.textContent = msg;
-      barEl.style.display = 'none';
-      listEl.style.display = 'none';
-      document.getElementById('btn-asr-folder-run').disabled = true;
-    }
-  } catch(e) { console.error(e); }
 }
 
 function _asrRenderFolderFileList() {
@@ -6993,24 +7040,8 @@ function asrFolderToggleItem(cb) {
 }
 
 // Auto-detect when user types/pastes a path
-function initAsrFolderPathInput() {
-  var input = document.getElementById('asr-folder-path');
-  var timer = null;
-  input.addEventListener('input', function() {
-    clearTimeout(timer);
-    var val = this.value.trim();
-    if (val) {
-      timer = setTimeout(function() { detectAsrFolderFiles(val); }, 500);
-    } else {
-      document.getElementById('asr-folder-file-info').style.display = 'none';
-      document.getElementById('asr-folder-select-bar').style.display = 'none';
-      document.getElementById('btn-asr-folder-run').disabled = true;
-    }
-  });
-}
-
 async function runAsrFolder() {
-  var folderPath = document.getElementById('asr-folder-path').value.trim();
+  var folderPath = _asrFolderPath;
   if (!folderPath) { toast('请选择音频文件夹', 'error'); return; }
 
   // Collect selected file names
@@ -7207,9 +7238,8 @@ function playAsrFolderAudio(path, name) {
   toast('正在播放: ' + name, 'info');
 }
 
-// Initialize folder path input listener on page load
+// Load saved settings on page load
 document.addEventListener('DOMContentLoaded', function() {
-  setTimeout(initAsrFolderPathInput, 100);
   // Load saved settings (denoise step defaults, etc.)
   setTimeout(loadSavedSettings, 200);
   // Restore UI state from localStorage
@@ -9181,7 +9211,6 @@ function saveSettings() {
 // ============================================================
 
 var _hotwordConfigs = [];
-var _hotwordDefaultId = null;
 
 function loadHotwordConfigs() {
   fetch(API + '/api/hotwords/configs').then(function(r) { return r.json(); }).then(function(data) {
@@ -9189,6 +9218,7 @@ function loadHotwordConfigs() {
     _hotwordDefaultId = data.default_id || null;
     renderHotwordsPage();
     populateHotwordDropdowns();
+    pvPopulateHotwordDropdown();
   }).catch(function(e) {
     console.error('Failed to load hotword configs:', e);
   });
@@ -9206,25 +9236,22 @@ function renderHotwordsPage() {
   var html = '';
   for (var i = 0; i < _hotwordConfigs.length; i++) {
     var c = _hotwordConfigs[i];
-    var isDefault = c.id === _hotwordDefaultId;
-    html += '<div style="padding:14px 18px;border-radius:8px;background:var(--bg2);border:1px solid ' + (isDefault ? 'var(--accent)' : 'var(--border)') + ';display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">';
+    var encName = encodeURIComponent(c.name);
+    html += '<div style="padding:14px 18px;border-radius:8px;background:var(--bg2);border:1px solid var(--border);display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">';
     html += '<div style="flex:1;min-width:0;">';
-    html += '<div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;">' + escapeHtml(c.name) + (isDefault ? ' <span style="color:var(--accent);font-size:11px;">默认</span>' : '') + '</div>';
+    html += '<div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;">' + escapeHtml(c.name) + '</div>';
     html += '<div style="font-size:12px;color:var(--text2);word-break:break-all;">' + escapeHtml(c.hotwords) + '</div>';
     html += '</div>';
     html += '<div style="display:flex;gap:6px;flex-shrink:0;">';
-    if (!isDefault) {
-      html += '<button class="btn btn-secondary" onclick="setDefaultHotword(\'' + c.id + '\')" style="font-size:11px;padding:4px 10px;">设为默认</button>';
-    }
-    html += '<button class="btn btn-secondary" onclick="editHotwordConfig(\'' + c.id + '\')" style="font-size:11px;padding:4px 10px;">编辑</button>';
-    html += '<button class="btn btn-secondary" onclick="deleteHotwordConfig(\'' + c.id + '\')" style="font-size:11px;padding:4px 10px;color:var(--danger);">删除</button>';
+    html += '<button class="btn btn-secondary" onclick="editHotwordConfig(\'' + encName + '\')" style="font-size:11px;padding:4px 10px;">编辑</button>';
+    html += '<button class="btn btn-secondary" onclick="deleteHotwordConfig(\'' + encName + '\')" style="font-size:11px;padding:4px 10px;color:var(--danger);">删除</button>';
     html += '</div></div>';
   }
   listEl.innerHTML = html;
 }
 
 function populateHotwordDropdowns() {
-  var prefixList = ['asr', 'asr-folder', 'cmp'];
+  var prefixList = ['asr', 'cmp'];
   for (var p = 0; p < prefixList.length; p++) {
     var sel = document.getElementById(prefixList[p] + '-hotwords-select');
     if (!sel) continue;
@@ -9232,25 +9259,11 @@ function populateHotwordDropdowns() {
     var opts = '<option value="">不使用热词</option>';
     for (var i = 0; i < _hotwordConfigs.length; i++) {
       var c = _hotwordConfigs[i];
-      var isDefault = c.id === _hotwordDefaultId;
-      opts += '<option value="' + safeAttr(c.id) + '"' + ((c.id === currentVal) || (!currentVal && isDefault) ? ' selected' : '') + '>' + escapeHtml(c.name) + '</option>';
+      var selected = c.name === currentVal ? ' selected' : '';
+      opts += '<option value="' + safeAttr(c.name) + '"' + selected + '>' + escapeHtml(c.name) + '</option>';
     }
     opts += '<option value="__custom__">自定义输入</option>';
     sel.innerHTML = opts;
-
-    // Auto-fill text input with default config's hotwords
-    if (_hotwordDefaultId && !currentVal) {
-      for (var i = 0; i < _hotwordConfigs.length; i++) {
-        if (_hotwordConfigs[i].id === _hotwordDefaultId) {
-          sel.value = _hotwordDefaultId;
-          var input = document.getElementById(prefixList[p] + '-hotwords');
-          if (input && !input.value.trim()) {
-            input.value = _hotwordConfigs[i].hotwords;
-          }
-          break;
-        }
-      }
-    }
   }
 }
 
@@ -9270,7 +9283,7 @@ function onHotwordSelect(prefix) {
     return;
   }
   for (var i = 0; i < _hotwordConfigs.length; i++) {
-    if (_hotwordConfigs[i].id === val) {
+    if (_hotwordConfigs[i].name === val) {
       input.value = _hotwordConfigs[i].hotwords;
       break;
     }
@@ -9279,17 +9292,16 @@ function onHotwordSelect(prefix) {
 
 function addHotwordConfig() {
   document.getElementById('hw-page-edit').style.display = 'block';
-  document.getElementById('hw-edit-id').value = '';
   document.getElementById('hw-edit-name').value = '';
   document.getElementById('hw-edit-hotwords').value = '';
   document.getElementById('hw-edit-name').focus();
 }
 
-function editHotwordConfig(id) {
+function editHotwordConfig(name) {
+  name = decodeURIComponent(name);
   for (var i = 0; i < _hotwordConfigs.length; i++) {
-    if (_hotwordConfigs[i].id === id) {
+    if (_hotwordConfigs[i].name === name) {
       document.getElementById('hw-page-edit').style.display = 'block';
-      document.getElementById('hw-edit-id').value = id;
       document.getElementById('hw-edit-name').value = _hotwordConfigs[i].name;
       document.getElementById('hw-edit-hotwords').value = _hotwordConfigs[i].hotwords;
       document.getElementById('hw-edit-name').focus();
@@ -9300,29 +9312,24 @@ function editHotwordConfig(id) {
 
 function cancelEditHotword() {
   document.getElementById('hw-page-edit').style.display = 'none';
-  document.getElementById('hw-edit-id').value = '';
   document.getElementById('hw-edit-name').value = '';
   document.getElementById('hw-edit-hotwords').value = '';
 }
 
 function saveHotwordConfig() {
-  var id = document.getElementById('hw-edit-id').value.trim();
   var name = document.getElementById('hw-edit-name').value.trim();
   var hotwords = document.getElementById('hw-edit-hotwords').value.trim();
 
   if (!name) { toast('请输入配置名称', 'error'); return; }
   if (!hotwords) { toast('请输入热词', 'error'); return; }
 
-  var payload = { name: name, hotwords: hotwords };
-  if (id) payload.id = id;
-
   fetch(API + '/api/hotwords/configs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ name: name, hotwords: hotwords }),
   }).then(function(r) { return r.json(); }).then(function(data) {
     if (data.status === 'ok') {
-      toast(id ? '热词配置已更新' : '热词配置已创建', 'success');
+      toast('热词配置已保存', 'success');
       cancelEditHotword();
       loadHotwordConfigs();
     } else {
@@ -9333,9 +9340,10 @@ function saveHotwordConfig() {
   });
 }
 
-function deleteHotwordConfig(id) {
-  if (!confirm('确定要删除此热词配置吗？')) return;
-  fetch(API + '/api/hotwords/configs/' + encodeURIComponent(id), { method: 'DELETE' })
+function deleteHotwordConfig(name) {
+  name = decodeURIComponent(name);
+  if (!confirm('确定删除热词配置「' + name + '」吗？')) return;
+  fetch(API + '/api/hotwords/configs/' + encodeURIComponent(name), { method: 'DELETE' })
     .then(function(r) { return r.json(); }).then(function(data) {
       if (data.status === 'ok') {
         toast('热词配置已删除', 'success');
@@ -9345,22 +9353,6 @@ function deleteHotwordConfig(id) {
       }
     }).catch(function(e) {
       toast('删除失败: ' + e.message, 'error');
-    });
-}
-
-function setDefaultHotword(id) {
-  fetch(API + '/api/hotwords/default/' + encodeURIComponent(id), { method: 'PUT' })
-    .then(function(r) { return r.json(); }).then(function(data) {
-      if (data.status === 'ok') {
-        _hotwordDefaultId = id;
-        renderHotwordsPage();
-        populateHotwordDropdowns();
-        toast('已设为默认配置', 'success');
-      } else {
-        toast('设置失败', 'error');
-      }
-    }).catch(function(e) {
-      toast('设置失败: ' + e.message, 'error');
     });
 }
 
@@ -9463,6 +9455,17 @@ function pvRenderStepConfig() {
     }
     durCfg.style.display = dsEnabled ? 'flex' : 'none';
   }
+
+  // Show/hide ASR hotword config when asr step is toggled
+  var hwCfg = document.getElementById('pv-asr-hotword-config');
+  if (hwCfg) {
+    var asrEnabled = false;
+    for (var k = 0; k < _pvSteps.length; k++) {
+      if (_pvSteps[k].key === 'asr' && _pvSteps[k].enabled) { asrEnabled = true; break; }
+    }
+    hwCfg.style.display = asrEnabled ? 'flex' : 'none';
+    if (asrEnabled) pvPopulateHotwordDropdown();
+  }
 }
 
 function _savePvSteps() {
@@ -9478,6 +9481,36 @@ function pvResetSteps() {
   _pvSteps = JSON.parse(JSON.stringify(PV_STEP_DEFAULTS));
   _savePvSteps();
   pvRenderStepConfig();
+}
+
+function pvPopulateHotwordDropdown() {
+  var sel = document.getElementById('pv-asr-hotword-select');
+  if (!sel) return;
+  var currentVal = sel.getAttribute('data-selected') || '';
+  var opts = '<option value="">不使用热词</option>';
+  for (var i = 0; i < _hotwordConfigs.length; i++) {
+    var c = _hotwordConfigs[i];
+    var selected = c.name === currentVal ? ' selected' : '';
+    opts += '<option value="' + safeAttr(c.name) + '"' + selected + '>' + escapeHtml(c.name) + '</option>';
+  }
+  sel.innerHTML = opts;
+  sel.setAttribute('data-selected', currentVal);
+
+  sel.onchange = function() {
+    var name = sel.value;
+    var preview = document.getElementById('pv-asr-hotword-preview');
+    if (!name) { preview.textContent = ''; return; }
+    for (var i = 0; i < _hotwordConfigs.length; i++) {
+      if (_hotwordConfigs[i].name === name) {
+        var hw = _hotwordConfigs[i].hotwords;
+        preview.textContent = hw.length > 50 ? hw.substring(0, 50) + '...' : hw;
+        sel.setAttribute('data-selected', name);
+        return;
+      }
+    }
+    preview.textContent = '';
+  };
+  if (sel.value) sel.onchange();
 }
 
 function pvGetEnabledSteps() {
@@ -9904,6 +9937,10 @@ function pvStartPipeline() {
       _pvSteps[d].config = _pvSteps[d].config || {};
       _pvSteps[d].config.segment_duration = parseInt(document.getElementById('pv-duration-sec').value) || 600;
     }
+    if (_pvSteps[d].key === 'asr' && _pvSteps[d].enabled) {
+      _pvSteps[d].config = _pvSteps[d].config || {};
+      _pvSteps[d].config.hotword_config = document.getElementById('pv-asr-hotword-select').value || '';
+    }
   }
   var stepsConfig = pvGetEnabledSteps();
   var outputDir = document.getElementById('pv-output-dir').value.trim();
@@ -10045,6 +10082,155 @@ function pvOnComplete(job) {
 // ============================================================
 var _mfaJobId = null;
 var _mfaPollTimer = null;
+
+// -- SRT Import (directory browser) ---
+var _mfaSrtDir = '';
+var _mfaSrtSelected = '';
+var _mfaSrtSelectedName = '';
+
+async function mfaSrtLoadDir(path) {
+  var container = document.getElementById('mfa-srt-file-list');
+  container.innerHTML = '<div class="empty-state" style="padding:30px;"><p>加载中...</p></div>';
+  try {
+    var resp = await fetch(API + '/api/mfa/browse-dir?path=' + encodeURIComponent(path || ''));
+    var data = await resp.json();
+    _mfaSrtDir = data.path;
+
+    // Breadcrumb
+    var bread = document.getElementById('mfa-srt-breadcrumb');
+    var parts = data.path.split('/').filter(function(p) { return p; });
+    var bc = '';
+    var cum = '';
+    for (var i = 0; i < parts.length; i++) {
+      cum += '/' + parts[i];
+      if (i > 0) bc += ' / ';
+      bc += '<span style="cursor:pointer;color:var(--accent);" onclick="mfaSrtNavigate(\'' + cum.replace(/'/g, "\\'") + '\')">' + escapeHtml(parts[i]) + '</span>';
+    }
+    bread.innerHTML = bc || '/';
+
+    // Back button
+    document.getElementById('mfa-srt-back').disabled = !data.parent;
+
+    // Render folders + files
+    var html = '';
+    var entries = data.folders || [];
+    for (var j = 0; j < entries.length; j++) {
+      var e = entries[j];
+      html += '<div class="mfa-browser-item dir" onclick="mfaSrtNavigate(\'' + e.path.replace(/'/g, "\\'") + '\')">' +
+        '<span class="mfa-folder-icon">📁</span>' +
+        '<span class="mfa-item-name">' + escapeHtml(e.name) + '</span>' +
+      '</div>';
+    }
+    var files = data.files || [];
+    for (var k = 0; k < files.length; k++) {
+      var f = files[k];
+      var selClass = (_mfaSrtSelected === f.path) ? ' selected' : '';
+      html += '<div class="mfa-browser-item file' + selClass + '" onclick="mfaSrtSelectFile(\'' + f.path.replace(/'/g, "\\'") + '\', \'' + escapeHtml(f.name).replace(/'/g, "\\'") + '\')">' +
+        '<span class="mfa-file-icon">📄</span>' +
+        '<span class="mfa-item-name">' + escapeHtml(f.name) + '</span>' +
+        '<span class="mfa-item-size">' + f.size_kb + ' KB</span>' +
+      '</div>';
+    }
+    if (!html) html = '<div class="empty-state" style="padding:20px;"><p>此目录下没有 SRT 文件</p></div>';
+    container.innerHTML = html;
+  } catch(e) {
+    container.innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
+  }
+}
+
+function mfaSrtNavigate(path) {
+  if (path === '..') {
+    // Go to parent
+    mfaSrtLoadDir('');
+    return;
+  }
+  // Reset selection when navigating
+  _mfaSrtSelected = '';
+  _mfaSrtSelectedName = '';
+  mfaSrtUpdateSelectionUI();
+  mfaSrtLoadDir(path);
+}
+
+function mfaSrtSelectFile(path, name) {
+  _mfaSrtSelected = path;
+  _mfaSrtSelectedName = name;
+  mfaSrtUpdateSelectionUI();
+  // Re-render to highlight
+  mfaSrtLoadDir(_mfaSrtDir);
+}
+
+function mfaSrtClearSelection() {
+  _mfaSrtSelected = '';
+  _mfaSrtSelectedName = '';
+  mfaSrtUpdateSelectionUI();
+  mfaSrtLoadDir(_mfaSrtDir);
+}
+
+function mfaSrtUpdateSelectionUI() {
+  var selDiv = document.getElementById('mfa-srt-selected');
+  var selName = document.getElementById('mfa-srt-selected-name');
+  var importBtn = document.getElementById('btn-mfa-srt-import');
+  if (_mfaSrtSelected) {
+    selDiv.style.display = 'block';
+    selName.textContent = _mfaSrtSelectedName || _mfaSrtSelected;
+    importBtn.disabled = false;
+    importBtn.style.opacity = '1';
+  } else {
+    selDiv.style.display = 'none';
+    importBtn.disabled = true;
+    importBtn.style.opacity = '0.5';
+  }
+}
+
+async function mfaSrtBrowseOther() {
+  var current = _mfaSrtDir || '/mnt/project/ComicCut/anime-pipeline/data/asr/folder_output/';
+  var path = await openFolderPicker('选择目录', current);
+  if (path) {
+    _mfaSrtSelected = '';
+    _mfaSrtSelectedName = '';
+    mfaSrtUpdateSelectionUI();
+    mfaSrtLoadDir(path);
+  }
+}
+
+async function mfaSrtImport() {
+  if (!_mfaSrtSelected) { toast('请先选择一个 SRT 文件', 'info'); return; }
+  var wavFile = document.getElementById('mfa-srt-wav-file').value.trim();
+  if (!wavFile) { toast('请输入 WAV 文件名', 'info'); return; }
+  var jsonlPath = document.getElementById('mfa-srt-jsonl-path').value.trim();
+
+  var url = API + '/api/mfa/srt-to-jsonl?' +
+    'srt_path=' + encodeURIComponent(_mfaSrtSelected) +
+    '&wav_file=' + encodeURIComponent(wavFile) +
+    '&output_jsonl=' + encodeURIComponent(jsonlPath);
+
+  var btn = document.getElementById('btn-mfa-srt-import');
+  btn.disabled = true;
+  btn.textContent = '导入中...';
+  document.getElementById('mfa-srt-status').textContent = '';
+
+  try {
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    if (!resp.ok) { toast('导入失败: ' + (data.detail || resp.status), 'error'); return; }
+
+    document.getElementById('mfa-srt-preview').style.display = 'block';
+    document.getElementById('mfa-srt-preview-text').textContent = data.text_preview || '';
+    document.getElementById('mfa-srt-jsonl-out').textContent = data.jsonl_path || '';
+    document.getElementById('mfa-srt-jsonl-count').textContent = data.jsonl_total_entries || 0;
+    document.getElementById('mfa-srt-status').textContent = '导入成功! ' + data.text_lines + ' 行文本 → ' + data.jsonl_total_entries + ' 条记录';
+
+    var genJsonl = document.getElementById('mfa-gen-jsonl');
+    if (!genJsonl.value && data.jsonl_path) genJsonl.value = data.jsonl_path;
+
+    toast('SRT 导入成功，JSONL 已有 ' + data.jsonl_total_entries + ' 条记录', 'success');
+  } catch(e) {
+    toast('导入失败: ' + e.message, 'error');
+  } finally {
+    mfaSrtUpdateSelectionUI();
+    btn.textContent = '导入到 JSONL';
+  }
+}
 
 function mfaToggleTrimEdges() {
   var on = document.getElementById('mfa-trim-normalize-edges').checked;

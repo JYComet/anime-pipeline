@@ -81,10 +81,25 @@ ASR_MODELS = {
         "abbr": "firered2",
         "framework": "firered",
     },
+    "paraformer": {
+        "name": "Paraformer-Large",
+        "model_id": "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+        "description": "阿里 Paraformer 非自回归中文ASR，推理极快（FunASR）",
+        "languages": ["zh"],
+        "abbr": "paraformer",
+    },
+    "whisper-v3": {
+        "name": "Whisper Large v3",
+        "model_id": "openai/whisper-large-v3",
+        "description": "OpenAI Whisper v3 多语言ASR，支持99种语言，高精度",
+        "languages": ["auto", "zh", "ja", "en", "ko", "yue", "fr", "de", "es", "pt", "it", "nl", "pl", "ar", "vi", "ru", "th"],
+        "abbr": "whisper3",
+        "framework": "whisper",
+    },
 }
 
 # Models used for ASR comparison
-COMPARE_MODELS = ["qwen3-asr", "cohere-transcribe", "firered-asr2"]
+COMPARE_MODELS = ["qwen3-asr", "cohere-transcribe", "firered-asr2", "paraformer", "whisper-v3"]
 
 # --- Model singletons ---
 _asr_models: dict[tuple, object] = {}  # keyed by (model_key, device, use_fp16, use_flash_attn)
@@ -225,7 +240,7 @@ def _get_asr_model(model_key="qwen3-asr", device="cuda", use_fp16=True, use_flas
                 except Exception:
                     pass
             _asr_models[cache_key] = model
-        elif model_info.get("framework") == "transformers":
+        elif model_info.get("framework") in ("transformers", "whisper"):
             from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
 
             load_kwargs = {"trust_remote_code": True}
@@ -288,18 +303,19 @@ def _get_asr_model(model_key="qwen3-asr", device="cuda", use_fp16=True, use_flas
         try:
             if model_key in ("qwen3-asr",):
                 model.model = torch.compile(model.model, mode="reduce-overhead")
-            elif model_info.get("framework") == "nemo":
-                model = torch.compile(model, mode="reduce-overhead")
-            elif model_info.get("framework") == "transformers":
+            elif model_info.get("framework") in ("nemo", "transformers", "whisper"):
                 compiled = torch.compile(model, mode="reduce-overhead")
-                _asr_models[cache_key] = (compiled, processor)
+                if model_info.get("framework") in ("transformers", "whisper"):
+                    _asr_models[cache_key] = (compiled, processor)
+                else:
+                    _asr_models[cache_key] = compiled
         except Exception:
             try:
                 if model_key in ("qwen3-asr",):
                     model.model = torch.compile(model.model, mode="default")
-                elif model_info.get("framework") in ("nemo", "transformers"):
+                elif model_info.get("framework") in ("nemo", "transformers", "whisper"):
                     compiled = torch.compile(model, mode="default")
-                    if model_info.get("framework") == "transformers":
+                    if model_info.get("framework") in ("transformers", "whisper"):
                         _asr_models[cache_key] = (compiled, processor)
                     else:
                         _asr_models[cache_key] = compiled
@@ -645,6 +661,44 @@ def _transformers_asr_pipeline(audio_path: str, model_key: str, language: str, d
     return [{"text": text, "start_ms": 0, "end_ms": duration_ms}]
 
 
+def _whisper_asr_pipeline(audio_path: str, model_key: str, language: str, device: str) -> list:
+    """Run OpenAI Whisper via HuggingFace transformers on the full audio file.
+
+    Whisper handles feature extraction and language detection internally.
+    Returns a single-segment result with the full transcription text.
+    """
+    import librosa
+
+    duration_ms = int(get_audio_duration(audio_path) * 1000)
+    model, processor = _get_asr_model(model_key, device=device)
+
+    audio, sr = librosa.load(audio_path, sr=16000, dtype=np.float32)
+    if len(audio) < sr * 0.1:
+        return []
+
+    inputs = processor(audio, sampling_rate=16000, return_tensors="pt")
+    input_features = inputs.input_features
+    if hasattr(model, 'device'):
+        input_features = input_features.to(model.device, dtype=model.dtype)
+
+    gen_kwargs = {"max_new_tokens": 448}
+    if language and language != "auto":
+        try:
+            gen_kwargs["forced_decoder_ids"] = processor.get_decoder_prompt_ids(
+                language=language, task="transcribe"
+            )
+        except Exception:
+            pass  # fall back to auto-detect
+
+    with torch.no_grad():
+        predicted_ids = model.generate(input_features, **gen_kwargs)
+    text = processor.decode(predicted_ids[0], skip_special_tokens=True).strip()
+
+    if not text:
+        return []
+    return [{"text": text, "start_ms": 0, "end_ms": duration_ms}]
+
+
 def _firered_asr_pipeline(audio_path: str, model_key: str, language: str, device: str) -> list:
     """Run FireRedASR2 on the full audio file and return timestamped segments.
 
@@ -740,6 +794,8 @@ def run_asr_pipeline(
         segments = _nemo_asr_pipeline(audio_path, model_key, language, device)
     elif framework == "transformers":
         segments = _transformers_asr_pipeline(audio_path, model_key, language, device)
+    elif framework == "whisper":
+        segments = _whisper_asr_pipeline(audio_path, model_key, language, device)
     elif framework == "firered":
         segments = _firered_asr_pipeline(audio_path, model_key, language, device)
     else:

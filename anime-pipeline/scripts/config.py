@@ -125,7 +125,7 @@ MFA_TEMP_DIR = os.path.join(COMICUT_ROOT, "demo", "models", "temp")
 MFA_DICT_PATH = os.path.join(MFA_MODELS_DIR, "pretrained_models", "dictionary", "japanese_mfa.dict")
 
 # --- Hotword configurations ---
-HOTWORDS_FILE = os.path.join(DATA_DIR, "hotwords.json")
+HOTWORDS_DIR = os.path.join(DATA_DIR, "hotwords")
 
 # --- Settings overrides ---
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")

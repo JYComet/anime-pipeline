@@ -3038,105 +3038,54 @@ def save_settings(payload: dict = Body(...)):
 # Hotword Configurations API
 # ============================================================
 
-import time as _time
-from config import HOTWORDS_FILE
+from config import HOTWORDS_DIR
 
 
-def _load_hotwords_configs() -> dict:
-    """Load hotword configurations from disk. Returns {configs: [...], default_id: str|None}."""
-    if not os.path.exists(HOTWORDS_FILE):
-        return {"configs": [], "default_id": None}
-    try:
-        with open(HOTWORDS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {"configs": [], "default_id": None}
-
-
-def _save_hotwords_configs(data: dict):
-    """Save hotword configurations to disk."""
-    os.makedirs(os.path.dirname(HOTWORDS_FILE), exist_ok=True)
-    tmp = HOTWORDS_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, HOTWORDS_FILE)
-
-
-_hotwords_lock = threading.RLock()
+def _list_hotword_configs():
+    """List hotword config files. Returns [{name, hotwords}, ...]."""
+    configs = []
+    os.makedirs(HOTWORDS_DIR, exist_ok=True)
+    for fname in sorted(os.listdir(HOTWORDS_DIR)):
+        if fname.endswith('.txt'):
+            name = fname[:-4]
+            path = os.path.join(HOTWORDS_DIR, fname)
+            with open(path, 'r', encoding='utf-8') as f:
+                configs.append({"name": name, "hotwords": f.read().strip()})
+    return configs
 
 
 @app.get("/api/hotwords/configs")
 def list_hotwords_configs():
     """List all hotword configurations."""
-    data = _load_hotwords_configs()
-    return {"configs": data.get("configs", []), "default_id": data.get("default_id")}
+    return {"configs": _list_hotword_configs()}
 
 
 @app.post("/api/hotwords/configs")
 def save_hotwords_config(payload: dict = Body(...)):
-    """Create or update a hotword configuration. Provide 'id' to update, omit to create."""
-    with _hotwords_lock:
-        data = _load_hotwords_configs()
-        configs = data.get("configs", [])
-        cfg_id = payload.get("id")
-        name = (payload.get("name") or "").strip()
-        hotwords = (payload.get("hotwords") or "").strip()
+    """Create or update a hotword configuration. Uses name as filename."""
+    name = (payload.get("name") or "").strip()
+    hotwords = (payload.get("hotwords") or "").strip()
 
-        if not name:
-            raise HTTPException(status_code=400, detail="名称不能为空")
-        if not hotwords:
-            raise HTTPException(status_code=400, detail="热词不能为空")
+    if not name:
+        raise HTTPException(status_code=400, detail="\u540d\u79f0\u4e0d\u80fd\u4e3a\u7a7a")
+    if not hotwords:
+        raise HTTPException(status_code=400, detail="\u70ed\u8bcd\u4e0d\u80fd\u4e3a\u7a7a")
 
-        if cfg_id:
-            # Update existing
-            for c in configs:
-                if c["id"] == cfg_id:
-                    c["name"] = name
-                    c["hotwords"] = hotwords
-                    break
-            else:
-                raise HTTPException(status_code=404, detail="配置不存在")
-        else:
-            # Create new
-            cfg_id = uuid.uuid4().hex[:12]
-            configs.append({
-                "id": cfg_id,
-                "name": name,
-                "hotwords": hotwords,
-                "created_at": _time.time(),
-            })
-
-        data["configs"] = configs
-        _save_hotwords_configs(data)
-    return {"status": "ok", "id": cfg_id}
-
-
-@app.delete("/api/hotwords/configs/{config_id}")
-def delete_hotwords_config(config_id: str):
-    """Delete a hotword configuration. Clears default_id if it matches."""
-    with _hotwords_lock:
-        data = _load_hotwords_configs()
-        configs = data.get("configs", [])
-        configs = [c for c in configs if c["id"] != config_id]
-        data["configs"] = configs
-        if data.get("default_id") == config_id:
-            data["default_id"] = None
-        _save_hotwords_configs(data)
+    os.makedirs(HOTWORDS_DIR, exist_ok=True)
+    path = os.path.join(HOTWORDS_DIR, name + ".txt")
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(hotwords)
     return {"status": "ok"}
 
 
-@app.put("/api/hotwords/default/{config_id}")
-def set_default_hotwords_config(config_id: str):
-    """Set a hotword configuration as the default."""
-    with _hotwords_lock:
-        data = _load_hotwords_configs()
-        configs = data.get("configs", [])
-        if not any(c["id"] == config_id for c in configs):
-            raise HTTPException(status_code=404, detail="配置不存在")
-        data["default_id"] = config_id
-        _save_hotwords_configs(data)
+@app.delete("/api/hotwords/configs/{name}")
+def delete_hotwords_config(name: str):
+    """Delete a hotword configuration file by name."""
+    path = os.path.join(HOTWORDS_DIR, name + ".txt")
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="\u914d\u7f6e\u4e0d\u5b58\u5728")
+    os.remove(path)
     return {"status": "ok"}
-
 
 @app.get("/api/browse-folder")
 def browse_folder_generic(title: str = "选择文件夹", initialdir: str = ""):
@@ -4306,6 +4255,52 @@ def delete_asr_result(path: str = Query(..., description="Path to SRT file to de
     return {"deleted": deleted}
 
 
+@app.get("/api/asr/dir-browse")
+def browse_asr_directory(path: str = Query("")):
+    """Browse a directory for sub-folders and audio files. Used by the in-page file browser."""
+    if not path:
+        path = DATA_DIR
+    # Security: resolve real path and ensure it's within DATA_DIR
+    real_path = os.path.realpath(path)
+    real_data = os.path.realpath(DATA_DIR)
+    if not real_path.startswith(real_data + os.sep) and real_path != real_data:
+        raise HTTPException(status_code=403, detail="Access denied: path outside data directory")
+    if not os.path.isdir(real_path):
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    parent_path = os.path.dirname(real_path)
+    # Don't allow going above DATA_DIR
+    if not parent_path.startswith(real_data + os.sep) and parent_path != real_data:
+        parent_path = real_data if real_path != real_data else ""
+
+    entries = sorted(os.listdir(real_path))
+    subdirs = []
+    audio_files = []
+    audio_exts = {".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg", ".wma", ".opus", ".wv"}
+
+    for entry in entries:
+        full = os.path.join(real_path, entry)
+        if os.path.isdir(full) and not entry.startswith('.'):
+            subdirs.append(entry)
+        elif os.path.isfile(full):
+            ext = os.path.splitext(entry)[1].lower()
+            if ext in audio_exts:
+                size = os.path.getsize(full)
+                audio_files.append({
+                    "name": entry,
+                    "ext": ext,
+                    "size_mb": round(size / 1024 / 1024, 1),
+                })
+
+    return {
+        "current_path": real_path,
+        "parent_path": parent_path,
+        "subdirs": subdirs,
+        "audio_files": audio_files,
+        "has_audio": len(audio_files) > 0,
+    }
+
+
 @app.post("/api/asr/folder-detect")
 def detect_asr_folder_files(payload: dict = Body(...)):
     """Scan a folder for audio files and return the list. Uses POST to avoid URL encoding issues with paths."""
@@ -5355,6 +5350,29 @@ def pv_resume_job(job_id: str):
     return {"status": "ok", "message": "已恢复执行"}
 
 
+@app.delete("/api/pipeline-video/job/{job_id}")
+def pv_delete_job(job_id: str):
+    """Delete a pipeline video job. Cancels if running, then removes data."""
+    import shutil
+    with _pipeline_video_lock:
+        job = _pipeline_video_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    # Cancel if running
+    if job.status == "running":
+        job.cancelled = True
+        job.status = "cancelled"
+    # Remove from dict and persist
+    with _pipeline_video_lock:
+        _pipeline_video_jobs.pop(job_id, None)
+        _save_pv_jobs()
+    # Remove associated temp directory
+    temp_dir = os.path.join(TEMP_DIR, "pipeline_video", job_id)
+    if os.path.isdir(temp_dir):
+        shutil.rmtree(temp_dir, ignore_errors=True)
+    return {"status": "ok", "message": "任务已删除"}
+
+
 # ============================================================
 # Pipeline Video — background processing
 # ============================================================
@@ -5736,7 +5754,18 @@ def _run_pipeline_video(job_id: str):
                 f.progress = float(msg) if isinstance(msg, (int, float)) else f.progress
 
         try:
-            from config import ASR_DEFAULT_HOTWORDS as _hotwords
+            # Resolve hotwords: check step config first, then settings default
+            asr_cfg = step_cfg_map.get("asr", {})
+            hw_cfg_name = (asr_cfg.get("config", {}) or {}).get("hotword_config", "")
+            _hotwords = ""
+            if hw_cfg_name:
+                hw_path = os.path.join(HOTWORDS_DIR, hw_cfg_name + ".txt")
+                if os.path.exists(hw_path):
+                    with open(hw_path, "r", encoding="utf-8") as _hf:
+                        _hotwords = _hf.read().strip()
+            if not _hotwords:
+                from config import ASR_DEFAULT_HOTWORDS as _hw_default
+                _hotwords = _hw_default
             result = run_asr_on_audio(
                 src, output_dir=temp_dir, model_key="qwen3-asr", language="zh",
                 progress_callback=on_progress, hotwords=_hotwords,
@@ -7103,6 +7132,120 @@ def _build_postprocess_cmd(python_exe, payload):
     if payload.get("post_copy_errors", False):
         cmd.append("--copy-errors")
     return cmd
+
+
+# MFA directory browser — shows folders + SRT files
+@app.get("/api/mfa/browse-dir")
+def mfa_browse_dir(path: str = Query("", description="Absolute directory path")):
+    """List folders and .srt files in a directory. Defaults to asr/folder_output."""
+    if not path or not os.path.isdir(path):
+        path = os.path.join(DATA_DIR, "asr", "folder_output")
+        if not os.path.isdir(path):
+            path = DATA_DIR
+        os.makedirs(path, exist_ok=True)
+
+    path = os.path.normpath(path)
+    folders = []
+    files = []
+    try:
+        for name in sorted(os.listdir(path)):
+            full = os.path.join(path, name)
+            if os.path.isdir(full) and not name.startswith("."):
+                folders.append({"name": name, "path": full.replace("\\", "/"), "type": "dir"})
+            elif name.lower().endswith(".srt") and os.path.isfile(full):
+                size_kb = round(os.path.getsize(full) / 1024, 1)
+                files.append({"name": name, "path": full.replace("\\", "/"), "type": "srt", "size_kb": size_kb})
+
+        parent = os.path.dirname(path)
+        if parent == path or not os.path.isdir(parent):
+            parent = None
+
+        return {
+            "path": path.replace("\\", "/"),
+            "parent": parent.replace("\\", "/") if parent else None,
+            "folders": folders,
+            "files": files,
+        }
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+
+# SRT to JSONL import helper
+@app.post("/api/mfa/srt-to-jsonl")
+def mfa_srt_to_jsonl(
+    srt_path: str = Query(..., description="Path to SRT subtitle file"),
+    wav_file: str = Query(..., description="Matching WAV filename (e.g. audio.wav)"),
+    output_jsonl: str = Query("", description="JSONL output path. Defaults to <srt_dir>/generated.jsonl"),
+    text_key: str = Query("text", description="JSON key for the transcript text"),
+    wav_key: str = Query("wav_file", description="JSON key for the wav filename"),
+):
+    """Parse an SRT file, extract plain text, and append a JSONL entry.
+
+    Reads the SRT, strips sequence numbers and timestamps, joins text lines
+    into a single transcript string. The resulting JSON line is appended to
+    the specified JSONL file (or a generated.jsonl next to the SRT if not given).
+    """
+    srt_path_obj = Path(srt_path)
+    if not srt_path_obj.exists():
+        raise HTTPException(status_code=404, detail=f"SRT file not found: {srt_path}")
+
+    # Read and parse SRT
+    with open(srt_path, "r", encoding="utf-8-sig") as f:
+        content = f.read()
+
+    text_lines = []
+    raw_lines = content.splitlines()
+    for line in raw_lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # Skip sequence numbers (pure digits, including full-width)
+        if stripped.isdigit():
+            continue
+        # Skip timestamp lines
+        if "-->" in stripped:
+            continue
+        text_lines.append(stripped)
+
+    full_text = "".join(text_lines)
+
+    if not full_text:
+        raise HTTPException(status_code=400, detail="No text content found in SRT file")
+
+    # Determine JSONL output path
+    if output_jsonl:
+        jsonl_path = Path(output_jsonl)
+    else:
+        jsonl_path = srt_path_obj.parent / "generated.jsonl"
+
+    jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+
+    entry = {
+        text_key: full_text,
+        wav_key: Path(wav_file).name,
+    }
+
+    # Append entry to JSONL
+    with open(str(jsonl_path), "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+    # Count total entries in JSONL
+    total = 0
+    if jsonl_path.exists():
+        with open(str(jsonl_path), "r", encoding="utf-8") as f:
+            total = sum(1 for _ in f)
+
+    return {
+        "status": "ok",
+        "srt_path": str(srt_path_obj),
+        "srt_lines": len(raw_lines),
+        "text_lines": len(text_lines),
+        "extracted_text": full_text,
+        "jsonl_path": str(jsonl_path),
+        "jsonl_entry": entry,
+        "jsonl_total_entries": total,
+        "text_preview": full_text[:300] + ("..." if len(full_text) > 300 else ""),
+    }
 
 
 # Job polling and management
