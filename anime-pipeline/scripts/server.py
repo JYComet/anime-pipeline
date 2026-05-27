@@ -4734,11 +4734,18 @@ def _run_pipeline_video(job_id: str):
         """BGM separation: Demucs HT → keep vocals only, delete instrumentals."""
         from music_separate import separate_vocals
         f.current_step = "music_separate"
-        f.steps.append({"step": "music_separate", "status": "running", "message": "加载 Demucs 模型..."})
-        _update_pipeline_job_progress(job)
 
         src = state.get("wav", f.wav_path)
         out = _temp_path(f, "separated", ".wav", state)
+        if os.path.exists(out) and os.path.getsize(out) > 0:
+            state["wav"] = out
+            f.steps.append({"step": "music_separate", "status": "completed",
+                            "message": "人声分离已完成 (复用缓存)"})
+            _update_pipeline_job_progress(job)
+            return True
+
+        f.steps.append({"step": "music_separate", "status": "running", "message": "加载 Demucs 模型..."})
+        _update_pipeline_job_progress(job)
         seg_dir = os.path.join(temp_dir, f"separated_{os.path.splitext(f.name)[0]}")
         os.makedirs(seg_dir, exist_ok=True)
 
@@ -4764,11 +4771,18 @@ def _run_pipeline_video(job_id: str):
     def _step_enhance(f, job, state):
         from denoise_audio import run_full_denoise
         f.current_step = "enhance"
-        f.steps.append({"step": "enhance", "status": "running", "message": "加载模型中..."})
-        _update_pipeline_job_progress(job)
 
         src = state.get("wav", f.wav_path)
         out = _temp_path(f, "enhance", ".wav", state)
+        if os.path.exists(out) and os.path.getsize(out) > 0:
+            state["wav"] = out
+            f.steps.append({"step": "enhance", "status": "completed",
+                            "message": "语音增强已完成 (复用缓存)"})
+            _update_pipeline_job_progress(job)
+            return True
+
+        f.steps.append({"step": "enhance", "status": "running", "message": "加载模型中..."})
+        _update_pipeline_job_progress(job)
 
         def on_step(step_key, status, message):
             f.steps.append({"step": step_key, "status": status, "message": message})
@@ -4795,12 +4809,20 @@ def _run_pipeline_video(job_id: str):
     def _step_super_resolve(f, job, state):
         from denoise_audio import run_full_denoise
         f.current_step = "super_resolve"
-        f.progress = 5
-        f.steps.append({"step": "super_resolve", "status": "running", "message": "加载超分模型..."})
-        _update_pipeline_job_progress(job)
 
         src = state.get("wav", f.wav_path)
         out = _temp_path(f, "super_resolve", ".wav", state)
+        if os.path.exists(out) and os.path.getsize(out) > 0:
+            state["wav"] = out
+            f.progress = 100
+            f.steps.append({"step": "super_resolve", "status": "completed",
+                            "message": "超分辨率已完成 (复用缓存)"})
+            _update_pipeline_job_progress(job)
+            return True
+
+        f.progress = 5
+        f.steps.append({"step": "super_resolve", "status": "running", "message": "加载超分模型..."})
+        _update_pipeline_job_progress(job)
 
         def on_step(step_key, status, message):
             f.steps.append({"step": step_key, "status": status, "message": message})
@@ -4831,6 +4853,16 @@ def _run_pipeline_video(job_id: str):
     def _step_asr(f, job, state):
         from asr_pipeline import run_asr_on_audio
         f.current_step = "asr"
+
+        srt_out = _temp_path(f, "asr", ".srt", state)
+        if os.path.exists(srt_out) and os.path.getsize(srt_out) > 0:
+            state["srt"] = srt_out
+            f.progress = 100
+            f.steps.append({"step": "asr", "status": "completed",
+                            "message": "ASR已完成 (复用缓存)"})
+            _update_pipeline_job_progress(job)
+            return True
+
         f.progress = 0
         _update_pipeline_job_progress(job)
 
@@ -4849,7 +4881,10 @@ def _run_pipeline_video(job_id: str):
             )
             srt = result.get("srt_path", "")
             if srt and os.path.exists(srt):
-                state["srt"] = srt
+                # Copy to cached path for resume on restart
+                if srt != srt_out:
+                    _shutil.copy2(srt, srt_out)
+                state["srt"] = srt_out
                 f.progress = 100
                 f.steps.append({"step": "asr", "status": "completed",
                                 "message": f"ASR完成: {result.get('segments_count', 0)}条字幕"})
@@ -4890,6 +4925,25 @@ def _run_pipeline_video(job_id: str):
         base = os.path.splitext(f.name)[0]
         seg_dir = os.path.join(temp_dir, f"segments_{base}")
         os.makedirs(seg_dir, exist_ok=True)
+
+        # Resume: check if segments already exist from a previous run
+        existing_segs = sorted([
+            os.path.join(seg_dir, x) for x in os.listdir(seg_dir)
+            if x.endswith(('.wav', '.aac', '.mp3', '.flac', '.ogg'))
+            and os.path.getsize(os.path.join(seg_dir, x)) > 1024
+        ])
+        if existing_segs and len(existing_segs) >= 2:
+            # Already split — check if first/last need trimming (only if > 2 segs and previously trimmed)
+            state["duration_segments"] = existing_segs
+            state["seg_dir"] = seg_dir
+            # Determine ext from existing files
+            state["seg_ext"] = os.path.splitext(existing_segs[0])[1] or ".wav"
+            state["opt_sr"], state["opt_ch"] = _get_optimal_wav_params(enabled_steps)
+            f.progress = 100
+            f.steps.append({"step": "duration_split", "status": "completed",
+                            "message": f"时长切分已完成 (复用缓存): {len(existing_segs)}段"})
+            _update_pipeline_job_progress(job)
+            return True
 
         ext = os.path.splitext(src)[1].lower()
         is_video = ext in VIDEO_EXTENSIONS
@@ -4973,6 +5027,17 @@ def _run_pipeline_video(job_id: str):
         src = state.get("wav", f.wav_path)
         out_dir = os.path.join(temp_dir, f"cut_{os.path.splitext(f.name)[0]}")
         os.makedirs(out_dir, exist_ok=True)
+
+        # Resume: check if cut clips already exist
+        existing_cuts = [os.path.join(out_dir, x) for x in os.listdir(out_dir)
+                        if x.endswith('.wav') and os.path.getsize(os.path.join(out_dir, x)) > 0]
+        if existing_cuts:
+            f.output_clips.extend(existing_cuts)
+            f.progress = 100
+            f.steps.append({"step": "cut", "status": "completed",
+                            "message": f"切割已完成 (复用缓存): {len(existing_cuts)}个片段"})
+            _update_pipeline_job_progress(job)
+            return True
 
         def on_progress(cur, total):
             if total > 0:
@@ -5106,11 +5171,18 @@ def _run_pipeline_video(job_id: str):
                 if segments:
                     # Step C: Process segments through remaining steps
                     # Phase-batch: each step runs on all segments before moving to next.
+                    # Fault-tolerant: segments that time out are skipped in subsequent steps.
                     import threading as _threading2
                     seg_lock = _threading2.Lock()
                     seg_count = len(segments)
                     seg_states = [{"wav": p, "seg_suffix": f"_seg{i:03d}"} for i, p in enumerate(segments)]
+                    # Segments to skip (timed out or unrecoverable error)
+                    seg_skip = set()
                     total_active_steps = sum(1 for s in post_steps if s != "convert")
+
+                    # Per-segment per-step timeout: 5 minutes max for any GPU step.
+                    # Normal steps take 15-60s; 300s catches genuine hangs only.
+                    STEP_TIMEOUT = 300
 
                     active_idx = 0  # counts only non-convert steps
                     for step_key in post_steps:
@@ -5135,49 +5207,90 @@ def _run_pipeline_video(job_id: str):
                         f.progress = step_base
                         _update_pipeline_job_progress(job)
 
-                        step_workers = min(seg_count, 2)
-                        step_futures = []
-                        with concurrent.futures.ThreadPoolExecutor(
-                            max_workers=step_workers
-                        ) as step_exec:
-                            for idx, ss in enumerate(seg_states):
-                                if job.cancelled:
-                                    break
+                        step_workers = min(seg_count - len(seg_skip), 2)
+                        if step_workers <= 0:
+                            # All segments already skipped
+                            break
+                        step_workers = max(step_workers, 1)
 
-                                def _run_step(_idx, _ss, _step_key=step_key):
-                                    if job.cancelled:
-                                        return
-                                    with seg_lock:
-                                        f.steps.append({"step": _step_key, "status": "running",
-                                                        "message": f"处理片段 {_idx+1}/{seg_count}"})
-                                        _update_pipeline_job_progress(job)
-                                    try:
-                                        h = STEP_HANDLERS.get(_step_key)
-                                        if h:
-                                            is_gpu = _step_key in _GPU_STEPS
-                                            if is_gpu:
-                                                with step_sem:
-                                                    with _sem["gpu"]:
-                                                        h(f, job, _ss)
-                                            else:
-                                                with step_sem:
+                        def _make_run_step(_idx, _ss, _step_key):
+                            """Factory to capture loop variables by value."""
+                            def _run_step():
+                                if job.cancelled or _idx in seg_skip:
+                                    return
+                                with seg_lock:
+                                    f.steps.append({"step": _step_key, "status": "running",
+                                                    "message": f"处理片段 {_idx+1}/{seg_count}"})
+                                    _update_pipeline_job_progress(job)
+                                try:
+                                    h = STEP_HANDLERS.get(_step_key)
+                                    if h:
+                                        is_gpu = _step_key in _GPU_STEPS
+                                        if is_gpu:
+                                            with step_sem:
+                                                with _sem["gpu"]:
                                                     h(f, job, _ss)
-                                    except Exception as e:
-                                        with seg_lock:
-                                            f.steps.append({"step": _step_key, "status": "error",
-                                                            "message": str(e)[:100]})
+                                        else:
+                                            with step_sem:
+                                                h(f, job, _ss)
+                                except Exception as e:
                                     with seg_lock:
-                                        step_done[0] += 1
-                                        f.progress = step_base + int(step_done[0] / seg_count * step_range)
-                                        _update_pipeline_job_progress(job)
-                                    if "cut" not in enabled_steps and _step_key == post_steps[-1]:
-                                        final_wav = _ss.get("wav", "")
-                                        if final_wav and os.path.exists(final_wav):
-                                            with seg_lock:
-                                                f.output_clips.append(final_wav)
+                                        f.steps.append({"step": _step_key, "status": "error",
+                                                        "message": str(e)[:100]})
+                                with seg_lock:
+                                    step_done[0] += 1
+                                    f.progress = step_base + int(step_done[0] / seg_count * step_range)
+                                    _update_pipeline_job_progress(job)
+                                if "cut" not in enabled_steps and _step_key == post_steps[-1]:
+                                    final_wav = _ss.get("wav", "")
+                                    if final_wav and os.path.exists(final_wav):
+                                        with seg_lock:
+                                            f.output_clips.append(final_wav)
+                            return _run_step
 
-                                step_futures.append(step_exec.submit(_run_step, idx, ss))
-                            concurrent.futures.wait(step_futures)
+                        step_exec = concurrent.futures.ThreadPoolExecutor(
+                            max_workers=step_workers
+                        )
+                        future_to_idx = {}
+                        try:
+                            for idx, ss in enumerate(seg_states):
+                                if idx in seg_skip or job.cancelled:
+                                    continue
+                                future = step_exec.submit(_make_run_step(idx, ss, step_key))
+                                future_to_idx[future] = idx
+
+                            if not future_to_idx:
+                                continue
+
+                            # Wait with per-future timeout, skip stuck segments
+                            deadline = time.time() + STEP_TIMEOUT * max(1, len(future_to_idx))
+                            remaining = set(future_to_idx.keys())
+                            while remaining and time.time() < deadline:
+                                done, remaining = concurrent.futures.wait(
+                                    remaining, timeout=min(STEP_TIMEOUT, max(1, deadline - time.time()))
+                                )
+                                if remaining:
+                                    # Give each stuck future one more STEP_TIMEOUT, then skip
+                                    for fut in list(remaining):
+                                        try:
+                                            fut.result(timeout=0)
+                                        except Exception:
+                                            pass
+                                        if fut in remaining:
+                                            idx = future_to_idx[fut]
+                                            seg_skip.add(idx)
+                                            with seg_lock:
+                                                f.steps.append({
+                                                    "step": step_key, "status": "error",
+                                                    "message": f"片段 {idx+1} 超时({STEP_TIMEOUT}s)，跳过后续步骤"
+                                                })
+                                                _update_pipeline_job_progress(job)
+                                            # Decrement count so progress reflects actual work
+                                            step_done[0] += 1
+                                            f.progress = step_base + int(step_done[0] / seg_count * step_range)
+                                            _update_pipeline_job_progress(job)
+                        finally:
+                            step_exec.shutdown(wait=False)
 
                     f.progress = 100
                     _update_pipeline_job_progress(job)
