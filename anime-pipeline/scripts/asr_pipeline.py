@@ -148,9 +148,16 @@ def _get_asr_model(model_key="qwen3-asr", device="cuda", use_fp16=True, use_flas
     """
     if device != "cpu" and not torch.cuda.is_available():
         raise RuntimeError("CUDA GPU is required for ASR model. CPU fallback is disabled.")
+
+    # Cache key encodes optimization flags so different configs don't collide
+    cache_key = (model_key, device, use_fp16, use_flash_attn)
+
+    # Fast path: already loaded
+    if cache_key in _asr_models:
+        return _asr_models[cache_key]
+
     with _model_lock:
-        # Cache key encodes optimization flags so different configs don't collide
-        cache_key = (model_key, device, use_fp16, use_flash_attn)
+        # Double-check after acquiring lock
         if cache_key in _asr_models:
             return _asr_models[cache_key]
 
@@ -162,27 +169,23 @@ def _get_asr_model(model_key="qwen3-asr", device="cuda", use_fp16=True, use_flas
         dtype = None
         if use_fp16 and device != "cpu":
             try:
-                # bf16 preferred on Ampere+, fp16 fallback
                 dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
             except Exception:
                 dtype = None
 
         # FlashAttention / SDPA — only on GPU
-        # Priority: flash_attention_2 (custom CUDA kernel) > sdpa (PyTorch native fused attention) > eager
         attn_kwargs = {}
         if use_flash_attn and device != "cpu":
             try:
-                import flash_attn  # noqa: F401 — verify it's installed
+                import flash_attn  # noqa: F401
                 attn_kwargs["attn_implementation"] = "flash_attention_2"
             except ImportError:
-                # Fall back to PyTorch native SDPA (fused memory-efficient attention)
-                # This provides ~80% of flash-attn's speedup without extra dependencies.
                 try:
                     if hasattr(torch.backends.cuda, "enable_flash_sdp"):
                         torch.backends.cuda.enable_flash_sdp(True)
                     attn_kwargs["attn_implementation"] = "sdpa"
                 except Exception:
-                    pass  # ultimate fallback: eager attention
+                    pass
 
         # Qwen3-ASR uses its own package (qwen-asr), not funasr
         if model_key in ("qwen3-asr",):
@@ -199,26 +202,11 @@ def _get_asr_model(model_key="qwen3-asr", device="cuda", use_fp16=True, use_flas
             )
             if device != "cpu":
                 try:
-                    model = model.cuda()
+                    model.model = model.model.cuda()
                 except Exception:
                     pass
-
-            # torch.compile for repeated forward passes (PyTorch 2.0+)
-            # Pre-flight check: requires Triton (Linux) or MSVC (Windows)
-            if use_compile and _check_torch_compile():
-                try:
-                    model = torch.compile(model, mode="reduce-overhead")
-                except Exception:
-                    try:
-                        model = torch.compile(model, mode="default")
-                    except Exception:
-                        pass
-
             _asr_models[cache_key] = model
-            return model
-
-        # NeMo-based models (Parakeet)
-        if model_info.get("framework") == "nemo":
+        elif model_info.get("framework") == "nemo":
             import nemo.collections.asr as nemo_asr
             model = nemo_asr.models.ASRModel.from_pretrained(
                 model_info["model_id"],
@@ -228,19 +216,8 @@ def _get_asr_model(model_key="qwen3-asr", device="cuda", use_fp16=True, use_flas
                     model = model.cuda()
                 except Exception:
                     pass
-            if use_compile and _check_torch_compile():
-                try:
-                    model = torch.compile(model, mode="reduce-overhead")
-                except Exception:
-                    try:
-                        model = torch.compile(model, mode="default")
-                    except Exception:
-                        pass
             _asr_models[cache_key] = model
-            return model
-
-        # HuggingFace transformers-based models (Cohere Transcribe)
-        if model_info.get("framework") == "transformers":
+        elif model_info.get("framework") == "transformers":
             from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
 
             load_kwargs = {"trust_remote_code": True}
@@ -257,25 +234,40 @@ def _get_asr_model(model_key="qwen3-asr", device="cuda", use_fp16=True, use_flas
                 model_info["model_id"],
                 **load_kwargs,
             )
-            if use_compile and _check_torch_compile():
-                try:
-                    model = torch.compile(model, mode="reduce-overhead")
-                except Exception:
-                    try:
-                        model = torch.compile(model, mode="default")
-                    except Exception:
-                        pass
             _asr_models[cache_key] = (model, processor)
-            return (model, processor)
+        else:
+            from funasr import AutoModel
+            model = AutoModel(
+                model=model_info["model_id"],
+                trust_remote_code=True,
+                device=device,
+            )
+            _asr_models[cache_key] = model
 
-        from funasr import AutoModel
-        model = AutoModel(
-            model=model_info["model_id"],
-            trust_remote_code=True,
-            device=device,
-        )
-        _asr_models[cache_key] = model
-        return model
+    # torch.compile outside the lock — it's slow and doesn't need mutual exclusion
+    if use_compile and _check_torch_compile():
+        try:
+            if model_key in ("qwen3-asr",):
+                model.model = torch.compile(model.model, mode="reduce-overhead")
+            elif model_info.get("framework") == "nemo":
+                model = torch.compile(model, mode="reduce-overhead")
+            elif model_info.get("framework") == "transformers":
+                compiled = torch.compile(model, mode="reduce-overhead")
+                _asr_models[cache_key] = (compiled, processor)
+        except Exception:
+            try:
+                if model_key in ("qwen3-asr",):
+                    model.model = torch.compile(model.model, mode="default")
+                elif model_info.get("framework") in ("nemo", "transformers"):
+                    compiled = torch.compile(model, mode="default")
+                    if model_info.get("framework") == "transformers":
+                        _asr_models[cache_key] = (compiled, processor)
+                    else:
+                        _asr_models[cache_key] = compiled
+            except Exception:
+                pass
+
+    return _asr_models[cache_key]
 
 
 def get_audio_duration(audio_path: str) -> float:
@@ -413,17 +405,78 @@ def _preload_asr_model_async(model_key="qwen3-asr", device="cuda"):
     return concurrent.futures.ThreadPoolExecutor(max_workers=1).submit(_load)
 
 
+_SENTENCE_END_RE = re.compile(r".*[。！？.!?]$")
+
+
+def _merge_segments_by_text(segments: list) -> list:
+    """Merge consecutive short VAD fragments into natural sentences.
+
+    Uses two criteria (either triggers a merge):
+    1. Text doesn't end with sentence-ending punctuation (。！？.!?)
+    2. Segment duration is very short (< 3s), suggesting a mid-sentence pause
+
+    Segments shorter than 3 seconds are merged with the next segment.
+    Combined segments longer than 45 seconds are NOT merged further.
+    """
+    if not segments or len(segments) <= 1:
+        return segments
+
+    merged = []
+    buf = None  # accumulates text/timestamps
+
+    for seg in segments:
+        text = seg["text"].strip()
+        if not text:
+            continue
+
+        if buf is None:
+            buf = dict(seg)
+            continue
+
+        buf_dur = (buf["end_ms"] - buf["start_ms"]) / 1000
+        seg_dur = (seg["end_ms"] - seg["start_ms"]) / 1000
+        combined_dur = (seg["end_ms"] - buf["start_ms"]) / 1000
+
+        # Don't merge if combined would be too long
+        if combined_dur > 45:
+            merged.append(buf)
+            buf = dict(seg)
+            continue
+
+        is_sentence_end = bool(_SENTENCE_END_RE.match(buf["text"]))
+        buf_is_short = buf_dur < 3.0
+        seg_is_short = seg_dur < 3.0
+
+        # Merge if: buffer doesn't end with punctuation, or either segment is very short
+        if not is_sentence_end or buf_is_short or seg_is_short:
+            buf["text"] = buf["text"] + text
+            buf["end_ms"] = seg["end_ms"]
+        else:
+            merged.append(buf)
+            buf = dict(seg)
+
+    if buf is not None:
+        merged.append(buf)
+
+    return merged
+
+
 def vad_asr_pipeline(
     audio_path: str,
     model_key: str = "qwen3-asr",
-    language: str = "ja",
+    language: str = "zh",
     device: str = "cuda",
     progress_callback=None,
+    hotwords: str = "",
 ) -> list:
     """Run VAD → split audio → ASR on each speech segment → return [{text, start_ms, end_ms}].
 
     This is the core subtitle generation pipeline.
     Optimized with: batched VAD segments, fp16 inference, FlashAttention 2, torch.compile.
+
+    Args:
+        hotwords: Optional context string with proper nouns / domain terms to improve
+                  recognition accuracy. Passed as system prompt to Qwen3-ASR.
     """
     # Step 1: Start ASR model preloading in background (opt 7: parallel loading)
     asr_future = _preload_asr_model_async(model_key, device)
@@ -463,7 +516,7 @@ def vad_asr_pipeline(
             chunk = audio[start_sample:end_sample]
             try:
                 qwen3_lang = _QWEN3_LANG_MAP.get(lang) if lang else None
-                tr_results = asr_model.transcribe([(chunk, sr)], language=qwen3_lang)
+                tr_results = asr_model.transcribe([(chunk, sr)], language=qwen3_lang, context=hotwords)
                 for tr in tr_results:
                     text = (tr.text or "").strip()
                     if text:
@@ -494,6 +547,8 @@ def vad_asr_pipeline(
                 processed = len(results) if results else 0
                 pct = 10 + int((processed / total) * 80) if total > 0 else 50
                 progress_callback("asr", pct)
+
+    return _merge_segments_by_text(results)
 
 
 def _ms_to_srt_timestamp(ms: float) -> str:
@@ -575,13 +630,17 @@ def segments_to_srt(segments: list, output_srt: str) -> str:
 def run_asr_pipeline(
     video_path: str,
     model_key: str = "qwen3-asr",
-    language: str = "ja",
+    language: str = "zh",
     device: str = "cuda",
     progress_callback=None,
+    hotwords: str = "",
 ) -> dict:
     """Full ASR pipeline: extract audio → VAD → ASR per segment → generate SRT.
 
     Returns dict with keys: audio_path, srt_path, segments_count, model, model_name, duration_sec.
+
+    Args:
+        hotwords: Optional context string with proper nouns for Qwen3-ASR.
     """
     if not os.path.exists(video_path):
         raise FileNotFoundError(f"Video not found: {video_path}")
@@ -610,6 +669,7 @@ def run_asr_pipeline(
         language=language,
         device=device,
         progress_callback=progress_callback,
+        hotwords=hotwords,
     )
     t2 = time.time()
 
@@ -643,7 +703,7 @@ def run_asr_pipeline(
     return {
         "audio_path": audio_path,
         "srt_path": srt_path,
-        "segments_count": len(segments),
+        "segments_count": len(segments) if segments else 0,
         "model": model_key,
         "model_name": model_label,
         "duration_sec": round(duration, 1),
@@ -656,14 +716,18 @@ def run_asr_on_audio(
     audio_path: str,
     output_dir: str,
     model_key: str = "qwen3-asr",
-    language: str = "ja",
+    language: str = "zh",
     device: str = "cuda",
     progress_callback=None,
+    hotwords: str = "",
 ) -> dict:
     """Run ASR directly on an audio file (no extraction step).
 
     The output SRT is named after the audio file (<basename>.srt) and
     saved to ``output_dir``.
+
+    Args:
+        hotwords: Optional context string with proper nouns for Qwen3-ASR.
 
     Returns dict with keys: audio_name, srt_path, segments_count, model_name, duration_sec.
     """
@@ -696,6 +760,7 @@ def run_asr_on_audio(
             language=language,
             device=device,
             progress_callback=progress_callback,
+            hotwords=hotwords,
         )
         t1 = time.time()
 
@@ -724,7 +789,7 @@ def run_asr_on_audio(
         return {
             "audio_name": os.path.basename(audio_path),
             "srt_path": srt_path,
-            "segments_count": len(segments),
+            "segments_count": len(segments) if segments else 0,
             "model_name": model_label,
             "duration_sec": round(t1 - t0, 1),
         }
@@ -818,6 +883,7 @@ def compare_asr_pipeline(
     source_dir: str = "",
     model_a: str = "qwen3-asr",
     model_b: str = "cohere-transcribe",
+    hotwords: str = "",
 ) -> dict:
     """Run two selected ASR models on a single WAV file and compare results.
 
@@ -872,6 +938,7 @@ def compare_asr_pipeline(
                 language=language,
                 device=device,
                 progress_callback=None,
+                hotwords=hotwords,
             )
 
         srt_path = os.path.join(srt_out_dir, f"{base_name}_{abbr}.srt")
@@ -890,7 +957,7 @@ def compare_asr_pipeline(
             "model_key": model_key,
             "model_name": model_info["name"],
             "abbr": abbr,
-            "segments_count": len(segments),
+            "segments_count": len(segments) if segments else 0,
             "srt_path": srt_path,
         }
         srt_paths[model_key] = srt_path

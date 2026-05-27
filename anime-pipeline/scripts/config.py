@@ -125,6 +125,20 @@ _USER_PATH_KEYS = {
     'PIPELINE_VIDEO_DIR',
 }
 
+# Non-path config keys stored in settings.json (model/language selections etc.)
+_CONFIG_KEYS = {
+    'ASR_DEFAULT_MODEL': 'qwen3-asr',
+    'ASR_DEFAULT_LANGUAGE': 'zh',
+    'ASR_COMPARE_MODEL_A': 'qwen3-asr',
+    'ASR_COMPARE_MODEL_B': 'cohere-transcribe',
+    'ASR_DEFAULT_HOTWORDS': '',
+}
+
+# Populate module-level defaults from _CONFIG_KEYS
+for _k, _v in _CONFIG_KEYS.items():
+    if _k not in globals():
+        globals()[_k] = _v
+
 # Registry of all configurable path variables: (name, current_value)
 _PATH_VARS = {}
 
@@ -168,6 +182,10 @@ def load_settings():
             pv_steps = data.get('pv_default_steps', None)
             if pv_steps is not None:
                 globals()['PV_DEFAULT_STEPS'] = pv_steps
+            config_vals = data.get('config', {})
+            for key, val in config_vals.items():
+                if key in _CONFIG_KEYS and isinstance(val, str) and val:
+                    globals()[key] = val
             return
 
     for key, val in paths.items():
@@ -182,8 +200,13 @@ def load_settings():
     if pv_steps is not None:
         globals()['PV_DEFAULT_STEPS'] = pv_steps
 
+    config_vals = data.get('config', {})
+    for key, val in config_vals.items():
+        if key in _CONFIG_KEYS and isinstance(val, str) and val:
+            globals()[key] = val
 
-def save_settings(paths: dict, denoise_default_steps=None, pv_default_steps=None):
+
+def save_settings(paths: dict, denoise_default_steps=None, pv_default_steps=None, config_vals=None):
     """Save settings to settings.json and patch module globals."""
     _register_path_vars()
     for key, val in paths.items():
@@ -194,12 +217,17 @@ def save_settings(paths: dict, denoise_default_steps=None, pv_default_steps=None
         globals()['DENOISE_DEFAULT_STEPS'] = denoise_default_steps
     if pv_default_steps is not None:
         globals()['PV_DEFAULT_STEPS'] = pv_default_steps
+    if config_vals is not None:
+        for key, val in config_vals.items():
+            if key in _CONFIG_KEYS and isinstance(val, str) and val:
+                globals()[key] = val
 
     data = {'paths': {k: globals()[k] for k in _USER_PATH_KEYS if k in globals()}}
     if denoise_default_steps is not None or 'DENOISE_DEFAULT_STEPS' in globals():
         data['denoise_default_steps'] = globals().get('DENOISE_DEFAULT_STEPS', [])
     if pv_default_steps is not None or 'PV_DEFAULT_STEPS' in globals():
         data['pv_default_steps'] = globals().get('PV_DEFAULT_STEPS', [])
+    data['config'] = {k: globals().get(k, _CONFIG_KEYS[k]) for k in _CONFIG_KEYS}
 
     os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
     tmp = SETTINGS_FILE + '.tmp'

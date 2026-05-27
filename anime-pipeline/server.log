@@ -1,0 +1,1113 @@
+/mnt/project/ComicCut/anime-pipeline/scripts/server.py:340: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+INFO:     Started server process [409278]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:5800 (Press CTRL+C to quit)
+[pipeline] Restored 204 jobs from disk
+Frontend: /mnt/project/ComicCut/anime-pipeline/frontend
+Data dir: /mnt/project/ComicCut/anime-pipeline/data
+Video dir: /mnt/project/ComicCut/video
+[watcher] Started monitoring downloads/ and video/ for new MKV files
+[startup] Restored 1 pipeline video jobs from disk
+[startup] Restored 3 ASR jobs from disk
+INFO:     192.168.100.213:63340 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:63340 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58902 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58902 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:63340 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58902 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:63340 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58902 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58902 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:63340 - "GET /api/asr/stream?path=%2Fmnt%2Fproject%2FComicCut%2Fanime-pipeline%2Fdata%2Ftemp%2Fpipeline_video%2Fddb8e06515eb%2F2022-07-09%20%E6%97%A9%E5%AE%89%E6%9D%82%E8%B0%88_seg000_separated_enhanced.wav HTTP/1.1" 206 Partial Content
+[startup] aria2c daemon: running
+INFO:     192.168.100.213:58902 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58902 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58902 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:49842 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:49842 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:49842 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:49842 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+[startup] Preloading Qwen3-ASR model...
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+`torch_dtype` is deprecated! Use `dtype` instead!
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00, 21.77it/s]
+The following generation flags are not valid and may be ignored: ['temperature']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53004 - "GET /api/asr/models HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58673 - "GET /api/asr/stream?path=%2Fmnt%2Fproject%2FComicCut%2Fanime-pipeline%2Fdata%2Ftemp%2Fpipeline_video%2Fddb8e06515eb%2F2022-07-09%20%E6%97%A9%E5%AE%89%E6%9D%82%E8%B0%88_seg001_separated_enhanced.wav HTTP/1.1" 206 Partial Content
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+[startup] Qwen3-ASR model loaded to GPU
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48352 - "POST /api/asr/folder HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+funasr version: 1.3.3.
+Check update of funasr, and it would cost few times. You may disable it by set `disable_update=True` in AutoModel
+New version is available: 1.3.6.
+Please use the command "pip install -U funasr" to upgrade.
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+WARNING:root:trust_remote_code: False
+Downloading Model from https://www.modelscope.cn to directory: /home/devuser/.cache/modelscope/hub/models/iic/speech_fsmn_vad_zh-cn-16k-common-pytorch
+  0%|[34m          [0m| 0/1 [00:00<?, ?it/s]INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+100%|[34m██████████[0m| 1/1 [00:01<00:00,  1.49s/it]{'load_data': '0.426', 'extract_feat': '0.236', 'forward': '1.494', 'batch_size': '1', 'rtf': '1.106'}, : 100%|[34m██████████[0m| 1/1 [00:01<00:00,  1.49s/it]rtf_avg: 1.106: 100%|[34m██████████[0m| 1/1 [00:01<00:00,  1.49s/it]                                                                                          rtf_avg: 1.106: 100%|[34m██████████[0m| 1/1 [00:01<00:00,  1.49s/it]
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60706 - "GET /api/asr/jobs HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET / HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/local/videos HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/local/subtitles HTTP/1.1" 200 OK
+INFO:     192.168.100.213:57156 - "GET /api/asr/models HTTP/1.1" 200 OK
+INFO:     192.168.100.213:58461 - "GET /api/asr/jobs HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50628 - "GET /api/jobs HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/asr/videos HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/extract/subtitle-files HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62101 - "GET /api/settings HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62761 - "GET /api/asr/results HTTP/1.1" 200 OK
+INFO:     192.168.100.213:51477 - "GET /api/teams HTTP/1.1" 200 OK
+INFO:     192.168.100.213:51477 - "GET /api/asr/models HTTP/1.1" 200 OK
+INFO:     192.168.100.213:51477 - "GET /api/asr/models HTTP/1.1" 200 OK
+INFO:     192.168.100.213:51477 - "POST /api/asr/folder-detect HTTP/1.1" 200 OK
+INFO:     192.168.100.213:65030 - "GET /api/list-dirs?path=%2Fmnt%2Fproject%2FComicCut%2Fanime-pipeline%2Fdata%2Fpipelinevideo%2F%E3%80%90%E9%9B%AA%E7%8B%90%E6%A1%91%E3%80%91%E7%9B%B4%E6%92%AD%E5%BD%95%E5%B1%8F%E8%AE%B0%E5%BD%95%EF%BC%88%E4%B8%89%EF%BC%89 HTTP/1.1" 200 OK
+INFO:     192.168.100.213:65030 - "GET /api/list-dirs?path=%2Fmnt%2Fproject%2FComicCut%2Fanime-pipeline%2Fdata%2Fpipelinevideo HTTP/1.1" 200 OK
+INFO:     192.168.100.213:65030 - "GET /api/list-dirs?path=%2Fmnt%2Fproject%2FComicCut%2Fanime-pipeline%2Fdata HTTP/1.1" 200 OK
+INFO:     192.168.100.213:65030 - "GET /api/list-dirs?path=%2Fmnt%2Fproject%2FComicCut%2Fanime-pipeline%2Fdata%2Ftemp HTTP/1.1" 200 OK
+INFO:     192.168.100.213:65030 - "GET /api/list-dirs?path=%2Fmnt%2Fproject%2FComicCut%2Fanime-pipeline%2Fdata%2Ftemp%2Fpipeline_video HTTP/1.1" 200 OK
+INFO:     192.168.100.213:65030 - "GET /api/list-dirs?path=%2Fmnt%2Fproject%2FComicCut%2Fanime-pipeline%2Fdata%2Ftemp%2Fpipeline_video%2Fddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62548 - "POST /api/asr/folder-detect HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50610 - "POST /api/asr/folder HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+  0%|[34m          [0m| 0/1 [00:00<?, ?it/s]INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+100%|[34m██████████[0m| 1/1 [00:04<00:00,  4.78s/it]{'load_data': '2.132', 'extract_feat': '2.504', 'forward': '4.782', 'batch_size': '1', 'rtf': '239.079'}, : 100%|[34m██████████[0m| 1/1 [00:04<00:00,  4.78s/it]rtf_avg: 239.079: 100%|[34m██████████[0m| 1/1 [00:04<00:00,  4.78s/it]                                                                                          rtf_avg: 239.079: 100%|[34m██████████[0m| 1/1 [00:04<00:00,  4.78s/it]
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50610 - "GET /api/asr/job/e3d131af2824 HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50610 - "GET /api/asr/stream?path=%2Fmnt%2Fproject%2FComicCut%2Fanime-pipeline%2Fdata%2Fasr%2Ffolder_output%2Fddb8e06515eb%2F2022-07-09%20%E6%97%A9%E5%AE%89%E6%9D%82%E8%B0%88_seg008_separated_enhanced.srt HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50610 - "GET /api/asr/stream?path=%2Fmnt%2Fproject%2FComicCut%2Fanime-pipeline%2Fdata%2Ftemp%2Fpipeline_video%2Fddb8e06515eb%2F2022-07-09%20%E6%97%A9%E5%AE%89%E6%9D%82%E8%B0%88_seg008_separated_enhanced.wav HTTP/1.1" 206 Partial Content
+INFO:     192.168.100.213:59920 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/jobs HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "POST /api/pipeline-video/job/ddb8e06515eb/resume HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+  0%|[34m          [0m| 0/1 [00:00<?, ?it/s]INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Running MossFormer2_SE_48K ...
+
+  0%|          | 0/1 [00:00<?, ?it/s][A100%|[34m██████████[0m| 1/1 [00:04<00:00,  4.83s/it]{'load_data': '2.171', 'extract_feat': '2.655', 'forward': '4.828', 'batch_size': '1', 'rtf': '241.399'}, : 100%|[34m██████████[0m| 1/1 [00:04<00:00,  4.83s/it]rtf_avg: 241.399: 100%|[34m██████████[0m| 1/1 [00:04<00:00,  4.83s/it]                                                                                          rtf_avg: 241.399: 100%|[34m██████████[0m| 1/1 [00:04<00:00,  4.85s/it]
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:62859 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+
+100%|██████████| 1/1 [02:00<00:00, 120.68s/it][A100%|██████████| 1/1 [02:00<00:00, 120.68s/it]
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Running MossFormer2_SE_48K ...
+  0%|          | 0/1 [00:00<?, ?it/s]INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+
+  0%|[34m          [0m| 0/1 [00:00<?, ?it/s][AINFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+
+100%|[34m██████████[0m| 1/1 [00:06<00:00,  6.72s/it][A
+{'load_data': '2.121', 'extract_feat': '4.585', 'forward': '6.718', 'batch_size': '1', 'rtf': '335.906'}, : 100%|[34m██████████[0m| 1/1 [00:06<00:00,  6.72s/it][A
+rtf_avg: 335.906: 100%|[34m██████████[0m| 1/1 [00:06<00:00,  6.72s/it]                                                                                          [Artf_avg: 335.906: 100%|[34m██████████[0m| 1/1 [00:06<00:00,  6.73s/it]
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+100%|██████████| 1/1 [01:57<00:00, 117.15s/it]100%|██████████| 1/1 [01:57<00:00, 117.15s/it]
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Running MossFormer2_SE_48K ...
+  0%|          | 0/1 [00:00<?, ?it/s]INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+
+  0%|[34m          [0m| 0/1 [00:00<?, ?it/s][AINFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+
+100%|[34m██████████[0m| 1/1 [00:06<00:00,  6.77s/it][A
+{'load_data': '2.189', 'extract_feat': '4.574', 'forward': '6.768', 'batch_size': '1', 'rtf': '338.381'}, : 100%|[34m██████████[0m| 1/1 [00:06<00:00,  6.77s/it][A
+rtf_avg: 338.381: 100%|[34m██████████[0m| 1/1 [00:06<00:00,  6.77s/it]                                                                                          [Artf_avg: 338.381: 100%|[34m██████████[0m| 1/1 [00:06<00:00,  6.79s/it]
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+100%|██████████| 1/1 [01:57<00:00, 117.46s/it]100%|██████████| 1/1 [01:57<00:00, 117.46s/it]
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Running MossFormer2_SE_48K ...
+  0%|          | 0/1 [00:00<?, ?it/s]INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:61961 - "GET /api/list-dirs?path=%2F HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:65307 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+100%|██████████| 1/1 [03:15<00:00, 195.39s/it]100%|██████████| 1/1 [03:15<00:00, 195.39s/it]
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+  0%|[34m          [0m| 0/1 [00:00<?, ?it/s]INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Running MossFormer2_SE_48K ...
+
+  0%|          | 0/1 [00:00<?, ?it/s][AINFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:53279 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+INFO:     192.168.100.213:50048 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+100%|[34m██████████[0m| 1/1 [00:12<00:00, 12.51s/it]{'load_data': '2.126', 'extract_feat': '10.373', 'forward': '12.507', 'batch_size': '1', 'rtf': '625.339'}, : 100%|[34m██████████[0m| 1/1 [00:12<00:00, 12.51s/it]rtf_avg: 625.339: 100%|[34m██████████[0m| 1/1 [00:12<00:00, 12.51s/it]                                                                                            rtf_avg: 625.339: 100%|[34m██████████[0m| 1/1 [00:12<00:00, 12.51s/it]
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.
+INFO:     192.168.100.213:57537 - "GET /api/pipeline-video/job/ddb8e06515eb HTTP/1.1" 200 OK
+Setting `pad_token_id` to `eos_token_id`:151645 for open-end generation.

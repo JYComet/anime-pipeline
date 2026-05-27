@@ -78,7 +78,99 @@ class DenoiseJob:
         }
 
 _denoise_jobs: dict[str, DenoiseJob] = {}
-_denoise_lock = threading.Lock()
+_denoise_lock = threading.RLock()
+
+_DENOISE_JOBS_FILE = os.path.join(DATA_DIR, "denoise_jobs.json")
+
+
+def _save_denoise_jobs():
+    """Persist denoise jobs to disk."""
+    try:
+        with _denoise_lock:
+            data = {k: v.to_dict() for k, v in _denoise_jobs.items()}
+        tmp = _DENOISE_JOBS_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, _DENOISE_JOBS_FILE)
+    except Exception as e:
+        print(f"[denoise] Failed to save jobs: {e}")
+
+
+def _load_denoise_jobs():
+    """Restore denoise jobs from disk on startup."""
+    if not os.path.exists(_DENOISE_JOBS_FILE):
+        return
+    try:
+        with open(_DENOISE_JOBS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        for job_id, jd in data.items():
+            files = []
+            for fd in jd.get("files", []):
+                files.append(DenoiseFileItem(
+                    name=fd["name"],
+                    input_path=fd["input_path"],
+                    status=fd.get("status", "completed"),
+                    steps=fd.get("steps", []),
+                    output_path=fd.get("output_path", ""),
+                ))
+            job = DenoiseJob(
+                job_id=jd["job_id"],
+                video_name=jd.get("video_name", ""),
+                files=files,
+                status=jd.get("status", "completed"),
+                progress=jd.get("progress", 100),
+                current_file=jd.get("current_file", ""),
+                created_at=jd.get("created_at", time.time()),
+            )
+            if job.status == "running":
+                job.status = "interrupted"
+                job.current_file = "服务器重启中断"
+            _denoise_jobs[job_id] = job
+        print(f"[startup] Restored {len(_denoise_jobs)} denoise jobs from disk")
+    except Exception as e:
+        print(f"[startup] Failed to load denoise jobs: {e}")
+
+
+# ============================================================
+# ASR job persistence
+# ============================================================
+
+_ASR_JOBS_FILE = os.path.join(DATA_DIR, "asr_jobs.json")
+
+
+def _save_asr_jobs():
+    """Persist ASR jobs to disk."""
+    try:
+        with _asr_lock:
+            data = {}
+            for k, v in _asr_jobs.items():
+                d = dict(v)
+                if "result" in d and d["result"] is not None and hasattr(d["result"], "copy"):
+                    d["result"] = dict(d["result"])
+                data[k] = d
+        tmp = _ASR_JOBS_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, _ASR_JOBS_FILE)
+    except Exception as e:
+        print(f"[asr] Failed to save jobs: {e}")
+
+
+def _load_asr_jobs():
+    """Restore ASR jobs from disk on startup. Mark running jobs as interrupted."""
+    if not os.path.exists(_ASR_JOBS_FILE):
+        return
+    try:
+        with open(_ASR_JOBS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        for job_id, jd in data.items():
+            if jd.get("status") == "running":
+                jd["status"] = "interrupted"
+                jd["current_step"] = "服务器重启中断"
+            _asr_jobs[job_id] = jd
+        print(f"[startup] Restored {len(_asr_jobs)} ASR jobs from disk")
+    except Exception as e:
+        print(f"[startup] Failed to load ASR jobs: {e}")
 
 
 # ============================================================
@@ -131,7 +223,60 @@ class PipelineVideoJob:
         }
 
 _pipeline_video_jobs: dict[str, PipelineVideoJob] = {}
-_pipeline_video_lock = threading.Lock()
+_pipeline_video_lock = threading.RLock()
+
+_PV_JOBS_FILE = os.path.join(DATA_DIR, "pipeline_video_jobs.json")
+
+
+def _save_pv_jobs():
+    """Persist pipeline video jobs to disk."""
+    try:
+        with _pipeline_video_lock:
+            data = {k: v.to_dict() for k, v in _pipeline_video_jobs.items()}
+        tmp = _PV_JOBS_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, _PV_JOBS_FILE)
+    except Exception as e:
+        print(f"[pv] Failed to save jobs: {e}")
+
+
+def _load_pv_jobs():
+    """Restore pipeline video jobs from disk on startup."""
+    if not os.path.exists(_PV_JOBS_FILE):
+        return
+    try:
+        with open(_PV_JOBS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        for job_id, jd in data.items():
+            files = []
+            for fd in jd.get("files", []):
+                files.append(PipelineVideoFileItem(
+                    name=fd["name"],
+                    input_path=fd["input_path"],
+                    wav_path=fd.get("wav_path", ""),
+                    status=fd.get("status", "completed"),
+                    current_step=fd.get("current_step", ""),
+                    progress=fd.get("progress", 100),
+                    steps=fd.get("steps", []),
+                    output_clips=fd.get("output_clips", []),
+                    error=fd.get("error", ""),
+                ))
+            job = PipelineVideoJob(
+                job_id=jd["job_id"],
+                folder_name=jd.get("folder_name", ""),
+                files=files,
+                status=jd.get("status", "completed"),
+                progress=jd.get("progress", 100),
+                cancelled=jd.get("cancelled", False),
+                created_at=jd.get("created_at", time.time()),
+            )
+            if job.status == "running":
+                job.status = "interrupted"
+            _pipeline_video_jobs[job_id] = job
+        print(f"[startup] Restored {len(_pipeline_video_jobs)} pipeline video jobs from disk")
+    except Exception as e:
+        print(f"[startup] Failed to load pipeline video jobs: {e}")
 
 
 def _update_pipeline_job_progress(job: PipelineVideoJob):
@@ -210,6 +355,26 @@ def startup_services():
 
     from file_watcher import start_watcher
     start_watcher(_auto_process_new_mkv, interval=5)
+
+    # Restore denoise, pipeline video, and ASR jobs from disk
+    _load_denoise_jobs()
+    _load_pv_jobs()
+    _load_asr_jobs()
+    _load_asr_compare_jobs()
+
+    # Preload ASR models in background so first request is fast
+    def _preload_asr():
+        import time
+        time.sleep(2)  # let server finish startup first
+        try:
+            from asr_pipeline import _get_asr_model
+            print("[startup] Preloading Qwen3-ASR model...")
+            _get_asr_model("qwen3-asr", device="cuda")
+            print("[startup] Qwen3-ASR model loaded to GPU")
+        except Exception as e:
+            print(f"[startup] ASR preload failed (will load on first use): {e}")
+
+    threading.Thread(target=_preload_asr, daemon=True).start()
 
     # Restore download jobs from aria2c state
     def restore_jobs():
@@ -861,6 +1026,54 @@ def delete_job(job_id: str):
     if not ok:
         raise HTTPException(status_code=404, detail="Job not found")
     return {"status": "ok"}
+
+
+@app.post("/api/jobs/{job_id}/discard")
+def discard_pipeline_job(job_id: str):
+    """Discard an interrupted pipeline job."""
+    result = pipeline.discard_interrupted(job_id)
+    if result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result["message"])
+    return result
+
+
+@app.post("/api/jobs/{job_id}/resume")
+def resume_pipeline_job(job_id: str):
+    """Resume an interrupted pipeline job. Re-submits the job for processing."""
+    result = pipeline.resume_job(job_id)
+    if result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result["message"])
+    jd = result.get("job", {})
+    # Re-submit pipeline based on what the job had
+    if jd.get("magnet"):
+        threading.Thread(target=_resubmit_pipeline, args=(job_id,), daemon=True).start()
+        return {"status": "ok", "message": "任务已恢复，正在重新提交下载"}
+    elif jd.get("mkv_path"):
+        threading.Thread(target=_resubmit_split, args=(job_id,), daemon=True).start()
+        return {"status": "ok", "message": "任务已恢复，正在重新分割"}
+    return {"status": "ok", "message": "任务已标记为待恢复，需手动重新提交"}
+
+
+def _resubmit_pipeline(job_id: str):
+    """Re-run full pipeline for a resumed job."""
+    j = pipeline.get_job(job_id)
+    if not j:
+        return
+    pipeline.run_full_pipeline(
+        job_id=job_id, magnet=j.magnet, title=j.title,
+        hw_accel="auto", download_method="aria2c",
+    )
+
+
+def _resubmit_split(job_id: str):
+    """Re-run extract+split for a resumed job."""
+    j = pipeline.get_job(job_id)
+    if not j:
+        return
+    pipeline.run_extract_and_split(
+        job_id=job_id, mkv_path=j.mkv_path, title=j.title,
+        hw_accel="auto",
+    )
 
 
 # ============================================================
@@ -1768,6 +1981,7 @@ def denoise_batch(payload: dict = Body(...)):
     job = DenoiseJob(job_id=job_id, video_name=video_name, files=files)
     with _denoise_lock:
         _denoise_jobs[job_id] = job
+        _save_denoise_jobs()
 
     # Run in background thread
     def _run():
@@ -1805,6 +2019,7 @@ def denoise_batch(payload: dict = Body(...)):
         job.current_file = ""
         job.status = "completed"
         job.progress = 100
+        _save_denoise_jobs()
 
     t = threading.Thread(target=_run, daemon=True)
     t.start()
@@ -1828,6 +2043,120 @@ def list_denoise_jobs():
     with _denoise_lock:
         jobs = sorted(_denoise_jobs.values(), key=lambda j: j.created_at, reverse=True)[:20]
     return {"jobs": [j.to_dict() for j in jobs], "count": len(jobs)}
+
+
+@app.post("/api/denoise/job/{job_id}/discard")
+def denoise_discard_job(job_id: str):
+    """Discard an interrupted denoise job."""
+    with _denoise_lock:
+        job = _denoise_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "interrupted":
+        raise HTTPException(status_code=400, detail=f"Job is {job.status}, not interrupted")
+    job.status = "cancelled"
+    _save_denoise_jobs()
+    return {"status": "ok", "message": "已丢弃中断的任务"}
+
+
+@app.post("/api/denoise/job/{job_id}/resume")
+def denoise_resume_job(job_id: str):
+    """Resume an interrupted denoise job, skipping completed files."""
+    with _denoise_lock:
+        job = _denoise_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "interrupted":
+        raise HTTPException(status_code=400, detail=f"Job is {job.status}, not interrupted")
+    job.status = "running"
+    _save_denoise_jobs()
+    threading.Thread(target=_run_denoise_resume, args=(job_id,), daemon=True).start()
+    return {"status": "ok", "message": "已恢复执行"}
+
+
+def _run_denoise_resume(job_id: str):
+    """Resume an interrupted denoise job, skipping completed files."""
+    from denoise_audio import run_full_denoise
+
+    with _denoise_lock:
+        job = _denoise_jobs.get(job_id)
+    if not job:
+        return
+
+    completed = [f for f in job.files if f.status == "completed"]
+    pending = [f for f in job.files if f.status != "completed"]
+
+    if not pending:
+        job.status = "completed"
+        job.progress = 100
+        _save_denoise_jobs()
+        return
+
+    total = len(job.files)
+    already_done = len(completed)
+    completed_count = already_done
+
+    job.status = "running"
+    for f in pending:
+        f.status = "running"
+        job.current_file = f.name
+        job.progress = (completed_count / total) * 100
+
+        video_dir = job.video_name or os.path.basename(os.path.dirname(f.input_path))
+        output_dir = os.path.join(CLEANED_DIR, video_dir)
+        os.makedirs(output_dir, exist_ok=True)
+
+        def on_step(step_key, status, message):
+            f.steps.append({"step": step_key, "status": status, "message": message})
+
+        # Check if processing WAV or MP4
+        is_mp4 = f.input_path.lower().endswith(".mp4")
+        wav_input = f.input_path
+        wav_tmp = ""
+
+        if is_mp4:
+            import tempfile
+            wav_tmp = os.path.join(tempfile.gettempdir(), "resume_denoise_" + uuid.uuid4().hex[:8] + ".wav")
+            try:
+                conv = subprocess.run(
+                    [FFMPEG, "-y", "-i", f.input_path, "-vn", "-acodec", "pcm_s16le",
+                     "-ar", "48000", "-ac", "1", wav_tmp],
+                    capture_output=True, timeout=60,
+                )
+                if conv.returncode != 0 or not os.path.exists(wav_tmp) or os.path.getsize(wav_tmp) == 0:
+                    f.status = "error"
+                    f.steps.append({"step": "convert", "status": "error", "message": "音频提取失败"})
+                    completed_count += 1
+                    continue
+                wav_input = wav_tmp
+            except Exception as e:
+                f.status = "error"
+                f.steps.append({"step": "convert", "status": "error", "message": str(e)[:100]})
+                completed_count += 1
+                continue
+
+        result = run_full_denoise(wav_input, output_dir, on_step=on_step)
+
+        if wav_tmp:
+            try:
+                os.remove(wav_tmp)
+            except Exception:
+                pass
+
+        if result["success"]:
+            f.status = "completed"
+            f.output_path = result["output_path"]
+        elif result.get("discard_reason"):
+            f.status = "discarded"
+        else:
+            f.status = "error"
+
+        completed_count += 1
+
+    job.current_file = ""
+    job.status = "completed"
+    job.progress = 100
+    _save_denoise_jobs()
 
 
 @app.get("/api/denoise/sources")
@@ -2685,7 +3014,8 @@ def get_settings():
         paths[k] = getattr(config, k, '')
     steps = getattr(config, 'DENOISE_DEFAULT_STEPS', None)
     pv_steps = getattr(config, 'PV_DEFAULT_STEPS', None)
-    return {"paths": paths, "denoise_default_steps": steps, "pv_default_steps": pv_steps}
+    config_vals = {k: getattr(config, k, config._CONFIG_KEYS[k]) for k in config._CONFIG_KEYS}
+    return {"paths": paths, "denoise_default_steps": steps, "pv_default_steps": pv_steps, "config": config_vals}
 
 
 @app.post("/api/settings")
@@ -2695,7 +3025,8 @@ def save_settings(payload: dict = Body(...)):
     paths = payload.get("paths", {})
     steps = payload.get("denoise_default_steps", None)
     pv_steps = payload.get("pv_default_steps", None)
-    save_settings(paths, steps, pv_steps)
+    config_vals = payload.get("config", None)
+    save_settings(paths, steps, pv_steps, config_vals)
     return {"status": "ok"}
 
 
@@ -3397,7 +3728,7 @@ def run_split(payload: dict = Body(...)):
 
 # ASR job tracking
 _asr_jobs: dict[str, dict] = {}
-_asr_lock = threading.Lock()
+_asr_lock = threading.RLock()
 
 
 def _find_videos_for_asr() -> list:
@@ -3458,8 +3789,9 @@ def list_asr_models():
 def run_asr_extraction(
     path: str = Query(..., description="Full path to video file"),
     model: str = Query("qwen3-asr", description="ASR model key"),
-    language: str = Query("ja", description="Language code or 'auto'"),
+    language: str = Query("zh", description="Language code or 'auto'"),
     device: str = Query("cuda", description="Device: cuda or cpu"),
+    hotwords: str = Query("", description="Context/ proper nouns for recognition"),
 ):
     """Start an ASR extraction job on a video file.
 
@@ -3478,6 +3810,7 @@ def run_asr_extraction(
             "video_path": path,
             "model": model,
             "language": language,
+            "hotwords": hotwords,
             "status": "pending",
             "progress": 0,
             "current_step": "",
@@ -3485,6 +3818,7 @@ def run_asr_extraction(
             "error": None,
             "created_at": time.time(),
         }
+        _save_asr_jobs()
 
     def _run():
         from asr_pipeline import run_asr_pipeline, ASR_MODELS
@@ -3494,6 +3828,7 @@ def run_asr_extraction(
             if not job:
                 return
             job["status"] = "running"
+            _save_asr_jobs()
 
         try:
             model_info = ASR_MODELS.get(model, ASR_MODELS.get("qwen3-asr", {}))
@@ -3513,7 +3848,7 @@ def run_asr_extraction(
 
             result = run_asr_pipeline(
                 path, model_key=model, language=language, device=device,
-                progress_callback=on_progress,
+                progress_callback=on_progress, hotwords=hotwords,
             )
 
             with _asr_lock:
@@ -3523,6 +3858,7 @@ def run_asr_extraction(
                     j["progress"] = 100
                     j["current_step"] = "处理完成"
                     j["result"] = result
+                    _save_asr_jobs()
 
         except Exception as e:
             with _asr_lock:
@@ -3531,6 +3867,7 @@ def run_asr_extraction(
                     j["status"] = "failed"
                     j["error"] = str(e)
                     j["current_step"] = f"错误: {e}"
+                    _save_asr_jobs()
 
     threading.Thread(target=_run, daemon=True).start()
 
@@ -3567,6 +3904,7 @@ def cancel_asr_job(job_id: str):
             raise HTTPException(status_code=400, detail="Job is not running")
         job["status"] = "cancelled"
         job["current_step"] = "已取消"
+        _save_asr_jobs()
     return {"status": "cancelled"}
 
 
@@ -3580,7 +3918,175 @@ def clear_asr_jobs():
         ]
         for jid in to_remove:
             del _asr_jobs[jid]
+        if to_remove:
+            _save_asr_jobs()
     return {"cleared": len(to_remove)}
+
+
+@app.post("/api/asr/job/{job_id}/discard")
+def asr_discard_job(job_id: str):
+    """Discard an interrupted ASR job."""
+    with _asr_lock:
+        job = _asr_jobs.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        job["status"] = "cancelled"
+        job["current_step"] = "已丢弃"
+        _save_asr_jobs()
+    return {"status": "discarded"}
+
+
+@app.post("/api/asr/job/{job_id}/resume")
+def asr_resume_job(job_id: str):
+    """Resume an interrupted ASR job."""
+    with _asr_lock:
+        job = _asr_jobs.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        if job.get("status") not in ("interrupted",):
+            raise HTTPException(status_code=400, detail="Job is not in interrupted state")
+        job_type = job.get("type", "video")
+
+    if job_type == "folder":
+        threading.Thread(target=_run_asr_folder_resume, args=(job_id,), daemon=True).start()
+    else:
+        threading.Thread(target=_run_asr_resume, args=(job_id,), daemon=True).start()
+    return {"status": "resuming"}
+
+
+def _run_asr_resume(job_id: str):
+    """Re-run an interrupted single-video ASR job."""
+    from asr_pipeline import run_asr_pipeline, ASR_MODELS
+
+    with _asr_lock:
+        job = _asr_jobs.get(job_id)
+        if not job:
+            return
+        path = job.get("video_path", "")
+        model = job.get("model", "qwen3-asr")
+        language = job.get("language", "zh")
+        device = job.get("device", "cuda")
+        hotwords = job.get("hotwords", "")
+        job["status"] = "running"
+        job["error"] = None
+        _save_asr_jobs()
+
+    try:
+        model_info = ASR_MODELS.get(model, ASR_MODELS.get("qwen3-asr", {}))
+
+        def on_progress(step, pct):
+            with _asr_lock:
+                j = _asr_jobs.get(job_id)
+                if j:
+                    j["progress"] = pct
+                    step_labels = {
+                        "extracting_audio": "正在从视频提取音频...",
+                        "running_asr": f"正在使用 {model_info.get('name', model)} 进行语音识别...",
+                        "generating_srt": "正在生成字幕文件...",
+                        "completed": "处理完成",
+                    }
+                    j["current_step"] = step_labels.get(step, step)
+
+        result = run_asr_pipeline(
+            path, model_key=model, language=language, device=device,
+            progress_callback=on_progress, hotwords=hotwords,
+        )
+
+        with _asr_lock:
+            j = _asr_jobs.get(job_id)
+            if j:
+                j["status"] = "completed"
+                j["progress"] = 100
+                j["current_step"] = "处理完成"
+                j["result"] = result
+                _save_asr_jobs()
+
+    except Exception as e:
+        with _asr_lock:
+            j = _asr_jobs.get(job_id)
+            if j:
+                j["status"] = "failed"
+                j["error"] = str(e)
+                j["current_step"] = f"错误: {e}"
+                _save_asr_jobs()
+
+
+def _run_asr_folder_resume(job_id: str):
+    """Re-run an interrupted folder ASR job, skipping already completed files."""
+    from asr_pipeline import run_asr_on_audio
+
+    with _asr_lock:
+        job = _asr_jobs.get(job_id)
+        if not job:
+            return
+        folder_path = job.get("folder_path", "")
+        model_key = job.get("model", "qwen3-asr")
+        language = job.get("language", "zh")
+        device = job.get("device", "cuda")
+        hotwords = job.get("hotwords", "")
+        output_dir = job.get("output_dir", "")
+        all_files = list(job.get("files", []))
+        completed_names = {r.get("audio_name", "") for r in job.get("results", [])}
+
+    # Only process files that haven't been completed yet
+    pending_files = [af for af in all_files if af.get("name", "") not in completed_names]
+    if not pending_files:
+        with _asr_lock:
+            j = _asr_jobs.get(job_id)
+            if j:
+                j["status"] = "completed"
+                j["progress"] = 100
+                j["current_step"] = "处理完成"
+                _save_asr_jobs()
+        return
+
+    with _asr_lock:
+        job = _asr_jobs.get(job_id)
+        if not job:
+            return
+        job["status"] = "running"
+        job["current_step"] = "加载模型中..."
+        _save_asr_jobs()
+
+    for idx, af in enumerate(pending_files):
+        with _asr_lock:
+            j = _asr_jobs.get(job_id)
+            if not j or j.get("status") == "cancelled":
+                return
+            j["current_file"] = af["name"]
+            j["progress"] = round((idx / len(pending_files)) * 100)
+
+        def on_progress(step, msg):
+            with _asr_lock:
+                jj = _asr_jobs.get(job_id)
+                if jj and jj.get("status") != "cancelled":
+                    jj["current_step"] = str(msg) if msg else str(step)
+
+        try:
+            result = run_asr_on_audio(
+                af["path"], output_dir,
+                model_key=model_key, language=language, device=device,
+                progress_callback=on_progress, hotwords=hotwords,
+            )
+            with _asr_lock:
+                jj = _asr_jobs.get(job_id)
+                if jj:
+                    jj["results"].append(result)
+                    jj["completed"] = len(jj["results"])
+        except Exception as e:
+            with _asr_lock:
+                jj = _asr_jobs.get(job_id)
+                if jj:
+                    jj["errors"].append({"file": af["name"], "error": str(e)})
+
+    with _asr_lock:
+        j = _asr_jobs.get(job_id)
+        if j and j.get("status") != "cancelled":
+            j["status"] = "completed"
+            j["progress"] = 100
+            j["current_file"] = ""
+            j["current_step"] = "处理完成"
+            _save_asr_jobs()
 
 
 @app.get("/api/asr/preview-audio")
@@ -3814,10 +4320,11 @@ def run_asr_folder(payload: dict = Body(...)):
     """
     folder_path = payload.get("folder_path", "").strip()
     model_key = payload.get("model", "qwen3-asr")
-    language = payload.get("language", "ja")
+    language = payload.get("language", "zh")
     device = payload.get("device", "cuda")
     output_base = payload.get("output_dir", "").strip()
     selected_files = payload.get("selected_files", None)  # optional list of file names
+    hotwords = payload.get("hotwords", "")
 
     if not folder_path or not os.path.isdir(folder_path):
         raise HTTPException(status_code=400, detail="无效的文件夹路径")
@@ -3870,12 +4377,14 @@ def run_asr_folder(payload: dict = Body(...)):
         "model": model_key,
         "language": language,
         "device": device,
+        "hotwords": hotwords,
         "results": [],
         "errors": [],
     }
 
     with _asr_lock:
         _asr_jobs[job_id] = job
+        _save_asr_jobs()
 
     def _run():
         with _asr_lock:
@@ -3884,6 +4393,7 @@ def run_asr_folder(payload: dict = Body(...)):
                 return
             j["status"] = "running"
             j["current_step"] = "加载模型中..."
+            _save_asr_jobs()
 
         from asr_pipeline import run_asr_on_audio
 
@@ -3905,7 +4415,7 @@ def run_asr_folder(payload: dict = Body(...)):
                 result = run_asr_on_audio(
                     af["path"], output_dir,
                     model_key=model_key, language=language, device=device,
-                    progress_callback=on_progress,
+                    progress_callback=on_progress, hotwords=hotwords,
                 )
                 with _asr_lock:
                     jj = _asr_jobs.get(job_id)
@@ -3925,6 +4435,7 @@ def run_asr_folder(payload: dict = Body(...)):
                 j["progress"] = 100
                 j["current_file"] = ""
                 j["current_step"] = "处理完成"
+                _save_asr_jobs()
 
     threading.Thread(target=_run, daemon=True).start()
 
@@ -3948,8 +4459,40 @@ def get_asr_folder_output_dir():
 # ============================================================
 
 _asr_compare_jobs: dict[str, dict] = {}
-_asr_compare_lock = threading.Lock()
+_asr_compare_lock = threading.RLock()
 _asr_compare_results: dict[str, dict] = {}  # keyed by audio path
+
+_ASR_COMPARE_JOBS_FILE = os.path.join(DATA_DIR, "asr_compare_jobs.json")
+
+
+def _save_asr_compare_jobs():
+    """Persist ASR compare jobs to disk."""
+    try:
+        with _asr_compare_lock:
+            data = dict(_asr_compare_jobs)
+        tmp = _ASR_COMPARE_JOBS_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, _ASR_COMPARE_JOBS_FILE)
+    except Exception as e:
+        print(f"[asr-compare] Failed to save jobs: {e}")
+
+
+def _load_asr_compare_jobs():
+    """Restore ASR compare jobs from disk. Mark running jobs as interrupted."""
+    if not os.path.exists(_ASR_COMPARE_JOBS_FILE):
+        return
+    try:
+        with open(_ASR_COMPARE_JOBS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        for job_id, jd in data.items():
+            if jd.get("status") == "running":
+                jd["status"] = "interrupted"
+                jd["current_step"] = "服务器重启中断"
+            _asr_compare_jobs[job_id] = jd
+        print(f"[startup] Restored {len(_asr_compare_jobs)} ASR compare jobs from disk")
+    except Exception as e:
+        print(f"[startup] Failed to load ASR compare jobs: {e}")
 
 
 def _find_unreviewed_wav_files() -> list:
@@ -4008,11 +4551,12 @@ def list_asr_compare_models():
 
 @app.post("/api/asr-compare/run-all")
 def run_asr_compare_all(
-    language: str = Query("ja"),
+    language: str = Query("zh"),
     device: str = Query("cuda"),
     dirs: list[str] = Query([], description="Optional list of source directory names to process"),
     model_a: str = Query("qwen3-asr"),
     model_b: str = Query("cohere-transcribe"),
+    hotwords: str = Query("", description="Context/ proper nouns for recognition"),
 ):
     """Queue WAV files from cleaned_unreviewed/ and process sequentially.
 
@@ -4055,7 +4599,13 @@ def run_asr_compare_all(
             "results": {},
             "error": None,
             "created_at": time.time(),
+            "_model_a": model_a,
+            "_model_b": model_b,
+            "_language": language,
+            "_device": device,
+            "_hotwords": hotwords,
         }
+        _save_asr_compare_jobs()
 
     def _run():
         from asr_pipeline import compare_asr_pipeline, ASR_MODELS, COMPARE_MODELS
@@ -4065,6 +4615,7 @@ def run_asr_compare_all(
             if not job:
                 return
             job["status"] = "running"
+            _save_asr_compare_jobs()
 
         files = all_files
         total = len(files)
@@ -4076,6 +4627,7 @@ def run_asr_compare_all(
                     if job:
                         job["status"] = "cancelled"
                         job["current_step"] = "已中止"
+                        _save_asr_compare_jobs()
                     return
 
             audio_path = f["path"]
@@ -4096,6 +4648,7 @@ def run_asr_compare_all(
                     source_dir=f["source_dir"],
                     model_a=model_a,
                     model_b=model_b,
+                    hotwords=hotwords,
                 )
                 result["source_dir"] = f["source_dir"]
 
@@ -4129,6 +4682,7 @@ def run_asr_compare_all(
                 j["status"] = "completed"
                 j["progress"] = 100
                 j["current_step"] = f"处理完成 — {total} 个文件, {j['flagged_count']} 个异常"
+                _save_asr_compare_jobs()
 
         # Persist results for later queries
         with _asr_compare_lock:
@@ -4152,6 +4706,15 @@ def get_asr_compare_job(job_id: str):
     return job
 
 
+@app.get("/api/asr-compare/jobs")
+def list_asr_compare_jobs():
+    """List all ASR compare jobs (most recent first)."""
+    with _asr_compare_lock:
+        jobs = list(_asr_compare_jobs.values())
+    jobs.sort(key=lambda j: j.get("created_at", 0), reverse=True)
+    return {"jobs": jobs}
+
+
 @app.post("/api/asr-compare/cancel")
 def cancel_asr_compare_job(payload: dict = Body(...)):
     """Cancel a running comparison job."""
@@ -4167,7 +4730,123 @@ def cancel_asr_compare_job(payload: dict = Body(...)):
             return {"status": "error", "detail": f"Job is {job.get('status')}, cannot cancel"}
         job["_cancelled"] = True
         job["current_step"] = "正在中止..."
+        _save_asr_compare_jobs()
     return {"status": "ok", "detail": "Cancelling..."}
+
+
+@app.post("/api/asr-compare/job/{job_id}/discard")
+def asr_compare_discard_job(job_id: str):
+    """Discard an interrupted ASR compare job."""
+    with _asr_compare_lock:
+        job = _asr_compare_jobs.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        job["status"] = "cancelled"
+        job["current_step"] = "已丢弃"
+        _save_asr_compare_jobs()
+    return {"status": "discarded"}
+
+
+@app.post("/api/asr-compare/job/{job_id}/resume")
+def asr_compare_resume_job(job_id: str):
+    """Resume an interrupted ASR compare job."""
+    with _asr_compare_lock:
+        job = _asr_compare_jobs.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        if job.get("status") not in ("interrupted",):
+            raise HTTPException(status_code=400, detail="Job is not in interrupted state")
+        files = list(job.get("files", []))
+        model_a = job.get("_model_a", "qwen3-asr")
+        model_b = job.get("_model_b", "cohere-transcribe")
+        language = job.get("_language", "ja")
+        device = job.get("_device", "cuda")
+        hotwords = job.get("_hotwords", "")
+
+    def _run():
+        from asr_pipeline import compare_asr_pipeline, ASR_MODELS
+
+        with _asr_compare_lock:
+            j = _asr_compare_jobs.get(job_id)
+            if not j:
+                return
+            j["status"] = "running"
+            j["current_step"] = "加载模型中..."
+            _save_asr_compare_jobs()
+
+        # Skip already-processed files
+        completed_paths = set(j.get("results", {}).keys())
+        total = len(files)
+
+        for idx, f in enumerate(files):
+            audio_path = f["path"]
+            if audio_path in completed_paths:
+                continue
+
+            audio_name = f["name"]
+
+            with _asr_compare_lock:
+                j = _asr_compare_jobs.get(job_id)
+                if not j or j.get("_cancelled") or j.get("status") == "cancelled":
+                    return
+                j["current_file"] = audio_name
+                j["progress"] = round((idx / total) * 100)
+
+            def on_progress(step, pct):
+                with _asr_compare_lock:
+                    jj = _asr_compare_jobs.get(job_id)
+                    if jj and jj.get("status") != "cancelled":
+                        jj["current_step"] = f"[{jj['completed'] + 1}/{total}] {audio_name} — {step}"
+
+            try:
+                result = compare_asr_pipeline(
+                    audio_path,
+                    language=language,
+                    device=device,
+                    progress_callback=on_progress,
+                    source_dir=f["source_dir"],
+                    model_a=model_a,
+                    model_b=model_b,
+                    hotwords=hotwords,
+                )
+                result["source_dir"] = f["source_dir"]
+
+                with _asr_compare_lock:
+                    jj = _asr_compare_jobs.get(job_id)
+                    if jj:
+                        jj["completed"] = jj.get("completed", 0) + 1
+                        jj["progress"] = int((jj["completed"] / total) * 100)
+                        jj["results"][audio_path] = result
+                        if result.get("flagged"):
+                            jj["flagged_count"] = jj.get("flagged_count", 0) + 1
+
+            except Exception as e:
+                with _asr_compare_lock:
+                    jj = _asr_compare_jobs.get(job_id)
+                    if jj:
+                        jj["completed"] = jj.get("completed", 0) + 1
+                        jj["progress"] = int((jj["completed"] / total) * 100)
+                        jj["results"][audio_path] = {
+                            "audio_path": audio_path,
+                            "audio_name": audio_name,
+                            "source_dir": f["source_dir"],
+                            "error": str(e),
+                            "flagged": True,
+                        }
+                        jj["flagged_count"] = jj.get("flagged_count", 0) + 1
+
+        with _asr_compare_lock:
+            jj = _asr_compare_jobs.get(job_id)
+            if jj:
+                jj["status"] = "completed"
+                jj["progress"] = 100
+                jj["current_step"] = f"处理完成 — {total} 个文件, {jj['flagged_count']} 个异常"
+                _save_asr_compare_jobs()
+                for path, result in jj["results"].items():
+                    _asr_compare_results[path] = result
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"status": "resuming"}
 
 
 @app.get("/api/asr-compare/results")
@@ -4480,6 +5159,7 @@ def pv_start_pipeline(payload: dict = Body(...)):
     job.output_dir = payload.get("output_dir", "") or PIPELINE_VIDEO_DIR
     with _pipeline_video_lock:
         _pipeline_video_jobs[job_id] = job
+        _save_pv_jobs()
 
     threading.Thread(target=_run_pipeline_video, args=(job_id,), daemon=True).start()
 
@@ -4531,7 +5211,40 @@ def pv_cancel_job(job_id: str):
     job.cancelled = True
     job.status = "cancelled"
     _update_pipeline_job_progress(job)
+    _save_pv_jobs()
     return {"status": "ok", "message": "已取消任务"}
+
+
+@app.post("/api/pipeline-video/job/{job_id}/discard")
+def pv_discard_job(job_id: str):
+    """Discard an interrupted pipeline video job."""
+    with _pipeline_video_lock:
+        job = _pipeline_video_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "interrupted":
+        raise HTTPException(status_code=400, detail=f"Job is {job.status}, not interrupted")
+    job.status = "cancelled"
+    _update_pipeline_job_progress(job)
+    _save_pv_jobs()
+    return {"status": "ok", "message": "已丢弃中断的任务"}
+
+
+@app.post("/api/pipeline-video/job/{job_id}/resume")
+def pv_resume_job(job_id: str):
+    """Resume an interrupted pipeline video job, skipping completed files."""
+    with _pipeline_video_lock:
+        job = _pipeline_video_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "interrupted":
+        raise HTTPException(status_code=400, detail=f"Job is {job.status}, not interrupted")
+    job.status = "running"
+    job.cancelled = False
+    _update_pipeline_job_progress(job)
+    _save_pv_jobs()
+    threading.Thread(target=_run_pipeline_video_resume, args=(job_id,), daemon=True).start()
+    return {"status": "ok", "message": "已恢复执行"}
 
 
 # ============================================================
@@ -4579,6 +5292,46 @@ def _get_optimal_wav_params(enabled_steps: list) -> tuple:
     if "asr" in enabled_steps:
         return 16000, 1  # ASR native rate, mono
     return 44100, 2  # default stereo
+
+
+def _run_pipeline_video_resume(job_id: str):
+    """Resume an interrupted pipeline video job — skip completed files."""
+    with _pipeline_video_lock:
+        job = _pipeline_video_jobs.get(job_id)
+    if not job:
+        return
+
+    completed = [f for f in job.files if f.status == "completed"]
+    pending = [f for f in job.files if f.status != "completed"]
+
+    if not pending:
+        job.status = "completed"
+        job.progress = 100
+        _update_pipeline_job_progress(job)
+        _save_pv_jobs()
+        return
+
+    for f in pending:
+        f.status = "pending"
+        f.progress = 0
+        f.current_step = ""
+        f.steps = []
+        f.output_clips = []
+        f.wav_path = ""
+        f.error = ""
+
+    job.files = pending
+    job.status = "running"
+    _save_pv_jobs()
+
+    _run_pipeline_video(job_id)
+
+    with _pipeline_video_lock:
+        job = _pipeline_video_jobs.get(job_id)
+        if job:
+            job.files = completed + job.files
+            _update_pipeline_job_progress(job)
+            _save_pv_jobs()
 
 
 def _run_pipeline_video(job_id: str):
@@ -4875,9 +5628,10 @@ def _run_pipeline_video(job_id: str):
                 f.progress = float(msg) if isinstance(msg, (int, float)) else f.progress
 
         try:
+            from config import ASR_DEFAULT_HOTWORDS as _hotwords
             result = run_asr_on_audio(
                 src, output_dir=temp_dir, model_key="qwen3-asr", language="zh",
-                progress_callback=on_progress,
+                progress_callback=on_progress, hotwords=_hotwords,
             )
             srt = result.get("srt_path", "")
             if srt and os.path.exists(srt):
@@ -5449,6 +6203,7 @@ def _run_pipeline_video(job_id: str):
     job.status = "completed"
     job.progress = 100
     _update_pipeline_job_progress(job)
+    _save_pv_jobs()
 
 # ============================================================
 # cut_audio_by_subtitle — helper to slice audio by SRT

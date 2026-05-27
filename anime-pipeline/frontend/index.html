@@ -110,6 +110,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
 .status-download_submitted { background: #0f3460; color: #4a9eff; }
 .status-queued { background: #3a2a0a; color: var(--warning); }
 .status-cancelled { background: #3a3a1a; color: var(--warning); }
+.status-interrupted { background: #3a1a1a; color: #ff6b6b; }
 
 .progress-bar {
   height: 6px; background: var(--border); border-radius: 3px; margin: 8px 0; overflow: hidden;
@@ -800,6 +801,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
       <div class="progress-bar"><div id="denoise-progress-fill" class="progress-fill" style="width:0%;background:var(--success);"></div></div>
       <div id="denoise-progress-text" style="font-size:12px;color:var(--text2);margin-top:4px;"></div>
     </div>
+    <div id="denoise-interrupted-section" style="display:none;"></div>
 
     <!-- File processing list -->
     <div id="denoise-file-list" style="max-height:50vh;overflow-y:auto;margin-bottom:16px;">
@@ -1144,6 +1146,30 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
             </div>
           </div>
 
+          <div style="display:flex;gap:12px;margin-bottom:12px;">
+            <div style="flex:1;">
+              <label style="display:block;font-size:12px;color:var(--text2);margin-bottom:4px;">ASR 模型</label>
+              <select id="asr-folder-model-select" style="width:100%;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:12px;">
+                <option value="">加载中...</option>
+              </select>
+            </div>
+            <div style="flex:1;">
+              <label style="display:block;font-size:12px;color:var(--text2);margin-bottom:4px;">语言</label>
+              <select id="asr-folder-lang-select" style="width:100%;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:12px;">
+                <option value="zh" selected>中文</option>
+                <option value="auto">自动检测</option>
+                <option value="ja">日本語</option>
+                <option value="en">English</option>
+                <option value="ko">한국어</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="margin-bottom:12px;">
+            <label style="display:block;font-size:12px;color:var(--text2);margin-bottom:4px;">热词/专有名词</label>
+            <input id="asr-folder-hotwords" type="text" placeholder="例如: 雪狐桑, 原神, 刻晴" style="width:100%;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:12px;">
+          </div>
+
           <button class="btn btn-primary" id="btn-asr-folder-run" onclick="runAsrFolder()" style="width:100%;padding:10px;font-size:14px;" disabled>
             开始批量语音识别
           </button>
@@ -1187,12 +1213,18 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
           <div style="margin-bottom:16px;">
             <label style="display:block;font-size:13px;color:var(--text2);margin-bottom:6px;">语言</label>
             <select id="asr-lang-select" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:14px;">
-              <option value="ja" selected>日本語</option>
+              <option value="zh" selected>中文</option>
               <option value="auto">自动检测</option>
-              <option value="zh">中文</option>
+              <option value="ja">日本語</option>
               <option value="en">English</option>
               <option value="ko">한국어</option>
             </select>
+          </div>
+
+          <!-- Hotwords -->
+          <div style="margin-bottom:16px;">
+            <label style="display:block;font-size:13px;color:var(--text2);margin-bottom:6px;">热词/专有名词（提示模型关注特定词汇）</label>
+            <input id="asr-hotwords" type="text" placeholder="例如: 雪狐桑, 原神, 刻晴" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:14px;">
           </div>
 
           <!-- Device selection -->
@@ -1310,6 +1342,10 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
                 <option value="cuda">GPU (CUDA)</option>
                 <option value="cpu">CPU</option>
               </select>
+            </div>
+            <div style="flex:1;min-width:180px;">
+              <label style="display:block;font-size:13px;color:var(--text2);margin-bottom:4px;">热词/专有名词</label>
+              <input id="cmp-hotwords" type="text" placeholder="例如: 雪狐桑, 原神" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;">
             </div>
             <div>
               <button class="btn btn-primary" id="btn-cmp-run" onclick="runAsrCompareAll()" style="padding:8px 24px;font-size:14px;white-space:nowrap;" disabled>
@@ -1684,6 +1720,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
       <div id="pv-results-files" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:8px;">
       </div>
     </div>
+    <div id="pv-interrupted-section" style="display:none;"></div>
   </div>
 </main>
 
@@ -1895,6 +1932,15 @@ window._reviewDir = '';
 window._reviewIndex = 0;
 
 // ============================================================
+// UI state persistence — survive page refreshes
+// ============================================================
+var _uiState = {};
+try { var s = localStorage.getItem('anime_pipeline_ui'); if (s) _uiState = JSON.parse(s); } catch(e) {}
+function _saveUiState() {
+  try { localStorage.setItem('anime_pipeline_ui', JSON.stringify(_uiState)); } catch(e) {}
+}
+
+// ============================================================
 // Event delegation
 // ============================================================
 document.addEventListener('click', function(e) {
@@ -2028,6 +2074,14 @@ document.addEventListener('click', function(e) {
     deleteJob(btn.getAttribute('data-jobid'));
     return;
   }
+  if (btn.classList.contains('btn-resume-job')) {
+    resumePipelineJob(btn.getAttribute('data-jobid'));
+    return;
+  }
+  if (btn.classList.contains('btn-discard-job')) {
+    discardPipelineJob(btn.getAttribute('data-jobid'));
+    return;
+  }
 });
 
 // ============================================================
@@ -2039,6 +2093,7 @@ function switchTab(name) {
   document.getElementById('tab-' + name).classList.add('active');
   var navBtn = document.querySelector('nav button[data-tab="' + name + '"]');
   if (navBtn) navBtn.classList.add('active');
+  _uiState.activeTab = name; _saveUiState();
   if (name === 'local') loadLocalFiles();
   if (name === 'local-files') loadLocalFilesBrowser();
   if (name === 'jobs') { loadJobs(); startJobPolling(); } else stopJobPolling();
@@ -2047,14 +2102,18 @@ function switchTab(name) {
   if (name === 'denoise') { loadDenoiseDirs(); loadUnreviewedDirs(); }
   if (name === 'denoise-review') { loadDreviewBaseDirs(); loadEmotionCounts('dreview-emotion-bar', '/api/denoise-review/emotion-counts'); }
   if (name === 'extract') { loadExtractFiles(); loadExtractedSubs(); }
-  if (name === 'asr') { loadAsrVideos(); loadAsrModels(); loadAsrResults(); }
-  if (name === 'asr-compare' && !_cmpLoaded) { loadAsrCompareFiles(); loadAsrCompareModels(); _cmpLoaded = true; }
+  if (name === 'asr') { loadAsrVideos(); loadAsrModels(); loadAsrResults(); restoreAsrInterruptedJobs(); }
+  if (name === 'asr-compare') { if (!_cmpLoaded) { loadAsrCompareFiles(); loadAsrCompareModels(); _cmpLoaded = true; } restoreAsrCompareInterruptedJobs(); }
   if (name === 'stitch') loadStitchVideos();
   if (name === 'split') {
     if (!window._splitLoaded) { loadSplitVideos(); loadSplitClipDirs(); window._splitLoaded = true; }
   }
   if (name === 'pipelinevideo') {
     pvRenderStepConfig();
+    pvRestoreJobs();
+  }
+  if (name === 'denoise') {
+    if (!_denoiseJobsRestored) { restoreDenoiseJobs(); _denoiseJobsRestored = true; }
   }
 }
 
@@ -2085,7 +2144,7 @@ function safeAttr(str) {
 }
 
 function statusText(s) {
-  var map = { pending: '等待中', running: '运行中', completed: '已完成', failed: '失败', skipped: '已跳过', cancelled: '已取消', queued: '排队中', download_submitted: '下载中' };
+  var map = { pending: '等待中', running: '运行中', completed: '已完成', failed: '失败', skipped: '已跳过', cancelled: '已取消', queued: '排队中', download_submitted: '下载中', interrupted: '已中断' };
   return map[s] || s;
 }
 
@@ -2737,10 +2796,11 @@ async function filterClips(jobId, minDuration) {
 // ============================================================
 // Jobs
 // ============================================================
-var _jobsFilter = 'running';
+var _jobsFilter = _uiState.jobsFilter || 'running';
 
 function switchJobsSubtab(filter) {
   _jobsFilter = filter;
+  _uiState.jobsFilter = filter; _saveUiState();
   document.getElementById('jobs-subtab-running').className = 'btn ' + (filter === 'running' ? 'btn-primary' : 'btn-secondary');
   document.getElementById('jobs-subtab-completed').className = 'btn ' + (filter === 'completed' ? 'btn-primary' : 'btn-secondary');
   document.getElementById('jobs-subtab-failed').className = 'btn ' + (filter === 'failed' ? 'btn-primary' : 'btn-secondary');
@@ -2773,7 +2833,7 @@ async function loadJobs() {
 
     // Filter by status
     if (_jobsFilter === 'running') {
-      jobs = jobs.filter(function(j) { return j.status === 'running' || j.status === 'pending' || j.status === 'cancelled' || j.status === 'download_submitted' || j.status === 'queued'; });
+      jobs = jobs.filter(function(j) { return j.status === 'running' || j.status === 'pending' || j.status === 'cancelled' || j.status === 'download_submitted' || j.status === 'queued' || j.status === 'interrupted'; });
     } else if (_jobsFilter === 'completed') {
       jobs = jobs.filter(function(j) { return j.status === 'completed'; });
     } else if (_jobsFilter === 'failed') {
@@ -2798,6 +2858,7 @@ async function loadJobs() {
             '<span class="job-status status-' + j.status + '">' + statusText(j.status) + '</span>' +
             (j.status === 'completed' || j.status === 'failed' ? '<button class="btn btn-secondary btn-delete-job" data-jobid="' + j.job_id + '" style="font-size:10px;padding:2px 6px;background:var(--danger);color:#fff;margin-left:6px;">X</button>' : '') +
             (j.status === 'running' || j.status === 'download_submitted' || j.status === 'queued' ? '<button class="btn btn-secondary btn-cancel-job" data-jobid="' + j.job_id + '" style="font-size:10px;padding:2px 8px;background:var(--warning);color:#000;margin-left:6px;">取消</button>' : '') +
+            (j.status === 'interrupted' ? '<button class="btn btn-success btn-resume-job" data-jobid="' + j.job_id + '" style="font-size:10px;padding:2px 8px;background:var(--success);color:#000;margin-left:6px;">继续执行</button><button class="btn btn-secondary btn-discard-job" data-jobid="' + j.job_id + '" style="font-size:10px;padding:2px 8px;background:var(--danger);color:#fff;margin-left:4px;">丢弃</button>' : '') +
           '</div>' +
         '</div>' +
         '<div class="progress-bar"><div class="progress-fill" style="width:' + progress + '%"></div></div>' +
@@ -2854,6 +2915,26 @@ async function deleteJob(jobId) {
   } catch(e) { toast('Error: ' + e.message, 'error'); }
 }
 
+async function resumePipelineJob(jobId) {
+  if (!confirm('确定恢复此中断的任务？将跳过已完成的步骤继续执行。')) return;
+  try {
+    var resp = await fetch(API + '/api/jobs/' + jobId + '/resume', { method: 'POST' });
+    var data = await resp.json();
+    if (resp.ok) { toast(data.message || '任务已恢复', 'success'); loadJobs(); }
+    else { toast('恢复失败: ' + (data.detail || ''), 'error'); }
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function discardPipelineJob(jobId) {
+  if (!confirm('确定丢弃此中断的任务？任务记录将标记为已取消。')) return;
+  try {
+    var resp = await fetch(API + '/api/jobs/' + jobId + '/discard', { method: 'POST' });
+    var data = await resp.json();
+    if (resp.ok) { toast(data.message || '已丢弃', 'info'); loadJobs(); }
+    else { toast('丢弃失败: ' + (data.detail || ''), 'error'); }
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+}
+
 function startJobPolling() { stopJobPolling(); jobPollInterval = setInterval(loadJobs, 3000); }
 function stopJobPolling() { if (jobPollInterval) { clearInterval(jobPollInterval); jobPollInterval = null; } }
 
@@ -2897,6 +2978,7 @@ async function loadReviewClips() {
     var data = await resp.json();
     window._reviewClips = data.clips;
     window._reviewDir = data.clip_dir;
+    _uiState.reviewDir = window._reviewDir; _saveUiState();
     window._reviewIndex = data.pending_index >= 0 ? data.pending_index : 0;
 
     updateReviewStats();
@@ -3405,6 +3487,86 @@ async function deleteAllBgm() {
 // ============================================================
 // Denoise — Unreviewed sub-tab
 // ============================================================
+
+function restoreDenoiseJobs() {
+  fetch(API + '/api/denoise/jobs')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.jobs || !data.jobs.length) return;
+      for (var i = 0; i < data.jobs.length; i++) {
+        if (data.jobs[i].status === 'running') {
+          _denoiseJobId = data.jobs[i].job_id;
+          document.getElementById('denoise-progress').style.display = 'block';
+          document.getElementById('denoise-interrupted-section').style.display = 'none';
+          document.getElementById('btn-denoise-all').style.display = 'none';
+          document.getElementById('btn-denoise-source-select').style.display = 'none';
+          startPolling();
+          updateDenoiseUI(data.jobs[i]);
+          return;
+        }
+      }
+      for (var i = 0; i < data.jobs.length; i++) {
+        if (data.jobs[i].status === 'interrupted') {
+          renderDenoiseInterrupted(data.jobs[i]);
+          return;
+        }
+      }
+    }).catch(function() {});
+}
+
+function renderDenoiseInterrupted(job) {
+  var completed = 0, pending = 0;
+  for (var i = 0; i < job.files.length; i++) {
+    if (job.files[i].status === 'completed') completed++;
+    else pending++;
+  }
+  var html = '<div style="background:var(--bg2);border:1px solid #ff6b6b;border-radius:8px;padding:16px;margin-bottom:12px;">';
+  html += '<div style="font-size:16px;font-weight:bold;color:#ff6b6b;margin-bottom:8px;">降噪任务因服务器重启中断</div>';
+  html += '<div style="font-size:13px;color:var(--text2);margin-bottom:4px;">视频: ' + escapeHtml(job.video_name) + '</div>';
+  html += '<div style="font-size:13px;color:var(--text2);margin-bottom:4px;">总文件数: ' + job.files.length + ' | 已完成: ' + completed + ' | 待处理: ' + pending + '</div>';
+  html += '<div style="font-size:13px;color:var(--text2);margin-bottom:12px;">进度: ' + (job.progress || 0).toFixed(0) + '%</div>';
+  html += '<div style="display:flex;gap:8px;">';
+  html += '<button class="btn btn-success" onclick="denoiseResumeInterrupted(\'' + job.job_id + '\')" style="background:var(--success);color:#000;">继续执行 (跳过已完成)</button>';
+  html += '<button class="btn btn-secondary" onclick="denoiseDiscardInterrupted(\'' + job.job_id + '\')" style="background:var(--danger);color:#fff;">丢弃任务</button>';
+  html += '</div></div>';
+  document.getElementById('denoise-interrupted-section').style.display = 'block';
+  document.getElementById('denoise-interrupted-section').innerHTML = html;
+}
+
+async function denoiseResumeInterrupted(jobId) {
+  if (!confirm('确定恢复此降噪任务？将跳过已完成的文件继续处理。')) return;
+  try {
+    var resp = await fetch(API + '/api/denoise/job/' + jobId + '/resume', { method: 'POST' });
+    var data = await resp.json();
+    if (resp.ok) {
+      toast('降噪任务已恢复执行', 'success');
+      document.getElementById('denoise-interrupted-section').style.display = 'none';
+      document.getElementById('denoise-progress').style.display = 'block';
+      document.getElementById('btn-denoise-all').style.display = 'none';
+      document.getElementById('btn-denoise-source-select').style.display = 'none';
+      _denoiseJobId = jobId;
+      startPolling();
+    } else {
+      toast('恢复失败: ' + (data.detail || ''), 'error');
+    }
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function denoiseDiscardInterrupted(jobId) {
+  if (!confirm('确定丢弃此中断的降噪任务？')) return;
+  try {
+    var resp = await fetch(API + '/api/denoise/job/' + jobId + '/discard', { method: 'POST' });
+    var data = await resp.json();
+    if (resp.ok) {
+      toast('已丢弃', 'info');
+      document.getElementById('denoise-interrupted-section').style.display = 'none';
+      refreshDenoise();
+    } else {
+      toast('丢弃失败: ' + (data.detail || ''), 'error');
+    }
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+}
+
 var _denoiseUrevDir = '';
 var _denoiseUrevClips = [];
 var _denoiseUrevJobId = null;
@@ -3413,6 +3575,7 @@ var _denoiseUrevSelectMode = false;
 var _denoiseUrevSelected = {};
 
 function switchDenoiseSubtab(name) {
+  _uiState.denoiseSubtab = name; _saveUiState();
   document.getElementById('denoise-panel-reviewed').style.display = (name === 'reviewed') ? 'block' : 'none';
   document.getElementById('denoise-panel-unreviewed').style.display = (name === 'unreviewed') ? 'block' : 'none';
   document.getElementById('denoise-subtab-reviewed').className = (name === 'reviewed') ? 'btn btn-primary' : 'btn btn-secondary';
@@ -4988,6 +5151,7 @@ function renderStepConfig() {
       }
       renderStepConfig();
       renderDenoiseFileList();
+      _saveDenoiseSteps();
     };
   }
 
@@ -5024,13 +5188,24 @@ function renderStepConfig() {
         _denoiseSteps.splice(dropIdx, 0, moved);
         renderStepConfig();
         renderDenoiseFileList();
+        _saveDenoiseSteps();
       }
     });
   }
 }
 
+function _saveDenoiseSteps() {
+  var map = {};
+  for (var i = 0; i < _denoiseSteps.length; i++) {
+    map[_denoiseSteps[i].key] = _denoiseSteps[i].enabled;
+  }
+  _uiState.denoiseSteps = map;
+  _saveUiState();
+}
+
 function resetStepConfig() {
   _denoiseSteps = JSON.parse(JSON.stringify(STEP_DEFAULTS));
+  _saveDenoiseSteps();
   renderStepConfig();
   renderDenoiseFileList();
 }
@@ -5978,6 +6153,14 @@ async function loadAsrModels() {
     }
     if (!html) html = '<option value="">无可用模型</option>';
     selEl.innerHTML = html;
+    // Apply saved ASR defaults
+    if (_savedAsrConfig && _savedAsrConfig.ASR_DEFAULT_MODEL) {
+      selEl.value = _savedAsrConfig.ASR_DEFAULT_MODEL;
+    }
+    if (_savedAsrConfig && _savedAsrConfig.ASR_DEFAULT_LANGUAGE) {
+      var langSel = document.getElementById('asr-lang-select');
+      if (langSel) langSel.value = _savedAsrConfig.ASR_DEFAULT_LANGUAGE;
+    }
   } catch(e) { console.error('loadAsrModels:', e); }
 }
 
@@ -6085,6 +6268,7 @@ function processNextAsrInQueue() {
   var model = document.getElementById('asr-model-select').value;
   var lang = document.getElementById('asr-lang-select').value;
   var device = document.getElementById('asr-device-select').value;
+  var hotwords = document.getElementById('asr-hotwords').value.trim();
 
   // Update UI
   document.getElementById('asr-empty-state').style.display = 'none';
@@ -6102,7 +6286,8 @@ function processNextAsrInQueue() {
   var url = API + '/api/asr/run?path=' + encodeURIComponent(item.path) +
     '&model=' + encodeURIComponent(model) +
     '&language=' + encodeURIComponent(lang) +
-    '&device=' + encodeURIComponent(device);
+    '&device=' + encodeURIComponent(device) +
+    '&hotwords=' + encodeURIComponent(hotwords);
 
   fetch(url, { method: 'POST' }).then(function(resp) { return resp.json(); }).then(function(data) {
     if (data.status !== 'started') {
@@ -6194,12 +6379,14 @@ async function runAsrExtraction() {
   var model = document.getElementById('asr-model-select').value;
   var lang = document.getElementById('asr-lang-select').value;
   var device = document.getElementById('asr-device-select').value;
+  var hotwords = document.getElementById('asr-hotwords').value.trim();
 
   try {
     var url = API + '/api/asr/run?path=' + encodeURIComponent(_asrActiveVideo) +
       '&model=' + encodeURIComponent(model) +
       '&language=' + encodeURIComponent(lang) +
-      '&device=' + encodeURIComponent(device);
+      '&device=' + encodeURIComponent(device) +
+      '&hotwords=' + encodeURIComponent(hotwords);
     var resp = await fetch(url, { method: 'POST' });
     var data = await resp.json();
     if (data.status !== 'started') { toast('启动 ASR 失败', 'error'); return; }
@@ -6268,8 +6455,77 @@ async function pollAsrJob() {
         document.getElementById('btn-asr-run').disabled = false;
         document.getElementById('btn-asr-run').textContent = '开始语音识别';
       }
+    } else if (job.status === 'interrupted') {
+      stopAsrPolling();
+      document.getElementById('asr-status-text').textContent = '任务被服务器重启中断';
+      toast('ASR 任务被中断，可选择恢复或丢弃', 'warning');
+      document.getElementById('btn-asr-run').disabled = false;
+      document.getElementById('btn-asr-run').textContent = '开始语音识别';
+      restoreAsrInterruptedJobs();
     }
   } catch(e) { console.error(e); }
+}
+
+async function restoreAsrInterruptedJobs() {
+  /* Check for interrupted ASR jobs (video/folder) and show resume/discard buttons */
+  try {
+    var resp = await fetch(API + '/api/asr/jobs');
+    if (!resp.ok) return;
+    var data = await resp.json();
+    var jobs = data.jobs || [];
+    var interrupted = jobs.filter(function(j) { return j.status === 'interrupted'; });
+    if (!interrupted.length) return;
+
+    var cfgPanel = document.getElementById('asr-config-panel');
+    // Remove existing interrupted section if any
+    var existing = document.getElementById('asr-interrupted-section');
+    if (existing) existing.remove();
+
+    var html = '<div id="asr-interrupted-section" style="margin-top:12px;padding:12px;border-radius:8px;background:#3a1a1a;border:1px solid #ff6b6b;">';
+    html += '<div style="font-size:13px;color:#ff6b6b;font-weight:600;margin-bottom:8px;">' +
+      '有 ' + interrupted.length + ' 个任务因服务器重启而中断</div>';
+    for (var i = 0; i < interrupted.length; i++) {
+      var j = interrupted[i];
+      var label = j.type === 'folder'
+        ? (j.folder_name || '文件夹任务') + ' (' + (j.completed || 0) + '/' + (j.total || 0) + ' 完成)'
+        : (j.video_name || '未知视频');
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,107,107,0.2);">' +
+        '<span style="font-size:12px;color:var(--text);">' + escapeHtml(label) + '</span>' +
+        '<span style="flex-shrink:0;">' +
+        '<button class="btn btn-primary" style="font-size:10px;padding:2px 8px;margin-left:8px;" onclick="resumeAsrJob(\'' + j.job_id + '\')">恢复</button>' +
+        '<button class="btn" style="font-size:10px;padding:2px 8px;margin-left:4px;background:var(--danger);color:#fff;" onclick="discardAsrJob(\'' + j.job_id + '\')">丢弃</button>' +
+        '</span></div>';
+    }
+    html += '</div>';
+    cfgPanel.insertAdjacentHTML('beforeend', html);
+  } catch(e) { console.error(e); }
+}
+
+async function resumeAsrJob(jobId) {
+  try {
+    var resp = await fetch(API + '/api/asr/job/' + jobId + '/resume', { method: 'POST' });
+    if (!resp.ok) { var err = await resp.json(); toast('恢复失败: ' + (err.detail || '未知错误'), 'error'); return; }
+    toast('ASR 任务已恢复');
+    // Remove interrupted section
+    var section = document.getElementById('asr-interrupted-section');
+    if (section) section.remove();
+    // Start polling this job
+    _asrJobId = jobId;
+    startAsrPolling();
+    document.getElementById('asr-status').style.display = 'block';
+    document.getElementById('asr-status-text').textContent = '恢复中...';
+  } catch(e) { toast('恢复失败', 'error'); }
+}
+
+async function discardAsrJob(jobId) {
+  if (!confirm('确定要丢弃此 ASR 任务吗？')) return;
+  try {
+    var resp = await fetch(API + '/api/asr/job/' + jobId + '/discard', { method: 'POST' });
+    if (!resp.ok) { toast('丢弃失败', 'error'); return; }
+    toast('ASR 任务已丢弃');
+    var section = document.getElementById('asr-interrupted-section');
+    if (section) section.remove();
+  } catch(e) { toast('丢弃失败', 'error'); }
 }
 
 async function loadAsrResults() {
@@ -6412,6 +6668,7 @@ function switchAsrMode(mode) {
     document.getElementById('btn-asr-run').style.display = 'none';
     document.getElementById('asr-audio-status').textContent = '批量处理音频文件';
     loadAsrModels();
+    loadAsrFolderModels();
   } else {
     document.getElementById('asr-config-panel').style.display = 'none';
     document.getElementById('asr-empty-state').style.display = '';
@@ -6420,8 +6677,27 @@ function switchAsrMode(mode) {
   }
 }
 
+async function loadAsrFolderModels() {
+  try {
+    var resp = await fetch(API + '/api/asr/models');
+    if (!resp.ok) return;
+    var data = await resp.json();
+    var models = data.models || [];
+    var sel = document.getElementById('asr-folder-model-select');
+    var html = '';
+    for (var i = 0; i < models.length; i++) {
+      var m = models[i];
+      var selAttr = m.key === 'qwen3-asr' ? ' selected' : '';
+      html += '<option value="' + safeAttr(m.key) + '"' + selAttr + '>' + escapeHtml(m.name) + '</option>';
+    }
+    if (!html) html = '<option value="">无可用模型</option>';
+    sel.innerHTML = html;
+    document.getElementById('btn-asr-folder-run').disabled = !models.length;
+  } catch(e) { console.error('loadAsrFolderModels:', e); }
+}
+
 async function browseAsrFolder() {
-  var current = document.getElementById('asr-folder-path').value || '';
+  var current = document.getElementById('asr-folder-path').value || '/mnt/project/ComicCut/anime-pipeline/data/';
   var path = await openFolderPicker('选择 ASR 文件夹', current);
   if (path) {
     document.getElementById('asr-folder-path').value = path;
@@ -6557,12 +6833,14 @@ async function runAsrFolder() {
   }
   if (!selectedFiles.length) { toast('请至少选择一个音频文件', 'info'); return; }
 
-  var model = document.getElementById('asr-model-select').value;
-  var language = document.getElementById('asr-lang-select').value;
-  var device = document.getElementById('asr-device-select').value;
+  var model = document.getElementById('asr-folder-model-select').value;
+  var language = document.getElementById('asr-folder-lang-select').value;
+  var device = 'cuda';
   var outputDir = document.getElementById('asr-folder-output').value.trim();
+  var hotwords = document.getElementById('asr-folder-hotwords').value.trim();
 
-  if (!model) { toast('请选择ASR模型', 'error'); return; }
+  if (!model) { toast('请选择ASR模型', 'error'); document.getElementById('btn-asr-folder-run').disabled = false; document.getElementById('btn-asr-folder-run').textContent = '开始批量语音识别'; return; }
+  if (!language) { toast('请选择语言', 'error'); document.getElementById('btn-asr-folder-run').disabled = false; document.getElementById('btn-asr-folder-run').textContent = '开始批量语音识别'; return; }
 
   document.getElementById('btn-asr-folder-run').disabled = true;
   document.getElementById('btn-asr-folder-run').textContent = '启动中...';
@@ -6579,6 +6857,7 @@ async function runAsrFolder() {
         device: device,
         output_dir: outputDir,
         selected_files: selectedFiles,
+        hotwords: hotwords,
       }),
     });
     if (!resp.ok) {
@@ -6698,6 +6977,14 @@ async function pollAsrFolderJob() {
       document.getElementById('asr-folder-progress-text').textContent = '处理失败: ' + (job.error || '未知错误');
       document.getElementById('btn-asr-folder-run').disabled = false;
       document.getElementById('btn-asr-folder-run').textContent = '开始批量语音识别';
+    } else if (job.status === 'interrupted') {
+      stopAsrFolderPolling();
+      document.getElementById('btn-asr-folder-cancel').style.display = 'none';
+      document.getElementById('asr-folder-progress-text').textContent = '任务被服务器重启中断';
+      document.getElementById('btn-asr-folder-run').disabled = false;
+      document.getElementById('btn-asr-folder-run').textContent = '开始批量语音识别';
+      toast('ASR 文件夹任务被中断，可选择恢复或丢弃', 'warning');
+      restoreAsrInterruptedJobs();
     } else if (job.status === 'cancelled') {
       stopAsrFolderPolling();
       document.getElementById('btn-asr-folder-cancel').style.display = 'none';
@@ -6738,7 +7025,43 @@ document.addEventListener('DOMContentLoaded', function() {
   setTimeout(initAsrFolderPathInput, 100);
   // Load saved settings (denoise step defaults, etc.)
   setTimeout(loadSavedSettings, 200);
+  // Restore UI state from localStorage
+  setTimeout(restoreUiState, 150);
 });
+
+function restoreUiState() {
+  // Restore active tab
+  if (_uiState.activeTab && _uiState.activeTab !== 'search') {
+    switchTab(_uiState.activeTab);
+  }
+  // Restore jobs filter buttons
+  if (_uiState.jobsFilter) {
+    switchJobsSubtab(_uiState.jobsFilter);
+  }
+  // Restore denoise subtab
+  if (_uiState.denoiseSubtab) {
+    switchDenoiseSubtab(_uiState.denoiseSubtab);
+  }
+  // Restore denoise step config
+  if (_uiState.denoiseSteps) {
+    for (var i = 0; i < _denoiseSteps.length; i++) {
+      var s = _uiState.denoiseSteps[_denoiseSteps[i].key];
+      if (typeof s !== 'undefined') _denoiseSteps[i].enabled = s;
+    }
+  }
+  // Restore pipeline video step config
+  if (_uiState.pvSteps) {
+    for (var i = 0; i < _pvSteps.length; i++) {
+      var s = _uiState.pvSteps[_pvSteps[i].key];
+      if (typeof s !== 'undefined') _pvSteps[i].enabled = s;
+    }
+    pvRenderStepConfig();
+  }
+  // Restore review dir
+  if (_uiState.reviewDir) {
+    _reviewDir = _uiState.reviewDir;
+  }
+}
 
 // ============================================================
 // ASR Comparison
@@ -6899,9 +7222,15 @@ async function loadAsrCompareModels() {
     selA.innerHTML = optsHtml;
     selB.innerHTML = optsHtml;
 
-    // Default: qwen3-asr for A, cohere-transcribe for B
-    if (_cmpModels.length >= 2) {
+    // Apply saved defaults, or fall back to hardcoded defaults
+    if (_savedAsrConfig && _savedAsrConfig.ASR_COMPARE_MODEL_A) {
+      selA.value = _savedAsrConfig.ASR_COMPARE_MODEL_A;
+    } else if (_cmpModels.length >= 2) {
       selA.value = 'qwen3-asr';
+    }
+    if (_savedAsrConfig && _savedAsrConfig.ASR_COMPARE_MODEL_B) {
+      selB.value = _savedAsrConfig.ASR_COMPARE_MODEL_B;
+    } else if (_cmpModels.length >= 2) {
       selB.value = 'cohere-transcribe';
     }
 
@@ -6939,11 +7268,11 @@ function updateCmpLangs() {
   for (var k = 0; k < langsA.length; k++) {
     if (setB[langsA[k]]) {
       var label = langNames[langsA[k]] || langsA[k];
-      var selAttr = langsA[k] === 'ja' ? ' selected' : '';
+      var selAttr = langsA[k] === 'zh' ? ' selected' : '';
       html += '<option value="' + safeAttr(langsA[k]) + '"' + selAttr + '>' + escapeHtml(label) + '</option>';
     }
   }
-  if (!html) html = '<option value="ja">日本語</option>';
+  if (!html) html = '<option value="zh">中文</option>';
   langSel.innerHTML = html;
 }
 
@@ -6954,6 +7283,7 @@ function runAsrCompareAll() {
   var models = getCmpSelectedModels();
   var lang = document.getElementById('cmp-lang-select').value || 'ja';
   var device = document.getElementById('cmp-device-select').value || 'cuda';
+  var hotwords = document.getElementById('cmp-hotwords').value.trim();
 
   document.getElementById('cmp-progress').style.display = 'block';
   document.getElementById('cmp-progress-fill').style.width = '0%';
@@ -6968,7 +7298,8 @@ function runAsrCompareAll() {
   var url = API + '/api/asr-compare/run-all?model_a=' + encodeURIComponent(models.a) +
     '&model_b=' + encodeURIComponent(models.b) +
     '&language=' + encodeURIComponent(lang) +
-    '&device=' + encodeURIComponent(device);
+    '&device=' + encodeURIComponent(device) +
+    '&hotwords=' + encodeURIComponent(hotwords);
   for (var i = 0; i < selDirs.length; i++) {
     url += '&dirs=' + encodeURIComponent(selDirs[i]);
   }
@@ -7213,6 +7544,64 @@ function packageAsrCompareResults() {
 // ============================================================
 // Audio Stitching
 // ============================================================
+async function restoreAsrCompareInterruptedJobs() {
+  /* Check for interrupted ASR compare jobs and show resume/discard buttons */
+  try {
+    var resp = await fetch(API + '/api/asr-compare/jobs');
+    if (!resp.ok) return;
+    var data = await resp.json();
+    var jobs = data.jobs || [];
+    var interrupted = jobs.filter(function(j) { return j.status === 'interrupted'; });
+    if (!interrupted.length) return;
+
+    // Show interrupted section above the main compare panel
+    var panel = document.getElementById('tab-asr-compare');
+    var existing = document.getElementById('cmp-interrupted-section');
+    if (existing) existing.remove();
+
+    var html = '<div id="cmp-interrupted-section" style="margin:12px 0;padding:12px;border-radius:8px;background:#3a1a1a;border:1px solid #ff6b6b;">';
+    html += '<div style="font-size:13px;color:#ff6b6b;font-weight:600;margin-bottom:8px;">' +
+      '有 ' + interrupted.length + ' 个 ASR 对比任务因服务器重启而中断</div>';
+    for (var i = 0; i < interrupted.length; i++) {
+      var j = interrupted[i];
+      var total = j.total || 0;
+      var completed = j.completed || 0;
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,107,107,0.2);">' +
+        '<span style="font-size:12px;color:var(--text);">ASR 对比任务 (' + completed + '/' + total + ' 完成)</span>' +
+        '<span style="flex-shrink:0;">' +
+        '<button class="btn btn-primary" style="font-size:10px;padding:2px 8px;margin-left:8px;" onclick="resumeAsrCompareJob(\'' + j.job_id + '\')">恢复</button>' +
+        '<button class="btn" style="font-size:10px;padding:2px 8px;margin-left:4px;background:var(--danger);color:#fff;" onclick="discardAsrCompareJob(\'' + j.job_id + '\')">丢弃</button>' +
+        '</span></div>';
+    }
+    html += '</div>';
+    panel.insertAdjacentHTML('afterbegin', html);
+  } catch(e) { console.error(e); }
+}
+
+async function resumeAsrCompareJob(jobId) {
+  try {
+    var resp = await fetch(API + '/api/asr-compare/job/' + jobId + '/resume', { method: 'POST' });
+    if (!resp.ok) { var err = await resp.json(); toast('恢复失败: ' + (err.detail || '未知错误'), 'error'); return; }
+    toast('ASR 对比任务已恢复');
+    var section = document.getElementById('cmp-interrupted-section');
+    if (section) section.remove();
+    // Start polling
+    _cmpActiveJobId = jobId;
+    pollAsrCompareJob();
+  } catch(e) { toast('恢复失败', 'error'); }
+}
+
+async function discardAsrCompareJob(jobId) {
+  if (!confirm('确定要丢弃此 ASR 对比任务吗？')) return;
+  try {
+    var resp = await fetch(API + '/api/asr-compare/job/' + jobId + '/discard', { method: 'POST' });
+    if (!resp.ok) { toast('丢弃失败', 'error'); return; }
+    toast('ASR 对比任务已丢弃');
+    var section = document.getElementById('cmp-interrupted-section');
+    if (section) section.remove();
+  } catch(e) { toast('丢弃失败', 'error'); }
+}
+
 var _stitchClips = [];
 var _stitchSelected = {};
 var _stitchOutputPath = '';
@@ -8313,7 +8702,39 @@ function loadSavedSettings() {
       }
       _pvSteps = JSON.parse(JSON.stringify(PV_STEP_DEFAULTS));
     }
+
+    // Apply saved ASR defaults to page fields (lazy-set after elements are populated)
+    var cfg = data.config || {};
+    _savedAsrConfig = cfg;
+
+    // Try to apply immediately; if model selects aren't populated yet,
+    // the loadAsrModels / loadCmpModels functions will apply them later.
+    setTimeout(function() {
+      applyAsrConfigToPage(cfg);
+    }, 800);
   }).catch(function() {});
+}
+
+var _savedAsrConfig = null;
+
+function applyAsrConfigToPage(cfg) {
+  if (!cfg) cfg = _savedAsrConfig || {};
+  if (cfg.ASR_DEFAULT_MODEL) {
+    var s = document.getElementById('asr-model-select');
+    if (s && s.options.length > 1) { s.value = cfg.ASR_DEFAULT_MODEL; }
+  }
+  if (cfg.ASR_DEFAULT_LANGUAGE) {
+    var s = document.getElementById('asr-lang-select');
+    if (s) { s.value = cfg.ASR_DEFAULT_LANGUAGE; }
+  }
+  if (cfg.ASR_COMPARE_MODEL_A) {
+    var s = document.getElementById('cmp-model-a-select');
+    if (s && s.options.length > 1) { s.value = cfg.ASR_COMPARE_MODEL_A; }
+  }
+  if (cfg.ASR_COMPARE_MODEL_B) {
+    var s = document.getElementById('cmp-model-b-select');
+    if (s && s.options.length > 1) { s.value = cfg.ASR_COMPARE_MODEL_B; }
+  }
 }
 
 var SETTINGS_CATEGORIES = [
@@ -8437,7 +8858,50 @@ function renderSettings() {
   }
   html += '</div></div>';
 
+  // ASR config section
+  var cfg = _settingsData.config || {};
+  var asrModel = cfg.ASR_DEFAULT_MODEL || 'qwen3-asr';
+  var asrLang = cfg.ASR_DEFAULT_LANGUAGE || 'zh';
+  var cmpModelA = cfg.ASR_COMPARE_MODEL_A || 'qwen3-asr';
+  var cmpModelB = cfg.ASR_COMPARE_MODEL_B || 'cohere-transcribe';
+
+  html += '<div class="settings-section">';
+  html += '<div class="settings-section-title">ASR 提取 — 默认设置</div>';
+  html += '<div class="settings-row">';
+  html += '<span class="settings-label">默认模型</span>';
+  html += '<select data-setting-config="ASR_DEFAULT_MODEL" style="flex:1;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;" onchange="this.style.borderColor=this.value?\'var(--success)\':\'var(--border)\'">';
+  html += '<option value="">— 加载中 —</option></select>';
+  html += '</div>';
+  html += '<div class="settings-row">';
+  html += '<span class="settings-label">默认语言</span>';
+  html += '<select data-setting-config="ASR_DEFAULT_LANGUAGE" style="flex:1;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;">';
+  html += '<option value="ja"' + (asrLang==='ja'?' selected':'') + '>日本語</option>';
+  html += '<option value="auto"' + (asrLang==='auto'?' selected':'') + '>自动检测</option>';
+  html += '<option value="zh"' + (asrLang==='zh'?' selected':'') + '>中文</option>';
+  html += '<option value="en"' + (asrLang==='en'?' selected':'') + '>English</option>';
+  html += '<option value="ko"' + (asrLang==='ko'?' selected':'') + '>한국어</option>';
+  html += '</select>';
+  html += '</div>';
+  html += '</div>';
+
+  html += '<div class="settings-section">';
+  html += '<div class="settings-section-title">ASR 对比 — 默认设置</div>';
+  html += '<div class="settings-row">';
+  html += '<span class="settings-label">模型 A</span>';
+  html += '<select data-setting-config="ASR_COMPARE_MODEL_A" style="flex:1;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;">';
+  html += '<option value="">— 加载中 —</option></select>';
+  html += '</div>';
+  html += '<div class="settings-row">';
+  html += '<span class="settings-label">模型 B</span>';
+  html += '<select data-setting-config="ASR_COMPARE_MODEL_B" style="flex:1;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;">';
+  html += '<option value="">— 加载中 —</option></select>';
+  html += '</div>';
+  html += '</div>';
+
   body.innerHTML = html;
+
+  // Populate ASR model dropdowns asynchronously
+  populateSettingsAsrModels(asrModel, cmpModelA, cmpModelB);
 }
 
 function browseSettingsFolder(key) {
@@ -8453,6 +8917,25 @@ function openSettingsFolder(key) {
   var input = document.querySelector('[data-settings-key="' + key + '"]');
   if (!input || !input.value) return;
   openFolderPath(input.value);
+}
+
+function populateSettingsAsrModels(asrModel, cmpModelA, cmpModelB) {
+  fetch(API + '/api/asr/models').then(function(r) { return r.json(); }).then(function(data) {
+    var models = data.models || [];
+    var opts = '';
+    for (var i = 0; i < models.length; i++) {
+      opts += '<option value="' + safeAttr(models[i].key) + '">' + escapeHtml(models[i].name) + '</option>';
+    }
+    // ASR extraction model
+    var sel1 = document.querySelector('[data-setting-config="ASR_DEFAULT_MODEL"]');
+    if (sel1) { sel1.innerHTML = opts; sel1.value = asrModel || 'qwen3-asr'; }
+    // Compare model A
+    var selA = document.querySelector('[data-setting-config="ASR_COMPARE_MODEL_A"]');
+    if (selA) { selA.innerHTML = opts; selA.value = cmpModelA || 'qwen3-asr'; }
+    // Compare model B
+    var selB = document.querySelector('[data-setting-config="ASR_COMPARE_MODEL_B"]');
+    if (selB) { selB.innerHTML = opts; selB.value = cmpModelB || 'cohere-transcribe'; }
+  }).catch(function() {});
 }
 
 function saveSettings() {
@@ -8474,10 +8957,16 @@ function saveSettings() {
     if (pvStepChecks[j].checked) pvSteps.push(pvStepChecks[j].getAttribute('data-setting-pv-step'));
   }
 
+  var configs = document.querySelectorAll('[data-setting-config]');
+  var configVals = {};
+  for (var j = 0; j < configs.length; j++) {
+    configVals[configs[j].getAttribute('data-setting-config')] = configs[j].value;
+  }
+
   fetch(API + '/api/settings', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({paths: paths, denoise_default_steps: steps, pv_default_steps: pvSteps})
+    body: JSON.stringify({paths: paths, denoise_default_steps: steps, pv_default_steps: pvSteps, config: configVals})
   }).then(function(r) { return r.json(); }).then(function(data) {
     if (data.status === 'ok') {
       toast('设置已保存，刷新页面后生效', 'success');
@@ -8550,6 +9039,7 @@ function pvRenderStepConfig() {
           break;
         }
       }
+      _savePvSteps();
       pvRenderStepConfig();
     };
   }
@@ -8582,6 +9072,7 @@ function pvRenderStepConfig() {
       if (dragIdx >= 0 && dragIdx !== dropIdx) {
         var moved = _pvSteps.splice(dragIdx, 1)[0];
         _pvSteps.splice(dropIdx, 0, moved);
+        _savePvSteps();
         pvRenderStepConfig();
       }
     });
@@ -8598,8 +9089,18 @@ function pvRenderStepConfig() {
   }
 }
 
+function _savePvSteps() {
+  var map = {};
+  for (var i = 0; i < _pvSteps.length; i++) {
+    map[_pvSteps[i].key] = _pvSteps[i].enabled;
+  }
+  _uiState.pvSteps = map;
+  _saveUiState();
+}
+
 function pvResetSteps() {
   _pvSteps = JSON.parse(JSON.stringify(PV_STEP_DEFAULTS));
+  _savePvSteps();
   pvRenderStepConfig();
 }
 
@@ -8913,6 +9414,102 @@ function pvPreviewFile(event, path) {
   bar.style.display = 'block';
   player.src = API + '/api/pipeline-video/stream?path=' + encodeURIComponent(path);
   player.load();
+}
+
+var _denoiseJobsRestored = false;
+
+function pvRestoreJobs() {
+  fetch(API + '/api/pipeline-video/jobs')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.jobs || !data.jobs.length) return;
+      var running = null;
+      var interrupted = null;
+      var lastCompleted = null;
+      for (var i = 0; i < data.jobs.length; i++) {
+        if (data.jobs[i].status === 'running' && !running) running = data.jobs[i];
+        if (data.jobs[i].status === 'interrupted' && !interrupted) interrupted = data.jobs[i];
+        if (data.jobs[i].status === 'completed' && !lastCompleted) lastCompleted = data.jobs[i];
+      }
+      if (running) {
+        _pvJobId = running.job_id;
+        document.getElementById('pv-file-section').style.display = 'none';
+        document.getElementById('pv-step-config').style.display = 'none';
+        document.getElementById('pv-progress-section').style.display = 'block';
+        document.getElementById('pv-results-section').style.display = 'none';
+        document.getElementById('pv-interrupted-section').style.display = 'none';
+        pvUpdateUI(running);
+        startPvPolling();
+      } else if (interrupted) {
+        _pvJobId = interrupted.job_id;
+        document.getElementById('pv-file-section').style.display = 'none';
+        document.getElementById('pv-step-config').style.display = 'none';
+        document.getElementById('pv-progress-section').style.display = 'none';
+        document.getElementById('pv-results-section').style.display = 'none';
+        document.getElementById('pv-interrupted-section').style.display = 'block';
+        pvRenderInterrupted(interrupted);
+      } else if (lastCompleted) {
+        _pvJobId = lastCompleted.job_id;
+        document.getElementById('pv-file-section').style.display = 'none';
+        document.getElementById('pv-step-config').style.display = 'none';
+        document.getElementById('pv-progress-section').style.display = 'none';
+        document.getElementById('pv-results-section').style.display = 'block';
+        document.getElementById('pv-interrupted-section').style.display = 'none';
+        pvOnComplete(lastCompleted);
+      }
+    }).catch(function() {});
+}
+
+function pvRenderInterrupted(job) {
+  var completed = 0, pending = 0;
+  for (var i = 0; i < job.files.length; i++) {
+    if (job.files[i].status === 'completed') completed++;
+    else pending++;
+  }
+  var html = '<div style="background:var(--bg2);border:1px solid #ff6b6b;border-radius:8px;padding:16px;margin-bottom:12px;">';
+  html += '<div style="font-size:16px;font-weight:bold;color:#ff6b6b;margin-bottom:8px;">任务因服务器重启中断</div>';
+  html += '<div style="font-size:13px;color:var(--text2);margin-bottom:4px;">文件夹: ' + escapeHtml(job.folder_name) + '</div>';
+  html += '<div style="font-size:13px;color:var(--text2);margin-bottom:4px;">总文件数: ' + job.files.length + ' | 已完成: ' + completed + ' | 待处理: ' + pending + '</div>';
+  html += '<div style="font-size:13px;color:var(--text2);margin-bottom:12px;">进度: ' + (job.progress || 0).toFixed(0) + '%</div>';
+  html += '<div style="display:flex;gap:8px;">';
+  html += '<button class="btn btn-success" onclick="pvResumeInterrupted(\'' + job.job_id + '\')" style="background:var(--success);color:#000;">继续执行 (跳过已完成)</button>';
+  html += '<button class="btn btn-secondary" onclick="pvDiscardInterrupted(\'' + job.job_id + '\')" style="background:var(--danger);color:#fff;">丢弃任务</button>';
+  html += '</div></div>';
+  document.getElementById('pv-interrupted-section').innerHTML = html;
+}
+
+async function pvResumeInterrupted(jobId) {
+  if (!confirm('确定恢复此任务？将跳过已完成的文件继续处理。')) return;
+  try {
+    var resp = await fetch(API + '/api/pipeline-video/job/' + jobId + '/resume', { method: 'POST' });
+    var data = await resp.json();
+    if (resp.ok) {
+      toast('任务已恢复执行', 'success');
+      document.getElementById('pv-interrupted-section').style.display = 'none';
+      document.getElementById('pv-progress-section').style.display = 'block';
+      _pvJobId = jobId;
+      startPvPolling();
+    } else {
+      toast('恢复失败: ' + (data.detail || ''), 'error');
+    }
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function pvDiscardInterrupted(jobId) {
+  if (!confirm('确定丢弃此中断的任务？')) return;
+  try {
+    var resp = await fetch(API + '/api/pipeline-video/job/' + jobId + '/discard', { method: 'POST' });
+    var data = await resp.json();
+    if (resp.ok) {
+      toast('已丢弃', 'info');
+      document.getElementById('pv-interrupted-section').style.display = 'none';
+      document.getElementById('pv-file-section').style.display = 'block';
+      document.getElementById('pv-step-config').style.display = 'block';
+      _pvJobId = null;
+    } else {
+      toast('丢弃失败: ' + (data.detail || ''), 'error');
+    }
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
 }
 
 function pvStartPipeline() {

@@ -125,6 +125,15 @@ class Pipeline:
                 job.clip_dir = jd.get("clip_dir", "")
                 job.clip_paths = []
                 job.status = st
+                # Running/pending jobs were interrupted by server restart
+                if st in ("running", "pending"):
+                    job.status = "interrupted"
+                    job.current_step = "interrupted (服务器重启中断)"
+                    job.steps.append(StepResult(
+                        step="interrupted",
+                        status=StepStatus.FAILED,
+                        message="服务器重启导致任务中断，可选择继续执行或丢弃",
+                    ))
                 job.progress = jd.get("progress", 0)
                 job.current_step = jd.get("current_step", "")
                 for s in jd.get("steps", []):
@@ -217,6 +226,31 @@ class Pipeline:
                 self._save_jobs()
                 return True
         return False
+
+    def discard_interrupted(self, job_id: str) -> dict:
+        """Discard an interrupted job — mark as cancelled."""
+        job = self.get_job(job_id)
+        if not job:
+            return {"status": "error", "message": "Job not found"}
+        if job.status != "interrupted":
+            return {"status": "error", "message": f"Job is {job.status}, not interrupted"}
+        job.status = "cancelled"
+        job.current_step = "cancelled"
+        self._save_jobs()
+        return {"status": "ok", "message": "已丢弃中断的任务"}
+
+    def resume_job(self, job_id: str) -> dict:
+        """Mark an interrupted job as ready to resume. The caller re-submits it."""
+        job = self.get_job(job_id)
+        if not job:
+            return {"status": "error", "message": "Job not found"}
+        if job.status != "interrupted":
+            return {"status": "error", "message": f"Job is {job.status}, not interrupted"}
+        job.status = "pending"
+        job.current_step = ""
+        job.steps = [s for s in job.steps if s.step != "interrupted"]
+        self._save_jobs()
+        return {"status": "ok", "message": "任务已标记为待恢复", "job": job.to_dict()}
 
     def run_full_pipeline(
         self,
