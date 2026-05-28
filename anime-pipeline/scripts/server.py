@@ -9,7 +9,7 @@ import subprocess
 import threading
 from pathlib import Path
 
-from fastapi import FastAPI, Query, Body, HTTPException, UploadFile, File
+from fastapi import FastAPI, Query, Body, HTTPException, UploadFile, File, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,7 +25,7 @@ from config import (
     EMOTION_DIR, EMOTION_DENOISE_DIR,
     MFA_SCRIPTS_DIR, MFA_MODELS_DIR, MFA_TEMP_DIR, MFA_DICT_PATH,
     MFA_RAW_WAV_DIR, MFA_WAV_DIR, MFA_TXT_DIR,
-    MFA_ALIGNED_DIR, MFA_POST_DIR, MFA_FILTERED_DIR, MFA_VALIDATE_DIR,
+    MFA_ALIGNED_DIR, MFA_JSONL_DIR, MFA_POST_DIR, MFA_FILTERED_DIR, MFA_VALIDATE_DIR,
     FFPROBE, FFMPEG
 )
 from pipeline import pipeline, PipelineJob, StepStatus
@@ -3600,8 +3600,12 @@ def list_split_clips(video_name: str):
 
 
 @app.get("/api/split/dir-browse")
-def browse_split_directory(path: str = Query("")):
-    """Browse a directory for sub-folders, video files, and WAV audio files."""
+def browse_split_directory(path: str = Query(""), scan_files: bool = Query(False)):
+    """Browse a directory for sub-folders, video files, and WAV audio files.
+
+    Set scan_files=true to also scan for media files (slower, use only when entering a folder).
+    When false, only subdirectories are returned — this is fast.
+    """
     if not path:
         path = DATA_DIR
     real_path = os.path.realpath(path)
@@ -3615,7 +3619,7 @@ def browse_split_directory(path: str = Query("")):
     if not parent_path.startswith(real_data + os.sep) and parent_path != real_data:
         parent_path = real_data if real_path != real_data else ""
 
-    entries = sorted(os.listdir(real_path))
+    entries = sorted(os.scandir(real_path), key=lambda e: e.name)
     subdirs = []
     video_files = []
     audio_files = []
@@ -3623,26 +3627,25 @@ def browse_split_directory(path: str = Query("")):
     audio_exts = {".wav"}
 
     for entry in entries:
-        full = os.path.join(real_path, entry)
-        if os.path.isdir(full) and not entry.startswith('.'):
-            subdirs.append(entry)
-        elif os.path.isfile(full):
-            ext = os.path.splitext(entry)[1].lower()
+        if entry.is_dir() and not entry.name.startswith('.'):
+            subdirs.append(entry.name)
+        elif scan_files and entry.is_file():
+            ext = os.path.splitext(entry.name)[1].lower()
             if ext in video_exts:
-                size = os.path.getsize(full)
+                size = entry.stat().st_size
                 video_files.append({
-                    "name": entry,
+                    "name": entry.name,
                     "ext": ext,
                     "size_mb": round(size / 1024 / 1024, 1),
-                    "full_path": full,
+                    "full_path": os.path.join(real_path, entry.name),
                 })
             elif ext in audio_exts:
-                size = os.path.getsize(full)
+                size = entry.stat().st_size
                 audio_files.append({
-                    "name": entry,
+                    "name": entry.name,
                     "ext": ext,
                     "size_mb": round(size / 1024 / 1024, 1),
-                    "full_path": full,
+                    "full_path": os.path.join(real_path, entry.name),
                 })
 
     return {
@@ -4346,21 +4349,20 @@ def browse_asr_directory(path: str = Query("")):
     if not parent_path.startswith(real_data + os.sep) and parent_path != real_data:
         parent_path = real_data if real_path != real_data else ""
 
-    entries = sorted(os.listdir(real_path))
+    entries = sorted(os.scandir(real_path), key=lambda e: e.name)
     subdirs = []
     audio_files = []
     audio_exts = {".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg", ".wma", ".opus", ".wv"}
 
     for entry in entries:
-        full = os.path.join(real_path, entry)
-        if os.path.isdir(full) and not entry.startswith('.'):
-            subdirs.append(entry)
-        elif os.path.isfile(full):
-            ext = os.path.splitext(entry)[1].lower()
+        if entry.is_dir() and not entry.name.startswith('.'):
+            subdirs.append(entry.name)
+        elif entry.is_file():
+            ext = os.path.splitext(entry.name)[1].lower()
             if ext in audio_exts:
-                size = os.path.getsize(full)
+                size = entry.stat().st_size
                 audio_files.append({
-                    "name": entry,
+                    "name": entry.name,
                     "ext": ext,
                     "size_mb": round(size / 1024 / 1024, 1),
                 })
@@ -4707,6 +4709,51 @@ def list_asr_compare_files():
     return {"dirs": _find_unreviewed_wav_files()}
 
 
+@app.get("/api/asr-compare/dir-browse")
+def browse_asr_compare_directory(path: str = Query("")):
+    """Browse a directory for sub-folders and audio files. Defaults to CLEANED_UNREVIEWED_DIR."""
+    if not path:
+        path = CLEANED_UNREVIEWED_DIR
+    # Security: resolve real path and ensure it's within DATA_DIR
+    real_path = os.path.realpath(path)
+    real_data = os.path.realpath(DATA_DIR)
+    if not real_path.startswith(real_data + os.sep) and real_path != real_data:
+        raise HTTPException(status_code=403, detail="Access denied: path outside data directory")
+    if not os.path.isdir(real_path):
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    parent_path = os.path.dirname(real_path)
+    # Don't allow going above DATA_DIR
+    if not parent_path.startswith(real_data + os.sep) and parent_path != real_data:
+        parent_path = real_data if real_path != real_data else ""
+
+    entries = sorted(os.scandir(real_path), key=lambda e: e.name)
+    subdirs = []
+    audio_files = []
+    audio_exts = {".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg", ".wma", ".opus", ".wv"}
+
+    for entry in entries:
+        if entry.is_dir() and not entry.name.startswith('.'):
+            subdirs.append(entry.name)
+        elif entry.is_file():
+            ext = os.path.splitext(entry.name)[1].lower()
+            if ext in audio_exts:
+                size = entry.stat().st_size
+                audio_files.append({
+                    "name": entry.name,
+                    "ext": ext,
+                    "size_mb": round(size / 1024 / 1024, 1),
+                })
+
+    return {
+        "current_path": real_path,
+        "parent_path": parent_path,
+        "subdirs": subdirs,
+        "audio_files": audio_files,
+        "has_audio": len(audio_files) > 0,
+    }
+
+
 @app.get("/api/asr-compare/models")
 def list_asr_compare_models():
     """Return the two comparison models with their language support."""
@@ -4727,38 +4774,56 @@ def list_asr_compare_models():
 
 @app.post("/api/asr-compare/run-all")
 def run_asr_compare_all(
+    request: Request,
     language: str = Query("zh"),
     device: str = Query("cuda"),
-    dirs: list[str] = Query([], description="Optional list of source directory names to process"),
     model_a: str = Query("qwen3-asr"),
     model_b: str = Query("cohere-transcribe"),
     hotwords: str = Query("", description="Context/ proper nouns for recognition"),
+    payload: dict = Body(default={}),
 ):
-    """Queue WAV files from cleaned_unreviewed/ and process sequentially.
+    """Queue audio files from a browsed folder and process sequentially.
 
-    If dirs is provided, only files from those source directories are processed.
+    Accepts JSON body with optional folder_path and selected_files.
+    Falls back to query-param dirs for backward compatibility.
     """
     from asr_pipeline import compare_asr_pipeline, ASR_MODELS
 
-    all_dirs = _find_unreviewed_wav_files()
-    dir_filter = set(dirs) if dirs else None
-
     all_files = []
-    for d in all_dirs:
-        if dir_filter and d["name"] not in dir_filter:
-            continue
-        for f in d["files"]:
-            all_files.append({
-                "name": f["name"],
-                "path": f["path"],
-                "source_dir": d["name"],
-            })
+    # Priority 1: JSON body with folder_path + selected_files
+    folder_path = payload.get("folder_path", "").strip() if payload else ""
+    selected_files = payload.get("selected_files", []) if payload else []
+    if folder_path and selected_files:
+        real_folder = os.path.realpath(folder_path)
+        real_data = os.path.realpath(DATA_DIR)
+        if not real_folder.startswith(real_data + os.sep) and real_folder != real_data:
+            raise HTTPException(status_code=403, detail="Access denied: path outside data directory")
+        source_dir = os.path.basename(real_folder) or os.path.basename(os.path.dirname(real_folder))
+        for fname in selected_files:
+            fp = os.path.join(real_folder, fname)
+            if os.path.isfile(fp):
+                all_files.append({
+                    "name": fname,
+                    "path": fp.replace("\\", "/"),
+                    "source_dir": source_dir,
+                })
+    # Priority 2: fallback to old dirs query param
+    if not all_files:
+        dirs: list[str] = request.query_params.getlist("dirs")
+        all_dirs = _find_unreviewed_wav_files()
+        dir_filter = set(dirs) if dirs else None
+        for d in all_dirs:
+            if dir_filter and d["name"] not in dir_filter:
+                continue
+            for f in d["files"]:
+                all_files.append({
+                    "name": f["name"],
+                    "path": f["path"],
+                    "source_dir": d["name"],
+                })
 
     if not all_files:
-        msg = "No WAV files found"
-        if dir_filter:
-            msg += f" in selected directories: {', '.join(sorted(dir_filter))}"
-        raise HTTPException(status_code=404, detail=msg)
+        raise HTTPException(status_code=404, detail="No audio files found")
 
     job_id = uuid.uuid4().hex[:12]
 
@@ -5648,23 +5713,28 @@ def _run_pipeline_video(job_id: str):
         if os.path.exists(srt_dst) and srt_dst not in f.output_clips:
             f.output_clips.append(srt_dst)
 
-        # --- Clean this file's temp data (safe regex, not naive prefix) ---
-        import re as _re
-        base_rgx_str = _re.escape(base_name)
-        _file_rgx = _re.compile(r'^' + base_rgx_str + r'(_seg\d{3})?_.+$')
-        seg_dir = "segments_" + base_name
-        sep_dir = "separated_" + base_name
-        if os.path.isdir(temp_dir):
-            for fn in os.listdir(temp_dir):
-                fp = os.path.join(temp_dir, fn)
-                if _file_rgx.match(fn) or fn in (seg_dir, sep_dir):
-                    try:
-                        if os.path.isfile(fp):
-                            os.remove(fp)
-                        elif os.path.isdir(fp):
-                            _shutil.rmtree(fp, ignore_errors=True)
-                    except OSError:
-                        pass
+        # --- Clean this file's temp data ---
+        # Only clean if the file actually produced outputs. If processing was
+        # incomplete (e.g. all segments timed out), preserve temp files.
+        has_output = os.path.exists(enhanced_dst) or os.path.exists(srt_dst) or \
+                     (os.path.isdir(clips_dir) and len(os.listdir(clips_dir)) > 0)
+        if has_output:
+            import re as _re
+            base_rgx_str = _re.escape(base_name)
+            _file_rgx = _re.compile(r'^' + base_rgx_str + r'(_seg\d{3})?_.+$')
+            seg_dir = "segments_" + base_name
+            sep_dir = "separated_" + base_name
+            if os.path.isdir(temp_dir):
+                for fn in os.listdir(temp_dir):
+                    fp = os.path.join(temp_dir, fn)
+                    if _file_rgx.match(fn) or fn in (seg_dir, sep_dir):
+                        try:
+                            if os.path.isfile(fp):
+                                os.remove(fp)
+                            elif os.path.isdir(fp):
+                                _shutil.rmtree(fp, ignore_errors=True)
+                        except OSError:
+                            pass
 
     # Per-step semaphores — tuned for RTX 4090 (24 GB).
     #
@@ -6528,9 +6598,14 @@ def _run_pipeline_video(job_id: str):
         futures = [executor.submit(_process_one_file, f) for f in files]
         concurrent.futures.wait(futures)
 
-    # Per-file flush already moved clips to final_dir; clean remaining temp as safety
+    # Only clean temp dir if all files produced outputs. Preserve temp data
+    # for incomplete processing (e.g. segments timed out).
+    all_have_outputs = all(
+        f.status == "skipped" or len(f.output_clips) > 0
+        for f in files
+    )
     had_errors = any(f.status == "error" for f in files)
-    if not had_errors and not job.cancelled:
+    if not had_errors and not job.cancelled and all_have_outputs:
         try:
             _shutil.rmtree(temp_dir)
             print(f"[pipeline-video] Cleaned temp dir: {temp_dir}")
@@ -7565,7 +7640,9 @@ def mfa_srt_to_jsonl(
     if output_jsonl:
         jsonl_path = Path(output_jsonl)
     else:
-        jsonl_path = srt_path_obj.parent / "generated.jsonl"
+        # Default: data/mfa/jsonl/<srt_stem>.jsonl
+        srt_stem = srt_path_obj.stem
+        jsonl_path = Path(os.path.join(MFA_DIR, "jsonl", srt_stem + ".jsonl"))
 
     jsonl_path.parent.mkdir(parents=True, exist_ok=True)
 

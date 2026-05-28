@@ -1328,26 +1328,39 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
   <!-- ASR 对比 -->
   <div id="tab-asr-compare" class="tab">
     <div style="display:flex;gap:16px;flex-wrap:wrap;">
-      <!-- Left: Audio file list grouped by source dir -->
+      <!-- Left: Folder browser (same style as ASR extraction folder mode) -->
       <div style="flex:0 0 380px;min-width:300px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-          <h3 style="margin:0;">未审核降噪音频</h3>
-          <button class="btn btn-secondary" onclick="loadAsrCompareFiles()" style="font-size:11px;padding:4px 10px;">刷新</button>
+          <h3 style="margin:0;">音频文件夹</h3>
+          <button class="btn btn-secondary" onclick="loadCmpFolderBrowser(_cmpFolderPath)" style="font-size:11px;padding:4px 10px;">刷新</button>
         </div>
-        <div style="margin-bottom:8px;font-size:11px;color:var(--text2);">
-          来源: data/cleaned_unreviewed/
+        <!-- Breadcrumb bar -->
+        <div id="cmp-folder-breadcrumb" style="display:flex;align-items:center;gap:6px;margin-bottom:8px;padding:6px 10px;border-radius:6px;background:var(--bg2);border:1px solid var(--border);font-size:12px;">
+          <button class="btn btn-secondary" onclick="cmpFolderGoUp()" style="font-size:11px;padding:2px 8px;flex-shrink:0;" id="btn-cmp-folder-up" disabled>⬆ 上级</button>
+          <span id="cmp-folder-current-path" style="flex:1;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left;">加载中...</span>
         </div>
-        <div id="cmp-batch-bar" class="batch-bar">
-          <label style="display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--text2);margin:0;">
-            <input type="checkbox" id="cmp-select-all-cb" onchange="cmpToggleSelectAll()">
-            全选文件夹
-          </label>
-          <span id="cmp-selected-count" style="color:var(--accent);white-space:nowrap;">已选 0 个</span>
-          <span id="cmp-selected-files" style="color:var(--text2);white-space:nowrap;font-size:11px;"></span>
-        </div>
-        <div id="cmp-file-list" class="file-list" style="max-height:55vh;border:1px solid var(--border);border-radius:8px;">
+        <!-- Subdirectory list -->
+        <div id="cmp-folder-subdirs" class="file-list" style="max-height:400px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;">
           <div class="empty-state"><p>加载中...</p></div>
         </div>
+        <!-- File info bar -->
+        <div id="cmp-folder-file-info" style="display:none;margin-top:6px;padding:6px 10px;border-radius:6px;background:var(--bg2);border:1px solid var(--border);font-size:12px;color:var(--text2);"></div>
+        <!-- Selection bar -->
+        <div id="cmp-folder-select-bar" style="display:none;margin-top:6px;align-items:center;gap:8px;">
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;">
+            <input type="checkbox" id="cmp-folder-select-all-cb" onchange="cmpFolderToggleSelectAll()" style="cursor:pointer;">
+            全选
+          </label>
+          <span id="cmp-folder-selected-count" style="font-size:11px;color:var(--text2);"></span>
+        </div>
+        <!-- File list -->
+        <div id="cmp-folder-file-list" class="file-list" style="display:none;max-height:250px;overflow-y:auto;margin-top:4px;border:1px solid var(--border);border-radius:8px;"></div>
+        <!-- Run button -->
+        <button class="btn btn-primary" id="btn-cmp-run" onclick="runAsrCompareAll()" style="width:100%;padding:10px;font-size:14px;margin-top:8px;" disabled>
+          开始对比
+        </button>
+        <!-- Hidden audio player -->
+        <audio id="cmp-folder-audio-player" style="display:none;" controls></audio>
       </div>
 
       <!-- Right: Controls + Progress + Results -->
@@ -1383,11 +1396,6 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
                 <option value="" selected>不使用热词</option>
               </select>
               <input id="cmp-hotwords" type="text" placeholder="或直接输入" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;">
-            </div>
-            <div>
-              <button class="btn btn-primary" id="btn-cmp-run" onclick="runAsrCompareAll()" style="padding:8px 24px;font-size:14px;white-space:nowrap;" disabled>
-                开始对比
-              </button>
             </div>
           </div>
           <div style="margin-top:6px;font-size:11px;color:var(--text2);">
@@ -1469,7 +1477,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
         <div id="split-folder-breadcrumb" style="display:flex;align-items:center;gap:6px;margin-bottom:8px;padding:6px 10px;border-radius:6px;background:var(--bg2);border:1px solid var(--border);font-size:12px;">
           <button class="btn btn-secondary" onclick="splitFolderGoUp()" style="font-size:11px;padding:2px 8px;flex-shrink:0;" id="btn-split-folder-up" disabled>⬆ 上级</button>
           <span id="split-folder-current-path" style="flex:1;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left;">加载中...</span>
-          <button class="btn btn-secondary" onclick="loadSplitFolderBrowser(_splitFolderPath)" style="font-size:11px;padding:2px 8px;flex-shrink:0;">刷新</button>
+          <button class="btn btn-secondary" onclick="loadSplitFolderBrowser(_splitFolderPath,true)" style="font-size:11px;padding:2px 8px;flex-shrink:0;">刷新</button>
         </div>
 
         <!-- Subdirectory list -->
@@ -2453,7 +2461,7 @@ function switchTab(name) {
   if (name === 'denoise-review') { loadDreviewBaseDirs(); loadEmotionCounts('dreview-emotion-bar', '/api/denoise-review/emotion-counts'); }
   if (name === 'extract') { loadExtractFiles(); loadExtractedSubs(); }
   if (name === 'asr') { loadAsrVideos(); loadAsrModels(); loadAsrResults(); restoreAsrInterruptedJobs(); loadHotwordConfigs(); }
-  if (name === 'asr-compare') { if (!_cmpLoaded) { loadAsrCompareFiles(); loadAsrCompareModels(); _cmpLoaded = true; } restoreAsrCompareInterruptedJobs(); loadHotwordConfigs(); }
+  if (name === 'asr-compare') { if (!_cmpLoaded) { loadCmpFolderBrowser(_cmpFolderPath); loadAsrCompareModels(); _cmpLoaded = true; } restoreAsrCompareInterruptedJobs(); loadHotwordConfigs(); }
   if (name === 'stitch') loadStitchVideos();
   if (name === 'split') {
     if (!window._splitLoaded) { loadSplitFolderBrowser(''); loadSplitClipDirs(); window._splitLoaded = true; }
@@ -6375,7 +6383,7 @@ function jumpToSplitFromExtract(subPath) {
   if (_extractActiveFile) {
     var dir = _extractActiveFile.replace(/\\/g, '/');
     dir = dir.substring(0, dir.lastIndexOf('/'));
-    loadSplitFolderBrowser(dir);
+    loadSplitFolderBrowser(dir, true);
   }
 }
 
@@ -7022,7 +7030,7 @@ function jumpToSplitFromAsr(subPath, videoPath) {
   if (videoPath) {
     var dir = videoPath.replace(/\\/g, '/');
     dir = dir.substring(0, dir.lastIndexOf('/'));
-    loadSplitFolderBrowser(dir);
+    loadSplitFolderBrowser(dir, true);
   }
 }
 
@@ -7450,141 +7458,123 @@ function restoreUiState() {
 // ASR Comparison
 // ============================================================
 var _cmpLoaded = false;
-var _cmpDirs = [];
+var _cmpFolderPath = '';     // current browsing path for compare
+var _cmpFolderFiles = [];    // audio files in current folder
+var _cmpFolderSelected = {}; // selected file names
 var _cmpJobId = null;
 var _cmpPollTimer = null;
 var _cmpResults = {};
-var _cmpCollapsed = {};
-var _cmpSelectedDirs = {};
 var _cmpModels = [];
 
-async function loadAsrCompareFiles() {
-  var cont = document.getElementById('cmp-file-list');
-  // Show loading state immediately so user knows refresh is happening
-  cont.innerHTML = '<div class="empty-state"><p>加载中...</p></div>';
+async function loadCmpFolderBrowser(path) {
+  if (!path) path = '';
   try {
-    var resp = await fetch(API + '/api/asr-compare/audio-files');
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var resp = await fetch(API + '/api/asr-compare/dir-browse?path=' + encodeURIComponent(path));
+    if (!resp.ok) { console.error('cmp dir-browse failed:', resp.status); return; }
     var data = await resp.json();
-    _cmpDirs = data.dirs || [];
-
-    if (!_cmpDirs.length) {
-      cont.innerHTML = '<div class="empty-state"><p>没有找到音频文件</p><p style="font-size:11px;color:var(--text2);">请先将降噪后的音频放入 data/cleaned_unreviewed/</p></div>';
-      document.getElementById('cmp-batch-bar').classList.remove('visible');
-      return;
+    _cmpFolderPath = data.current_path;
+    _cmpFolderFiles = data.audio_files || [];
+    _cmpFolderSelected = {};
+    for (var i = 0; i < _cmpFolderFiles.length; i++) {
+      _cmpFolderSelected[_cmpFolderFiles[i].name] = true;
     }
 
-    document.getElementById('cmp-batch-bar').classList.add('visible');
+    // Breadcrumb
+    document.getElementById('cmp-folder-current-path').textContent = _cmpFolderPath || '/';
+    var upBtn = document.getElementById('btn-cmp-folder-up');
+    upBtn.disabled = !data.parent_path;
 
-    // Default to collapsed for any dir the user hasn't explicitly toggled
-    for (var i = 0; i < _cmpDirs.length; i++) {
-      if (!(_cmpDirs[i].name in _cmpCollapsed)) _cmpCollapsed[_cmpDirs[i].name] = true;
-    }
-
-    var html = '';
-    for (var i = 0; i < _cmpDirs.length; i++) {
-      var d = _cmpDirs[i];
-      var col = _cmpCollapsed[d.name] ? ' collapsed' : '';
-      var checked = _cmpSelectedDirs[d.name] ? ' checked' : '';
-      var filesHtml = '';
-      for (var j = 0; j < d.files.length; j++) {
-        var f = d.files[j];
-        var statusClass = 'pending';
-        var res = _cmpResults[f.path];
-        if (res) {
-          if (res.error) { statusClass = 'flagged'; }
-          else if (res.user_action === 'discarded') { statusClass = 'flagged'; }
-          else if (res.flagged && res.user_action !== 'kept') { statusClass = 'flagged'; }
-          else { statusClass = 'done'; }
-        }
-        filesHtml += '<div class="cmp-file-item">' +
-          '<span class="cmp-status ' + statusClass + '"></span>' +
-          '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(f.name) + '</span>' +
-          '<span style="color:var(--text2);flex-shrink:0;">' + f.size_kb + ' KB</span>' +
-        '</div>';
+    // Subdirs list
+    var subdirsHtml = '';
+    if (data.subdirs.length) {
+      for (var i = 0; i < data.subdirs.length; i++) {
+        var subPath = (_cmpFolderPath ? _cmpFolderPath + '/' + data.subdirs[i] : data.subdirs[i]);
+        subdirsHtml += '<div class="file-item" onclick="loadCmpFolderBrowser(\'' + safeAttr(subPath) + '\')" style="cursor:pointer;display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--accent);">';
+        subdirsHtml += '<span style="font-size:14px;">📁</span>';
+        subdirsHtml += '<span style="font-size:12px;">' + escapeHtml(data.subdirs[i]) + '</span>';
+        subdirsHtml += '</div>';
       }
-      html += '<div class="cmp-dir-group' + checked + '">' +
-        '<div class="cmp-dir-header' + col + '" onclick="toggleCmpDir(event, \'' + safeAttr(d.name) + '\')">' +
-          '<input type="checkbox" class="item-check" onchange="event.stopPropagation();cmpToggleDirSelect(this)" data-cmp-dir="' + safeAttr(d.name) + '"' + (checked ? ' checked' : '') + '>' +
-          '<span class="dir-icon">&#9660;</span>' +
-          '<span style="flex:1;">' + escapeHtml(d.name) + '</span>' +
-          '<span style="color:var(--text2);font-weight:400;font-size:11px;">' + d.file_count + ' 个文件</span>' +
-        '</div>' +
-        '<div class="cmp-dir-files' + col + '">' + filesHtml + '</div>' +
-      '</div>';
+    } else {
+      subdirsHtml = '<div class="empty-state" style="padding:16px;"><p style="font-size:12px;">此目录下没有子文件夹</p></div>';
     }
-    cont.innerHTML = html;
-    document.getElementById('cmp-empty-state').style.display = 'none';
-    updateCmpBatchUI();
-  } catch(e) {
-    cont.innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
+    document.getElementById('cmp-folder-subdirs').innerHTML = subdirsHtml;
+
+    // Audio files list
+    var infoEl = document.getElementById('cmp-folder-file-info');
+    var barEl = document.getElementById('cmp-folder-select-bar');
+    var listEl = document.getElementById('cmp-folder-file-list');
+    if (_cmpFolderFiles.length) {
+      infoEl.style.display = 'block';
+      var totalMb = 0;
+      for (var i = 0; i < _cmpFolderFiles.length; i++) { totalMb += _cmpFolderFiles[i].size_mb || 0; }
+      infoEl.textContent = '发现 ' + _cmpFolderFiles.length + ' 个音频文件 (' + totalMb.toFixed(1) + ' MB)';
+      barEl.style.display = 'flex';
+      document.getElementById('btn-cmp-run').disabled = false;
+      _cmpRenderFolderFileList();
+    } else {
+      infoEl.style.display = 'block';
+      infoEl.textContent = data.has_audio ? '' : '此目录下没有音频文件（支持 wav, mp3, flac, m4a, aac, ogg, wma, opus）';
+      barEl.style.display = 'none';
+      listEl.style.display = 'none';
+      document.getElementById('btn-cmp-run').disabled = true;
+    }
+  } catch(e) { console.error('loadCmpFolderBrowser:', e); }
+}
+
+function cmpFolderGoUp() {
+  if (_cmpFolderPath) {
+    var parent = _cmpFolderPath.substring(0, _cmpFolderPath.lastIndexOf('/'));
+    loadCmpFolderBrowser(parent);
   }
 }
 
-function toggleCmpDir(evt, name) {
-  // Don't toggle if clicking on checkbox
-  if (evt && evt.target && evt.target.type === 'checkbox') return;
-  _cmpCollapsed[name] = !_cmpCollapsed[name];
-  loadAsrCompareFiles();
+function _cmpRenderFolderFileList() {
+  var listEl = document.getElementById('cmp-folder-file-list');
+  var html = '';
+  var selCount = 0;
+  for (var i = 0; i < _cmpFolderFiles.length; i++) {
+    var f = _cmpFolderFiles[i];
+    if (_cmpFolderSelected[f.name]) selCount++;
+    var audioPath = _cmpFolderPath.replace(/\\/g, '/').replace(/\/$/, '') + '/' + f.name;
+    var checked = _cmpFolderSelected[f.name] ? 'checked' : '';
+    html += '<div class="file-item" style="display:flex;align-items:center;gap:6px;padding:4px 8px;border-bottom:1px solid var(--border);">';
+    html += '<input type="checkbox" class="cmp-folder-item-cb" ' + checked + ' onchange="cmpFolderToggleItem(this)" data-name="' + escapeHtml(f.name) + '" style="cursor:pointer;flex-shrink:0;">';
+    html += '<span style="font-size:12px;color:var(--text2);flex-shrink:0;width:20px;text-align:center;">' + (i + 1) + '</span>';
+    html += '<span style="flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(f.name) + '">' + escapeHtml(f.name) + '</span>';
+    html += '<span style="font-size:10px;color:var(--text2);flex-shrink:0;">' + f.size_mb + ' MB</span>';
+    html += '<button class="btn btn-secondary" onclick="playCmpFolderAudio(\'' + safeAttr(audioPath) + '\',\'' + escapeHtml(f.name).replace(/'/g, "\\\\'") + '\')" style="font-size:10px;padding:2px 8px;flex-shrink:0;" title="播放">▶</button>';
+    html += '</div>';
+  }
+  listEl.innerHTML = html;
+  listEl.style.display = 'block';
+
+  // Update select-all checkbox and count
+  document.getElementById('cmp-folder-select-all-cb').checked = selCount === _cmpFolderFiles.length && _cmpFolderFiles.length > 0;
+  document.getElementById('cmp-folder-selected-count').textContent = '已选 ' + selCount + '/' + _cmpFolderFiles.length + ' 个';
 }
 
-function cmpToggleDirSelect(cb) {
-  var name = cb.getAttribute('data-cmp-dir');
-  if (!name) return;
-  if (cb.checked) { _cmpSelectedDirs[name] = true; }
-  else { delete _cmpSelectedDirs[name]; }
-  var group = cb.closest('.cmp-dir-group');
-  if (group) group.classList.toggle('checked', cb.checked);
-  updateCmpBatchUI();
+function cmpFolderToggleSelectAll() {
+  var checked = document.getElementById('cmp-folder-select-all-cb').checked;
+  for (var i = 0; i < _cmpFolderFiles.length; i++) {
+    if (checked) { _cmpFolderSelected[_cmpFolderFiles[i].name] = true; }
+    else { delete _cmpFolderSelected[_cmpFolderFiles[i].name]; }
+  }
+  _cmpRenderFolderFileList();
 }
 
-function cmpToggleSelectAll() {
-  var masterCb = document.getElementById('cmp-select-all-cb');
-  var checked = masterCb.checked;
-  _cmpSelectedDirs = {};
-  var cbs = document.querySelectorAll('#cmp-file-list .item-check');
-  for (var i = 0; i < cbs.length; i++) {
-    cbs[i].checked = checked;
-    var name = cbs[i].getAttribute('data-cmp-dir');
-    if (checked && name) _cmpSelectedDirs[name] = true;
-    var group = cbs[i].closest('.cmp-dir-group');
-    if (group) group.classList.toggle('checked', checked);
-  }
-  updateCmpBatchUI();
+function cmpFolderToggleItem(cb) {
+  var name = cb.getAttribute('data-name');
+  if (cb.checked) { _cmpFolderSelected[name] = true; }
+  else { delete _cmpFolderSelected[name]; }
+  _cmpRenderFolderFileList();
 }
 
-function updateCmpBatchUI() {
-  var countEl = document.getElementById('cmp-selected-count');
-  var filesEl = document.getElementById('cmp-selected-files');
-  var runBtn = document.getElementById('btn-cmp-run');
-  if (!countEl || !runBtn) return;
-
-  var count = Object.keys(_cmpSelectedDirs).length;
-  var totalFiles = 0;
-  for (var i = 0; i < _cmpDirs.length; i++) {
-    if (_cmpSelectedDirs[_cmpDirs[i].name]) totalFiles += _cmpDirs[i].file_count;
-  }
-  countEl.textContent = '已选 ' + count + ' 个文件夹';
-  if (filesEl) filesEl.textContent = totalFiles > 0 ? '(' + totalFiles + ' 个音频)' : '';
-  runBtn.disabled = count === 0;
-
-  // Sync master checkbox
-  var masterCb = document.getElementById('cmp-select-all-cb');
-  if (!masterCb) return;
-  var cbs = document.querySelectorAll('#cmp-file-list .item-check');
-  if (cbs.length === 0) {
-    masterCb.checked = false;
-    masterCb.indeterminate = false;
-  } else if (count === cbs.length) {
-    masterCb.checked = true;
-    masterCb.indeterminate = false;
-  } else if (count > 0) {
-    masterCb.checked = false;
-    masterCb.indeterminate = true;
-  } else {
-    masterCb.checked = false;
-    masterCb.indeterminate = false;
-  }
+function playCmpFolderAudio(audioPath, name) {
+  var player = document.getElementById('cmp-folder-audio-player');
+  player.src = API + '/api/asr-compare/stream?path=' + encodeURIComponent(audioPath);
+  player.style.display = 'block';
+  player.play().catch(function(e) { console.error('Play failed:', e); });
+  toast('正在播放: ' + name, 'info');
 }
 
 async function loadAsrCompareModels() {
@@ -7660,8 +7650,15 @@ function updateCmpLangs() {
 }
 
 function runAsrCompareAll() {
-  var selDirs = Object.keys(_cmpSelectedDirs);
-  if (!selDirs.length) { toast('请先勾选要处理的文件夹', 'info'); return; }
+  var folderPath = _cmpFolderPath;
+  if (!folderPath) { toast('请选择音频文件夹', 'error'); return; }
+
+  // Collect selected file names
+  var selectedFiles = [];
+  for (var i = 0; i < _cmpFolderFiles.length; i++) {
+    if (_cmpFolderSelected[_cmpFolderFiles[i].name]) selectedFiles.push(_cmpFolderFiles[i].name);
+  }
+  if (!selectedFiles.length) { toast('请至少选择一个音频文件', 'info'); return; }
 
   var models = getCmpSelectedModels();
   var lang = document.getElementById('cmp-lang-select').value || 'ja';
@@ -7683,11 +7680,12 @@ function runAsrCompareAll() {
     '&language=' + encodeURIComponent(lang) +
     '&device=' + encodeURIComponent(device) +
     '&hotwords=' + encodeURIComponent(hotwords);
-  for (var i = 0; i < selDirs.length; i++) {
-    url += '&dirs=' + encodeURIComponent(selDirs[i]);
-  }
 
-  fetch(url, { method: 'POST' }).then(function(resp) { return resp.json(); }).then(function(data) {
+  fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ folder_path: folderPath, selected_files: selectedFiles }),
+  }).then(function(resp) { return resp.json(); }).then(function(data) {
     if (data.status !== 'started') {
       toast('启动对比失败', 'error');
       document.getElementById('btn-cmp-run').disabled = false;
@@ -7734,7 +7732,7 @@ async function pollCmpJob() {
       document.getElementById('btn-cmp-package').disabled = false;
       renderCmpSummary();
       renderCmpResults();
-      loadAsrCompareFiles();
+      loadCmpFolderBrowser(_cmpFolderPath);
       toast('ASR 对比完成 — ' + (job.flagged_count || 0) + ' 个异常', job.flagged_count > 0 ? 'info' : 'success');
     } else if (job.status === 'failed') {
       _cmpResetUI();
@@ -7750,7 +7748,7 @@ async function pollCmpJob() {
       document.getElementById('btn-cmp-run').textContent = '重新对比';
       renderCmpSummary();
       renderCmpResults();
-      loadAsrCompareFiles();
+      loadCmpFolderBrowser(_cmpFolderPath);
       toast('ASR 对比已中止', 'info');
     }
   } catch(e) { console.error(e); }
@@ -7868,7 +7866,7 @@ function cmpKeepAudio(path) {
       if (_cmpResults[path]) { _cmpResults[path].user_action = 'kept'; _cmpResults[path].flagged = false; }
       renderCmpSummary();
       renderCmpResults();
-      loadAsrCompareFiles();
+      loadCmpFolderBrowser(_cmpFolderPath);
       toast('已保留', 'success');
     }
   }).catch(function(e) { toast('操作失败: ' + e.message, 'error'); });
@@ -7885,7 +7883,7 @@ function cmpDiscardAudio(path) {
       if (_cmpResults[path]) { _cmpResults[path].user_action = 'discarded'; _cmpResults[path].flagged = false; }
       renderCmpSummary();
       renderCmpResults();
-      loadAsrCompareFiles();
+      loadCmpFolderBrowser(_cmpFolderPath);
       toast('已舍弃', 'success');
     }
   }).catch(function(e) { toast('操作失败: ' + e.message, 'error'); });
@@ -8211,16 +8209,23 @@ var _splitFolderSubdirs = [];    // subdirectory names
 
 // --- Folder browser ---
 
-async function loadSplitFolderBrowser(path) {
+async function loadSplitFolderBrowser(path, scanFiles) {
   if (!path) path = '';
+  scanFiles = !!scanFiles;
+  var subEl = document.getElementById('split-folder-subdirs');
   try {
-    var resp = await fetch(API + '/api/split/dir-browse?path=' + encodeURIComponent(path));
-    if (!resp.ok) { console.error('split dir-browse failed:', resp.status); return; }
+    var url = API + '/api/split/dir-browse?path=' + encodeURIComponent(path);
+    if (scanFiles) url += '&scan_files=1';
+    var resp = await fetch(url);
+    if (!resp.ok) {
+      subEl.innerHTML = '<div class=\"empty-state\" style=\"padding:16px;\"><p style=\"font-size:12px;color:var(--danger);\">加载失败 (HTTP ' + resp.status + ')，请确认服务器已重启</p></div>';
+      return;
+    }
     var data = await resp.json();
     _splitFolderPath = data.current_path;
     _splitFolderSubdirs = data.subdirs || [];
 
-    // Merge video and audio files, sorted by name
+    // Merge video and audio files (only when scanFiles was requested)
     _splitFolderFiles = [];
     var vf = data.video_files || [];
     for (var i = 0; i < vf.length; i++) {
@@ -8247,7 +8252,7 @@ async function loadSplitFolderBrowser(path) {
     if (_splitFolderSubdirs.length) {
       for (var i = 0; i < _splitFolderSubdirs.length; i++) {
         var subPath = (_splitFolderPath ? _splitFolderPath + '/' + _splitFolderSubdirs[i] : _splitFolderSubdirs[i]);
-        subdirsHtml += '<div class="file-item" onclick="loadSplitFolderBrowser(\'' + safeAttr(subPath) + '\')" style="cursor:pointer;display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--accent);">';
+        subdirsHtml += '<div class="file-item" onclick="loadSplitFolderBrowser(\'' + safeAttr(subPath) + '\',true)" style="cursor:pointer;display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--accent);">';
         subdirsHtml += '<span style="font-size:14px;">📁</span>';
         subdirsHtml += '<span style="font-size:12px;">' + escapeHtml(_splitFolderSubdirs[i]) + '</span>';
         subdirsHtml += '</div>';
@@ -8257,7 +8262,7 @@ async function loadSplitFolderBrowser(path) {
     }
     document.getElementById('split-folder-subdirs').innerHTML = subdirsHtml;
 
-    // File list
+    // File list (only meaningful when scanFiles was requested)
     var infoEl = document.getElementById('split-folder-file-info');
     var barEl = document.getElementById('split-folder-select-bar');
     var listEl = document.getElementById('split-folder-file-list');
@@ -8273,9 +8278,13 @@ async function loadSplitFolderBrowser(path) {
       infoEl.textContent = '发现 ' + parts.join('，') + ' (' + totalMb.toFixed(1) + ' MB)';
       barEl.style.display = 'flex';
       _splitRenderFolderFileList();
-    } else {
+    } else if (scanFiles) {
       infoEl.style.display = 'block';
       infoEl.textContent = '此目录下没有视频或音频文件（支持 mkv, mp4, avi, mov, wmv, wav）';
+      barEl.style.display = 'none';
+      listEl.style.display = 'none';
+    } else {
+      infoEl.style.display = 'none';
       barEl.style.display = 'none';
       listEl.style.display = 'none';
     }
@@ -8291,13 +8300,17 @@ async function loadSplitFolderBrowser(path) {
       }
     }
     updateSplitBatchUI();
-  } catch(e) { console.error('loadSplitFolderBrowser:', e); }
+  } catch(e) {
+    console.error('loadSplitFolderBrowser:', e);
+    var subEl2 = document.getElementById('split-folder-subdirs');
+    if (subEl2) subEl2.innerHTML = '<div class=\"empty-state\" style=\"padding:16px;\"><p style=\"font-size:12px;color:var(--danger);\">加载出错: ' + escapeHtml(String(e.message || e)) + '</p></div>';
+  }
 }
 
 function splitFolderGoUp() {
   if (_splitFolderPath) {
     var parent = _splitFolderPath.substring(0, _splitFolderPath.lastIndexOf('/'));
-    loadSplitFolderBrowser(parent);
+    loadSplitFolderBrowser(parent, true);
   }
 }
 
@@ -8362,9 +8375,9 @@ function playSplitFolderAudio(path) {
 
 // --- Old loadSplitVideos / refreshSplitVideos (kept as aliases) ---
 
-function loadSplitVideos() { loadSplitFolderBrowser(_splitFolderPath); }
+function loadSplitVideos() { loadSplitFolderBrowser(_splitFolderPath, true); }
 
-function refreshSplitVideos() { loadSplitFolderBrowser(_splitFolderPath); }
+function refreshSplitVideos() { loadSplitFolderBrowser(_splitFolderPath, true); }
 
 function selectSplitVideo(name, path) {
   // Backward-compat wrapper
@@ -8481,7 +8494,7 @@ function processNextSplitInQueue() {
     document.getElementById('split-queue-status').style.display = 'none';
     document.getElementById('btn-split-batch-run').disabled = Object.keys(_splitSelected).length === 0;
     resetSplitUI();
-    loadSplitFolderBrowser(_splitFolderPath);
+    loadSplitFolderBrowser(_splitFolderPath, true);
     loadSplitClipDirs();
     toast('全部切割批量任务已完成', 'success');
     return;
@@ -8536,7 +8549,7 @@ function processNextSplitInQueue() {
       toast('无效的片段时长，停止队列', 'error');
       resetSplitUI();
       _splitQueue = []; _splitQueueIndex = -1;
-      loadSplitFolderBrowser(_splitFolderPath);
+      loadSplitFolderBrowser(_splitFolderPath, true);
       return;
     }
     payload.segment_duration = segDur;
@@ -8550,7 +8563,7 @@ function processNextSplitInQueue() {
       toast('无效的目标大小，停止队列', 'error');
       resetSplitUI();
       _splitQueue = []; _splitQueueIndex = -1;
-      loadSplitFolderBrowser(_splitFolderPath);
+      loadSplitFolderBrowser(_splitFolderPath, true);
       return;
     }
     payload.target_size_mb = tsize;
@@ -8561,7 +8574,7 @@ function processNextSplitInQueue() {
       toast('无效的裁剪时间，停止队列', 'error');
       resetSplitUI();
       _splitQueue = []; _splitQueueIndex = -1;
-      loadSplitFolderBrowser(_splitFolderPath);
+      loadSplitFolderBrowser(_splitFolderPath, true);
       return;
     }
     payload.start_time = trimStart;
@@ -8580,7 +8593,7 @@ function processNextSplitInQueue() {
   document.getElementById('split-progress-text').textContent = '队列 ' + (_splitQueueIndex + 1) + '/' + _splitQueue.length + ' — 提交任务...';
   document.getElementById('split-status-text').textContent = '';
 
-  loadSplitFolderBrowser(_splitFolderPath);
+  loadSplitFolderBrowser(_splitFolderPath, true);
 
   fetch(API + '/api/split/run', {
     method: 'POST',
@@ -8950,7 +8963,7 @@ async function pollSplitJob() {
         _splitQueue = [];
         _splitQueueIndex = -1;
         document.getElementById('split-queue-status').style.display = 'none';
-        loadSplitFolderBrowser(_splitFolderPath);
+        loadSplitFolderBrowser(_splitFolderPath, true);
       }
       resetSplitUI();
     }
@@ -10801,6 +10814,10 @@ function mfaSrtSelectFile(path, name) {
   _mfaSrtSelected = path;
   _mfaSrtSelectedName = name;
   mfaSrtUpdateSelectionUI();
+  // Auto-fill WAV filename and JSONL path from SRT stem
+  var stem = name.replace(/\.srt$/i, '');
+  document.getElementById('mfa-srt-wav-file').value = stem + '.wav';
+  document.getElementById('mfa-srt-jsonl-path').value = 'data/mfa/jsonl/' + stem + '.jsonl';
   // Re-render to highlight
   mfaSrtLoadDir(_mfaSrtDir);
 }
