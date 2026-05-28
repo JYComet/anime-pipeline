@@ -3558,16 +3558,18 @@ def list_split_clip_dirs():
         for entry in sorted(os.listdir(CLIPS_DIR)):
             full = os.path.join(CLIPS_DIR, entry)
             if os.path.isdir(full):
-                mp4_count = len([f for f in os.listdir(full) if f.endswith(".mp4")])
-                mkvs = [f for f in os.listdir(full) if f.endswith(".mkv")]
+                media_exts = {".mp4", ".mkv", ".wav"}
+                media_count = len([f for f in os.listdir(full)
+                    if os.path.splitext(f)[1].lower() in media_exts])
                 dirs.append({
                     "name": entry,
                     "path": full,
-                    "clip_count": mp4_count,
+                    "clip_count": media_count,
                     "total_size_mb": round(
                         sum(os.path.getsize(os.path.join(full, f))
                             for f in os.listdir(full)
-                            if f.endswith(".mp4") and os.path.isfile(os.path.join(full, f))
+                            if os.path.splitext(f)[1].lower() in media_exts
+                            and os.path.isfile(os.path.join(full, f))
                         ) / 1024 / 1024, 1,
                     ),
                     "mtime": os.path.getmtime(full),
@@ -3585,7 +3587,8 @@ def list_split_clips(video_name: str):
 
     clips = []
     for f in sorted(os.listdir(clips_dir)):
-        if not f.endswith(".mp4"):
+        ext = os.path.splitext(f)[1].lower()
+        if ext not in (".mp4", ".mkv", ".wav"):
             continue
         full = os.path.join(clips_dir, f)
         clips.append({
@@ -3594,6 +3597,63 @@ def list_split_clips(video_name: str):
             "size_mb": round(os.path.getsize(full) / 1024 / 1024, 1),
         })
     return {"clips": clips, "count": len(clips), "video_name": video_name}
+
+
+@app.get("/api/split/dir-browse")
+def browse_split_directory(path: str = Query("")):
+    """Browse a directory for sub-folders, video files, and WAV audio files."""
+    if not path:
+        path = DATA_DIR
+    real_path = os.path.realpath(path)
+    real_data = os.path.realpath(DATA_DIR)
+    if not real_path.startswith(real_data + os.sep) and real_path != real_data:
+        raise HTTPException(status_code=403, detail="Access denied: path outside data directory")
+    if not os.path.isdir(real_path):
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    parent_path = os.path.dirname(real_path)
+    if not parent_path.startswith(real_data + os.sep) and parent_path != real_data:
+        parent_path = real_data if real_path != real_data else ""
+
+    entries = sorted(os.listdir(real_path))
+    subdirs = []
+    video_files = []
+    audio_files = []
+    video_exts = {".mkv", ".mp4", ".avi", ".mov", ".wmv"}
+    audio_exts = {".wav"}
+
+    for entry in entries:
+        full = os.path.join(real_path, entry)
+        if os.path.isdir(full) and not entry.startswith('.'):
+            subdirs.append(entry)
+        elif os.path.isfile(full):
+            ext = os.path.splitext(entry)[1].lower()
+            if ext in video_exts:
+                size = os.path.getsize(full)
+                video_files.append({
+                    "name": entry,
+                    "ext": ext,
+                    "size_mb": round(size / 1024 / 1024, 1),
+                    "full_path": full,
+                })
+            elif ext in audio_exts:
+                size = os.path.getsize(full)
+                audio_files.append({
+                    "name": entry,
+                    "ext": ext,
+                    "size_mb": round(size / 1024 / 1024, 1),
+                    "full_path": full,
+                })
+
+    return {
+        "current_path": real_path,
+        "parent_path": parent_path,
+        "subdirs": subdirs,
+        "video_files": video_files,
+        "audio_files": audio_files,
+        "has_videos": len(video_files) > 0,
+        "has_audio": len(audio_files) > 0,
+    }
 
 
 @app.post("/api/split/run")
@@ -3635,6 +3695,19 @@ def run_split(payload: dict = Body(...)):
     def run():
 
         try:
+            is_audio = video_path.lower().endswith('.wav')
+            if mode == "subtitle" and is_audio:
+                job.status = "failed"
+                job.current_step = "error"
+                job.progress = 0
+                from pipeline import StepResult, StepStatus
+                job.steps = [StepResult(
+                    step="split_video", status=StepStatus.FAILED,
+                    message="字幕分割模式不支持 WAV 音频文件",
+                )]
+                pipeline._save_jobs()
+                return
+
             if mode == "subtitle":
                 subtitle_path = payload.get("subtitle_path", "")
                 if not subtitle_path or not os.path.exists(subtitle_path):
@@ -5512,6 +5585,87 @@ def _run_pipeline_video(job_id: str):
     temp_dir = os.path.join(TEMP_DIR, "pipeline_video", job_id)
     os.makedirs(temp_dir, exist_ok=True)
 
+    # Final output dir — created eagerly so per-file flush works from the start
+    output_base = getattr(job, 'output_dir', PIPELINE_VIDEO_DIR) or PIPELINE_VIDEO_DIR
+    final_dir = os.path.join(output_base, folder)
+    os.makedirs(final_dir, exist_ok=True)
+
+    def _publish_completed_file(f, state=None):
+        """Copy outputs to per-file folder structure, then clean this file's temp data.
+
+        Only runs when ALL segments of this file have completed.
+        Regex ^{base}(_seg\\d{{3}})?_.+$ matches only this exact file's temp
+        artifacts — it won't match "歌 2" when cleaning "歌".
+
+        Output layout under final_dir/{base_name}/:
+          enhanced/   ← final enhanced WAV
+          subtitles/  ← ASR SRT
+          clips/      ← cut audio segments
+        """
+        if f.status not in ("completed", "skipped"):
+            return
+
+        base_name = os.path.splitext(f.name)[0]
+        file_out = os.path.join(final_dir, base_name)
+        enhanced_dir = os.path.join(file_out, "enhanced")
+        subtitles_dir = os.path.join(file_out, "subtitles")
+        clips_dir = os.path.join(file_out, "clips")
+
+        def _safe_copy(src, dst_dir, dst_name):
+            os.makedirs(dst_dir, exist_ok=True)
+            dst = os.path.join(dst_dir, dst_name)
+            try:
+                if os.path.abspath(src) != os.path.abspath(dst):
+                    _shutil.copy2(src, dst)
+            except Exception:
+                pass
+            return dst
+
+        # 1. Enhanced WAV — skip if already published by _step_asr
+        enhanced_dst = os.path.join(enhanced_dir, base_name + ".wav")
+        if not os.path.exists(enhanced_dst):
+            wav_src = (state or {}).get("wav", "")
+            if wav_src and os.path.exists(wav_src):
+                _safe_copy(wav_src, enhanced_dir, base_name + ".wav")
+
+        # 2. SRT subtitles — skip if already published by _step_asr
+        srt_dst = os.path.join(subtitles_dir, base_name + ".srt")
+        if not os.path.exists(srt_dst):
+            srt_src = (state or {}).get("srt", "")
+            if srt_src and os.path.exists(srt_src):
+                _safe_copy(srt_src, subtitles_dir, base_name + ".srt")
+
+        # 3. Collect all output paths for frontend reference
+        # (enhanced WAV and SRT already published by _step_asr,
+        #  cut clips already placed by _step_cut into clips_dir)
+        if os.path.isdir(clips_dir):
+            for cf in os.listdir(clips_dir):
+                cp = os.path.join(clips_dir, cf)
+                if cp not in f.output_clips:
+                    f.output_clips.append(cp)
+        if os.path.exists(enhanced_dst) and enhanced_dst not in f.output_clips:
+            f.output_clips.append(enhanced_dst)
+        if os.path.exists(srt_dst) and srt_dst not in f.output_clips:
+            f.output_clips.append(srt_dst)
+
+        # --- Clean this file's temp data (safe regex, not naive prefix) ---
+        import re as _re
+        base_rgx_str = _re.escape(base_name)
+        _file_rgx = _re.compile(r'^' + base_rgx_str + r'(_seg\d{3})?_.+$')
+        seg_dir = "segments_" + base_name
+        sep_dir = "separated_" + base_name
+        if os.path.isdir(temp_dir):
+            for fn in os.listdir(temp_dir):
+                fp = os.path.join(temp_dir, fn)
+                if _file_rgx.match(fn) or fn in (seg_dir, sep_dir):
+                    try:
+                        if os.path.isfile(fp):
+                            os.remove(fp)
+                        elif os.path.isdir(fp):
+                            _shutil.rmtree(fp, ignore_errors=True)
+                    except OSError:
+                        pass
+
     # Per-step semaphores — tuned for RTX 4090 (24 GB).
     #
     # GPU budget (23.5 GB total, ~2 GB reserved by desktop/CUDA context):
@@ -5733,9 +5887,19 @@ def _run_pipeline_video(job_id: str):
         from asr_pipeline import run_asr_on_audio
         f.current_step = "asr"
 
-        srt_out = _temp_path(f, "asr", ".srt", state)
-        if os.path.exists(srt_out) and os.path.getsize(srt_out) > 0:
-            state["srt"] = srt_out
+        base_name = os.path.splitext(f.name)[0]
+        file_out = os.path.join(final_dir, base_name)
+        enhanced_dir = os.path.join(file_out, "enhanced")
+        subtitles_dir = os.path.join(file_out, "subtitles")
+        os.makedirs(enhanced_dir, exist_ok=True)
+        os.makedirs(subtitles_dir, exist_ok=True)
+
+        enhanced_wav = os.path.join(enhanced_dir, base_name + ".wav")
+        srt_final = os.path.join(subtitles_dir, base_name + ".srt")
+
+        # Cache check: if SRT already in final dir, reuse
+        if os.path.exists(srt_final) and os.path.getsize(srt_final) > 0:
+            state["srt"] = srt_final
             f.progress = 100
             f.steps.append({"step": "asr", "status": "completed",
                             "message": "ASR已完成 (复用缓存)"})
@@ -5745,7 +5909,14 @@ def _run_pipeline_video(job_id: str):
         f.progress = 0
         _update_pipeline_job_progress(job)
 
+        # Publish enhanced WAV to pipelinevideo for ASR input
         src = state.get("wav", f.wav_path)
+        if src and os.path.exists(src) and not os.path.exists(enhanced_wav):
+            try:
+                _shutil.copy2(src, enhanced_wav)
+            except Exception:
+                pass
+        asr_input = enhanced_wav if os.path.exists(enhanced_wav) else src
 
         def on_progress(phase, msg):
             if isinstance(msg, str):
@@ -5754,9 +5925,14 @@ def _run_pipeline_video(job_id: str):
                 f.progress = float(msg) if isinstance(msg, (int, float)) else f.progress
 
         try:
-            # Resolve hotwords: check step config first, then settings default
+            # Read ASR configuration from step config
             asr_cfg = step_cfg_map.get("asr", {})
-            hw_cfg_name = (asr_cfg.get("config", {}) or {}).get("hotword_config", "")
+            asr_opts = asr_cfg.get("config", {}) or {}
+            model_key = asr_opts.get("model", "qwen3-asr")
+            language = asr_opts.get("language", "zh")
+
+            # Resolve hotwords
+            hw_cfg_name = asr_opts.get("hotword_config", "")
             _hotwords = ""
             if hw_cfg_name:
                 hw_path = os.path.join(HOTWORDS_DIR, hw_cfg_name + ".txt")
@@ -5767,15 +5943,21 @@ def _run_pipeline_video(job_id: str):
                 from config import ASR_DEFAULT_HOTWORDS as _hw_default
                 _hotwords = _hw_default
             result = run_asr_on_audio(
-                src, output_dir=temp_dir, model_key="qwen3-asr", language="zh",
+                asr_input, output_dir=subtitles_dir, model_key=model_key, language=language,
                 progress_callback=on_progress, hotwords=_hotwords,
             )
             srt = result.get("srt_path", "")
             if srt and os.path.exists(srt):
-                # Copy to cached path for resume on restart
-                if srt != srt_out:
-                    _shutil.copy2(srt, srt_out)
-                state["srt"] = srt_out
+                # Move to final subtitles path if ASR put it elsewhere
+                if os.path.abspath(srt) != os.path.abspath(srt_final):
+                    try:
+                        _shutil.move(srt, srt_final)
+                    except Exception:
+                        try:
+                            _shutil.copy2(srt, srt_final)
+                        except Exception:
+                            srt_final = srt
+                state["srt"] = srt_final
                 f.progress = 100
                 f.steps.append({"step": "asr", "status": "completed",
                                 "message": f"ASR完成: {result.get('segments_count', 0)}条字幕"})
@@ -5915,13 +6097,19 @@ def _run_pipeline_video(job_id: str):
             _update_pipeline_job_progress(job)
             return True
 
-        src = state.get("wav", f.wav_path)
-        out_dir = os.path.join(temp_dir, f"cut_{os.path.splitext(f.name)[0]}")
-        os.makedirs(out_dir, exist_ok=True)
+        base_name = os.path.splitext(f.name)[0]
+        file_out = os.path.join(final_dir, base_name)
+        enhanced_dir = os.path.join(file_out, "enhanced")
+        clips_dir = os.path.join(file_out, "clips")
+        os.makedirs(clips_dir, exist_ok=True)
 
-        # Resume: check if cut clips already exist
-        existing_cuts = [os.path.join(out_dir, x) for x in os.listdir(out_dir)
-                        if x.endswith('.wav') and os.path.getsize(os.path.join(out_dir, x)) > 0]
+        # Read enhanced WAV from pipelinevideo if available, fall back to temp
+        enhanced_wav = os.path.join(enhanced_dir, base_name + ".wav")
+        src = enhanced_wav if os.path.exists(enhanced_wav) else state.get("wav", f.wav_path)
+
+        # Resume: check if cut clips already exist in final dir
+        existing_cuts = [os.path.join(clips_dir, x) for x in os.listdir(clips_dir)
+                        if x.endswith('.wav') and os.path.getsize(os.path.join(clips_dir, x)) > 0]
         if existing_cuts:
             f.output_clips.extend(existing_cuts)
             f.progress = 100
@@ -5936,8 +6124,8 @@ def _run_pipeline_video(job_id: str):
 
         try:
             clips = cut_audio_by_subtitle(
-                audio_path=src, srt_path=srt, output_dir=out_dir,
-                base_name=os.path.splitext(f.name)[0],
+                audio_path=src, srt_path=srt, output_dir=clips_dir,
+                base_name=base_name,
                 on_progress=on_progress,
             )
             f.output_clips.extend(clips)
@@ -5968,10 +6156,41 @@ def _run_pipeline_video(job_id: str):
         except ValueError:
             return -1
 
+    def _check_already_done(f):
+        """Check if this file already has all expected outputs in final_dir.
+        Returns True (and marks skipped) if every expected output exists."""
+        base_name = os.path.splitext(f.name)[0]
+        file_out = os.path.join(final_dir, base_name)
+        has_enhanced = os.path.isfile(os.path.join(file_out, "enhanced", base_name + ".wav"))
+        has_srt = os.path.isfile(os.path.join(file_out, "subtitles", base_name + ".srt"))
+        has_clips = os.path.isdir(os.path.join(file_out, "clips")) and \
+                    len(os.listdir(os.path.join(file_out, "clips"))) > 0
+        # Build expected set based on enabled steps
+        need_srt = "asr" in enabled_steps
+        need_clips = "cut" in enabled_steps
+        all_ok = has_enhanced
+        if need_srt: all_ok = all_ok and has_srt
+        if need_clips: all_ok = all_ok and has_clips
+        if all_ok:
+            f.status = "skipped"
+            f.progress = 100
+            f.steps.append({"step": "init", "status": "skipped",
+                            "message": "输出已存在，跳过处理"})
+            # Still collect existing output paths for frontend
+            _publish_completed_file(f)
+            return True
+        return False
+
     def _process_one_file(f):
         try:
             state = file_state.setdefault(f.input_path, {})
             f.status = "running"
+
+            # Pre-check: skip if outputs already exist in final_dir
+            if _check_already_done(f):
+                _update_pipeline_job_progress(job)
+                return
+
             if job.cancelled:
                 f.status = "error"; f.error = "任务已取消"
                 _update_pipeline_job_progress(job); return
@@ -6071,9 +6290,9 @@ def _run_pipeline_video(job_id: str):
                     seg_skip = set()
                     total_active_steps = sum(1 for s in post_steps if s != "convert")
 
-                    # Per-segment per-step timeout: 5 minutes max for any GPU step.
-                    # Normal steps take 15-60s; 300s catches genuine hangs only.
-                    STEP_TIMEOUT = 300
+                    # Per-segment per-step timeout.  ASR on a 10min segment can
+                    # take 20-30min on GPU; 1800s (30min) avoids false skips.
+                    STEP_TIMEOUT = 1800
 
                     active_idx = 0  # counts only non-convert steps
                     for step_key in post_steps:
@@ -6298,6 +6517,7 @@ def _run_pipeline_video(job_id: str):
                             f.output_clips.append(final_wav)
 
             f.status = "completed"
+            _publish_completed_file(f, state)
         except Exception as e:
             f.status = "error"
             f.error = str(e)[:200]
@@ -6308,24 +6528,7 @@ def _run_pipeline_video(job_id: str):
         futures = [executor.submit(_process_one_file, f) for f in files]
         concurrent.futures.wait(futures)
 
-    # Move final clips to output
-    output_base = getattr(job, 'output_dir', PIPELINE_VIDEO_DIR) or PIPELINE_VIDEO_DIR
-    final_dir = os.path.join(output_base, folder)
-    os.makedirs(final_dir, exist_ok=True)
-    for f in files:
-        if f.output_clips:
-            for clip in list(f.output_clips):
-                if os.path.exists(clip):
-                    dest = os.path.join(final_dir, os.path.basename(clip))
-                    try:
-                        _shutil.move(clip, dest)
-                    except Exception:
-                        try:
-                            _shutil.copy2(clip, dest)
-                        except Exception:
-                            pass
-            f.output_clips = [os.path.join(final_dir, os.path.basename(c)) for c in f.output_clips]
-
+    # Per-file flush already moved clips to final_dir; clean remaining temp as safety
     had_errors = any(f.status == "error" for f in files)
     if not had_errors and not job.cancelled:
         try:
@@ -6335,7 +6538,7 @@ def _run_pipeline_video(job_id: str):
             print(f"[pipeline-video] Failed to clean temp: {e}")
 
     for f in files:
-        if f.status not in ("error",):
+        if f.status not in ("error", "skipped"):
             f.status = "completed"
     job.status = "completed"
     job.progress = 100
@@ -7132,6 +7335,152 @@ def _build_postprocess_cmd(python_exe, payload):
     if payload.get("post_copy_errors", False):
         cmd.append("--copy-errors")
     return cmd
+
+
+# ============================================================
+# MFA TextGrid Viewer — parse + audio stream
+# ============================================================
+
+_RE_TG_UNQUOTE = __import__('re').compile(r'^"(.*)"$')
+
+
+def _tg_unquote(v: str) -> str:
+    v = v.strip()
+    m = _RE_TG_UNQUOTE.match(v)
+    if m:
+        return m.group(1).replace('""', '"')
+    return v
+
+
+def _parse_textgrid_file(path: str) -> dict:
+    """Parse a Praat TextGrid file into structured JSON.
+
+    Returns {xmin, xmax, tiers: [{name, intervals: [{xmin, xmax, text, duration}]}]}.
+    Works with both long_textgrid and short_textgrid formats.
+    """
+    with open(path, "r", encoding="utf-8") as f:
+        lines = f.read().splitlines()
+
+    xmin = 0.0
+    xmax = 0.0
+    tiers = []
+    current = None
+    pending_xmin = None
+    pending_xmax = None
+    in_items = False
+    in_interval = False
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if line == "item []:" or line == "item[]:":
+            in_items = True
+            continue
+        if not in_items:
+            if line.startswith("xmin ="):
+                xmin = float(line.split("=", 1)[1])
+            elif line.startswith("xmax ="):
+                xmax = float(line.split("=", 1)[1])
+            continue
+        if line.startswith("item [") or line.startswith("item["):
+            if current is not None:
+                tiers.append(current)
+            current = {"name": "", "intervals": []}
+            pending_xmin = None
+            pending_xmax = None
+            in_interval = False
+        elif current is not None and line.startswith("name ="):
+            current["name"] = _tg_unquote(line.split("=", 1)[1].strip())
+        elif current is not None and line.startswith("xmin ="):
+            v = float(line.split("=", 1)[1])
+            if in_interval:
+                pending_xmin = v
+            else:
+                current["_xmin"] = v
+        elif current is not None and line.startswith("xmax ="):
+            v = float(line.split("=", 1)[1])
+            if in_interval:
+                pending_xmax = v
+            else:
+                current["_xmax"] = v
+        elif current is not None and (line.startswith("intervals [") or line.startswith("intervals[")):
+            pending_xmin = None
+            pending_xmax = None
+            in_interval = True
+        elif current is not None and line.startswith("text ="):
+            text = _tg_unquote(line.split("=", 1)[1].strip())
+            if pending_xmin is None or pending_xmax is None:
+                continue
+            dur = round(pending_xmax - pending_xmin, 6)
+            current["intervals"].append({
+                "xmin": round(pending_xmin, 6),
+                "xmax": round(pending_xmax, 6),
+                "text": text,
+                "duration": dur,
+            })
+            pending_xmin = None
+            pending_xmax = None
+            in_interval = False
+
+    if current is not None:
+        tiers.append(current)
+
+    for t in tiers:
+        t.pop("_xmin", None)
+        t.pop("_xmax", None)
+
+    return {"xmin": round(xmin, 6), "xmax": round(xmax, 6), "tiers": tiers}
+
+
+@app.get("/api/mfa/parse-textgrid")
+def mfa_parse_textgrid(path: str = Query(..., description="Path to TextGrid file")):
+    """Parse a Praat TextGrid and return interval data as JSON."""
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"TextGrid not found: {path}")
+    if not path.lower().endswith(".textgrid"):
+        raise HTTPException(status_code=400, detail="File must be a .TextGrid")
+    try:
+        data = _parse_textgrid_file(path)
+        # Summarize: total intervals per tier
+        for t in data["tiers"]:
+            t["interval_count"] = len(t["intervals"])
+        data["tier_count"] = len(data["tiers"])
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Parse error: {e}")
+
+
+@app.get("/api/mfa/find-wav")
+def mfa_find_wav(textgrid_path: str = Query(..., description="TextGrid file path, finds matching WAV by stem")):
+    """Given a TextGrid path, try to find the corresponding WAV file."""
+    if not os.path.exists(textgrid_path):
+        raise HTTPException(status_code=404, detail="TextGrid not found")
+
+    stem = os.path.splitext(os.path.basename(textgrid_path))[0]
+    tg_dir = os.path.dirname(textgrid_path)
+
+    # Search strategy:
+    # 1. Same directory
+    # 2. Parent directory / mfa/wav / <stem>.wav
+    # 3. Walk up to find <stem>.wav
+    candidates = [
+        os.path.join(tg_dir, stem + ".wav"),
+        os.path.join(MFA_WAV_DIR, stem + ".wav"),
+        os.path.join(MFA_POST_DIR, "..", stem + ".wav"),
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return {"wav_path": os.path.normpath(c).replace("\\", "/"), "stem": stem, "source": "match"}
+    return {"wav_path": "", "stem": stem, "source": "not_found", "hint": "将 WAV 文件放到 data/mfa/wav/ 下可自动匹配"}
+
+
+@app.get("/api/mfa/stream")
+def mfa_stream(path: str = Query(..., description="Path to audio file (WAV/MP3)")):
+    """Stream an audio file for playback in the browser."""
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File not found")
+    ext = path.lower()
+    mt = "audio/wav" if ext.endswith(".wav") else ("audio/mpeg" if ext.endswith(".mp3") else "audio/ogg")
+    return FileResponse(path, media_type=mt)
 
 
 # MFA directory browser — shows folders + SRT files

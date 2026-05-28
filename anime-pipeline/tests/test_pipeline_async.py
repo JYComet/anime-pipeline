@@ -4,7 +4,7 @@ Runs split+convert first (fast), then ASR segment-by-segment.
 """
 import os, sys, time, json, subprocess, shutil
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'scripts'))
 from config import FFMPEG, FFPROBE, TEMP_DIR
 
 INPUT_FILE = r"E:\ComicCut\anime-pipeline\data\downloads\【VR研学】小鼠粽子喜欢甜的还是咸的 20250531 2222.aac"

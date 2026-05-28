@@ -229,6 +229,30 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
 .mfa-browser-item .mfa-file-icon { font-size:14px;flex-shrink:0; }
 .mfa-browser-item .mfa-item-name { flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
 .mfa-browser-item .mfa-item-size { font-size:11px;color:var(--text2);flex-shrink:0; }
+.mfa-tier-row { display:flex;align-items:stretch;border-bottom:1px solid #1a1a2e; }
+.mfa-tier-label {
+  width:110px;flex-shrink:0;font-size:10px;color:var(--text2);
+  padding:3px 6px;display:flex;align-items:center;justify-content:flex-end;
+  background:rgba(0,0,0,.2);border-right:1px solid var(--border);
+}
+.mfa-tier-bars { flex:1;position:relative;height:22px; }
+.mfa-tier-seg {
+  position:absolute;top:2px;bottom:2px;border-radius:2px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:9px;overflow:hidden;white-space:nowrap;cursor:pointer;
+  transition:opacity .15s;
+}
+.mfa-tier-seg:hover { opacity:0.8; }
+.mfa-tier-seg.sil0 { background:#1a2a1a;color:#3a5a3a; }
+.mfa-tier-seg.sil1 { background:#1a2a2a;color:#3a6a6a; }
+.mfa-tier-seg.sil2 { background:#2a1a1a;color:#6a4a3a; }
+.mfa-tier-seg.sil3 { background:#2a1a2a;color:#6a3a6a; }
+.mfa-tier-seg.word { background:#0f3460;color:#4a9eff; }
+.mfa-tier-seg.phone { background:#1a3a2a;color:#4ecca3; }
+.mfa-tier-seg.romaji { background:#2a2a0a;color:#cccc44; }
+.mfa-tier-seg.raw { background:#2a0a2a;color:#cc88cc; }
+.mfa-tier-seg.token { background:#0a2a2a;color:#44cccc; }
+.mfa-tier-seg.question { background:#3a1a1a;color:#e94560; }
 .toast-container { position: fixed; top: 16px; right: 16px; z-index: 1000; display: flex; flex-direction: column; gap: 8px; }
 .toast {
   padding: 12px 20px; border-radius: 8px; font-size: 14px;
@@ -1110,13 +1134,13 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
       <div style="flex:0 0 380px;min-width:300px;">
         <!-- Mode toggle -->
         <div style="display:flex;gap:6px;margin-bottom:10px;">
-          <button id="asr-mode-video-btn" class="btn btn-primary" onclick="switchAsrMode('video')" style="font-size:11px;padding:4px 12px;">视频模式</button>
-          <button id="asr-mode-folder-btn" class="btn btn-secondary" onclick="switchAsrMode('folder')" style="font-size:11px;padding:4px 12px;">📁 文件夹模式</button>
+          <button id="asr-mode-video-btn" class="btn btn-secondary" onclick="switchAsrMode('video')" style="font-size:11px;padding:4px 12px;">视频模式</button>
+          <button id="asr-mode-folder-btn" class="btn btn-primary" onclick="switchAsrMode('folder')" style="font-size:11px;padding:4px 12px;">📁 文件夹模式</button>
         </div>
 
         <!-- Video mode panel -->
-        <div id="asr-video-panel">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <div id="asr-video-panel" style="display:none;">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
             <h3 style="margin:0;">视频文件</h3>
             <button class="btn btn-secondary" onclick="loadAsrVideos()" style="font-size:11px;padding:4px 10px;">刷新</button>
           </div>
@@ -1135,8 +1159,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
         </div>
 
         <!-- Folder mode panel -->
-        <div id="asr-folder-panel" style="display:none;">
-          <div id="asr-folder-config-hint" style="margin-bottom:10px;padding:8px 12px;border-radius:6px;background:var(--accent);color:#fff;font-size:12px;text-align:center;font-weight:600;">
+        <div id="asr-folder-panel">
+  <div id="asr-folder-config-hint" style="margin-bottom:10px;padding:8px 12px;border-radius:6px;background:var(--accent);color:#fff;font-size:12px;text-align:center;font-weight:600;">
             ⚙️ 识别参数（模型/语言/热词/设备/输出目录）请在右侧面板设置 →
           </div>
           <!-- In-page directory browser -->
@@ -1439,24 +1463,32 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
   <!-- 视频切割 -->
   <div id="tab-split" class="tab">
     <div class="split-layout">
-      <!-- Left: Video list -->
+      <!-- Left: Folder browser -->
       <div class="split-left">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-          <h3 style="margin:0;">MKV/MP4 文件</h3>
-          <button class="btn btn-secondary" onclick="refreshSplitVideos()" style="font-size:11px;padding:4px 10px;">刷新</button>
+        <!-- Breadcrumb bar -->
+        <div id="split-folder-breadcrumb" style="display:flex;align-items:center;gap:6px;margin-bottom:8px;padding:6px 10px;border-radius:6px;background:var(--bg2);border:1px solid var(--border);font-size:12px;">
+          <button class="btn btn-secondary" onclick="splitFolderGoUp()" style="font-size:11px;padding:2px 8px;flex-shrink:0;" id="btn-split-folder-up" disabled>⬆ 上级</button>
+          <span id="split-folder-current-path" style="flex:1;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left;">加载中...</span>
+          <button class="btn btn-secondary" onclick="loadSplitFolderBrowser(_splitFolderPath)" style="font-size:11px;padding:2px 8px;flex-shrink:0;">刷新</button>
         </div>
-        <div id="split-batch-bar" class="batch-bar">
-          <label style="display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--text2);margin:0;">
-            <input type="checkbox" id="split-select-all-cb" onchange="splitToggleSelectAll()">
+
+        <!-- Subdirectory list -->
+        <div id="split-folder-subdirs" class="file-list" style="max-height:25vh;overflow-y:auto;border:1px solid var(--border);border-radius:8px;">
+          <div class="empty-state"><p>加载中...</p></div>
+        </div>
+
+        <!-- File info and selection bar -->
+        <div id="split-folder-file-info" style="display:none;margin-top:6px;padding:6px 10px;border-radius:6px;background:var(--bg2);border:1px solid var(--border);font-size:12px;color:var(--text2);"></div>
+        <div id="split-folder-select-bar" style="display:none;margin-top:6px;align-items:center;gap:8px;">
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;">
+            <input type="checkbox" id="split-folder-select-all-cb" onchange="splitFolderToggleSelectAll()" style="cursor:pointer;">
             全选
           </label>
-          <span id="split-selected-count" style="color:var(--accent);white-space:nowrap;">已选 0 个</span>
+          <span id="split-folder-selected-count" style="font-size:11px;color:var(--text2);"></span>
           <button class="btn btn-primary" id="btn-split-batch-run" onclick="runSplitBatch()" style="font-size:11px;padding:4px 12px;" disabled>批量执行</button>
           <span id="split-queue-status" style="display:none;color:var(--warning);font-weight:600;"></span>
         </div>
-        <div id="split-video-list" class="file-list" style="max-height:60vh;border:1px solid var(--border);border-radius:8px;">
-          <div class="empty-state"><p>加载中...</p></div>
-        </div>
+        <div id="split-folder-file-list" class="file-list" style="display:none;max-height:30vh;overflow-y:auto;margin-top:4px;border:1px solid var(--border);border-radius:8px;"></div>
 
         <!-- Existing clip dirs -->
         <div style="margin-top:16px;">
@@ -1465,6 +1497,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
             <div class="empty-state"><p>加载中...</p></div>
           </div>
         </div>
+        <!-- Hidden audio element for WAV preview -->
+        <audio id="split-folder-audio-player" style="display:none;" controls></audio>
       </div>
 
       <!-- Right: Config + Results -->
@@ -1479,7 +1513,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
 
           <!-- Mode selector -->
           <div class="split-mode-tabs">
-            <button class="active" data-split-mode="subtitle" onclick="switchSplitMode('subtitle')">字幕分割</button>
+            <button class="active" data-split-mode="subtitle" onclick="switchSplitMode('subtitle')" id="split-mode-subtitle-btn">字幕分割</button>
             <button data-split-mode="duration" onclick="switchSplitMode('duration')">时长分割</button>
             <button data-split-mode="size" onclick="switchSplitMode('size')">大小分割</button>
             <button data-split-mode="trim" onclick="switchSplitMode('trim')">裁剪</button>
@@ -1548,20 +1582,24 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
 
           <!-- Shared config -->
           <div class="split-config">
-            <label>输出格式</label>
-            <select id="split-output-ext">
-              <option value=".mp4">MP4 (.mp4)</option>
-              <option value=".mkv">MKV (.mkv)</option>
-              <option value=".mov">MOV (.mov)</option>
-            </select>
-            <label>硬件加速</label>
-            <select id="split-hw-accel">
-              <option value="auto">自动检测</option>
-              <option value="nvenc" selected>NVIDIA NVENC</option>
-              <option value="amf">AMD AMF</option>
-              <option value="qsv">Intel QSV</option>
-              <option value="libx264">CPU (libx264)</option>
-            </select>
+            <div id="split-output-format-section">
+              <label>输出格式</label>
+              <select id="split-output-ext">
+                <option value=".mp4">MP4 (.mp4)</option>
+                <option value=".mkv">MKV (.mkv)</option>
+                <option value=".mov">MOV (.mov)</option>
+              </select>
+            </div>
+            <div id="split-hw-accel-section">
+              <label>硬件加速</label>
+              <select id="split-hw-accel">
+                <option value="auto">自动检测</option>
+                <option value="nvenc" selected>NVIDIA NVENC</option>
+                <option value="amf">AMD AMF</option>
+                <option value="qsv">Intel QSV</option>
+                <option value="libx264">CPU (libx264)</option>
+              </select>
+            </div>
           </div>
 
           <!-- Output dir info -->
@@ -1675,9 +1713,17 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
         <input id="pv-duration-sec" type="number" value="600" min="10" step="60" style="width:100px;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:13px;">
         <span style="font-size:11px;color:var(--text2);">默认 600 秒 = 10 分钟</span>
       </div>
-      <div id="pv-asr-hotword-config" style="display:none;margin-top:8px;gap:8px;align-items:center;">
-        <label style="font-size:12px;color:var(--text2);white-space:nowrap;">ASR热词:</label>
-        <select id="pv-asr-hotword-select" style="padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;min-width:180px;">
+      <div id="pv-asr-config" style="display:none;margin-top:8px;gap:8px;align-items:center;flex-wrap:wrap;">
+        <label style="font-size:12px;color:var(--text2);white-space:nowrap;">ASR:</label>
+        <select id="pv-asr-model" style="padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;" onchange="pvOnAsrModelChange()">
+          <option value="qwen3-asr">Qwen3-ASR</option>
+        </select>
+        <select id="pv-asr-lang" style="padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;">
+          <option value="zh">中文</option>
+          <option value="ja">日本語</option>
+          <option value="auto">自动</option>
+        </select>
+        <select id="pv-asr-hotword-select" style="padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;min-width:160px;">
           <option value="">不使用热词</option>
         </select>
         <span id="pv-asr-hotword-preview" style="font-size:11px;color:var(--text2);"></span>
@@ -1968,6 +2014,41 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
       <button class="btn btn-success" onclick="mfaRunAll()" id="btn-mfa-runall" style="padding:8px 24px;font-size:14px;">运行完整管线 (1→2→3→4)</button>
       <span style="font-size:12px;color:var(--text2);">自动按顺序执行全部 4 个步骤</span>
     </div>
+
+    <!-- TextGrid Viewer -->
+    <details id="mfa-viewer-section" style="margin-bottom:12px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px 18px;">
+      <summary style="cursor:pointer;font-size:14px;font-weight:600;color:var(--accent);">📊 TextGrid 查看器 (对齐预览 + 音频播放)</summary>
+
+      <!-- Viewer file picker -->
+      <div style="display:flex;align-items:center;gap:8px;margin:8px 0;">
+        <button id="mfa-viewer-back" class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaViewerNavigate('..')" disabled>⬆</button>
+        <div id="mfa-viewer-breadcrumb" style="flex:1;font-size:11px;color:var(--text2);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;"></div>
+        <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaViewerBrowseOther()">浏览</button>
+      </div>
+      <div id="mfa-viewer-file-list" style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;background:var(--bg);margin-bottom:8px;">
+        <div class="empty-state" style="padding:20px;"><p>点击上方浏览按钮选择 TextGrid 所在目录</p></div>
+      </div>
+
+      <!-- Viewer canvas + timeline -->
+      <div id="mfa-viewer-main" style="display:none;">
+        <!-- Audio player -->
+        <div id="mfa-viewer-player-bar" style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg);border-radius:6px;margin-bottom:8px;flex-wrap:wrap;">
+          <button id="mfa-viewer-play" class="btn btn-primary" onclick="mfaViewerTogglePlay()" style="font-size:12px;padding:4px 16px;">▶ 播放</button>
+          <span id="mfa-viewer-time" style="font-size:12px;color:var(--text2);min-width:90px;">0.00s / 0.00s</span>
+          <input type="range" id="mfa-viewer-seek" min="0" max="1000" value="0" oninput="mfaViewerSeek(this.value)" style="flex:1;min-width:120px;accent-color:var(--accent);">
+          <span id="mfa-viewer-wav-name" style="font-size:11px;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+        </div>
+
+        <!-- Waveform canvas -->
+        <canvas id="mfa-waveform-canvas" width="1200" height="120" style="width:100%;height:120px;background:#000;border-radius:6px 6px 0 0;display:block;"></canvas>
+
+        <!-- Tier timeline -->
+        <div id="mfa-viewer-tiers" style="background:var(--bg);border-radius:0 0 6px 6px;overflow:hidden;"></div>
+      </div>
+      <div id="mfa-viewer-empty" style="text-align:center;padding:30px;color:var(--text2);">
+        <p>选择一个 .TextGrid 文件查看对齐结果</p>
+      </div>
+    </details>
 
     <!-- Progress panel -->
     <div id="mfa-progress-panel" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;">
@@ -2375,7 +2456,7 @@ function switchTab(name) {
   if (name === 'asr-compare') { if (!_cmpLoaded) { loadAsrCompareFiles(); loadAsrCompareModels(); _cmpLoaded = true; } restoreAsrCompareInterruptedJobs(); loadHotwordConfigs(); }
   if (name === 'stitch') loadStitchVideos();
   if (name === 'split') {
-    if (!window._splitLoaded) { loadSplitVideos(); loadSplitClipDirs(); window._splitLoaded = true; }
+    if (!window._splitLoaded) { loadSplitFolderBrowser(''); loadSplitClipDirs(); window._splitLoaded = true; }
   }
   if (name === 'pipelinevideo') {
     pvRenderStepConfig();
@@ -6291,6 +6372,11 @@ function jumpToSplitFromExtract(subPath) {
   _pendingSplitSubPath = subPath;
   _pendingSplitMkvPath = _extractActiveFile;
   switchTab('split');
+  if (_extractActiveFile) {
+    var dir = _extractActiveFile.replace(/\\/g, '/');
+    dir = dir.substring(0, dir.lastIndexOf('/'));
+    loadSplitFolderBrowser(dir);
+  }
 }
 
 function viewExtractSub(path) {
@@ -6737,38 +6823,76 @@ async function pollAsrJob() {
 }
 
 async function restoreAsrInterruptedJobs() {
-  /* Check for interrupted ASR jobs (video/folder) and show resume/discard buttons */
+  /* Restore ASR jobs on page load / tab switch:
+     - 'running' jobs → auto-resume polling (survives page refresh)
+     - 'interrupted' jobs → show resume/discard buttons */
   try {
     var resp = await fetch(API + '/api/asr/jobs');
     if (!resp.ok) return;
     var data = await resp.json();
     var jobs = data.jobs || [];
+
+    var running = jobs.filter(function(j) { return j.status === 'running'; });
     var interrupted = jobs.filter(function(j) { return j.status === 'interrupted'; });
-    if (!interrupted.length) return;
 
-    var cfgPanel = document.getElementById('asr-config-panel');
-    // Remove existing interrupted section if any
-    var existing = document.getElementById('asr-interrupted-section');
-    if (existing) existing.remove();
+    // Remove existing interrupted sections
+    var existing = document.querySelectorAll('#asr-interrupted-section');
+    for (var e = 0; e < existing.length; e++) existing[e].remove();
 
-    var html = '<div id="asr-interrupted-section" style="margin-top:12px;padding:12px;border-radius:8px;background:#3a1a1a;border:1px solid #ff6b6b;">';
-    html += '<div style="font-size:13px;color:#ff6b6b;font-weight:600;margin-bottom:8px;">' +
-      '有 ' + interrupted.length + ' 个任务因服务器重启而中断</div>';
-    for (var i = 0; i < interrupted.length; i++) {
-      var j = interrupted[i];
-      var label = j.type === 'folder'
-        ? (j.folder_name || '文件夹任务') + ' (' + (j.completed || 0) + '/' + (j.total || 0) + ' 完成)'
-        : (j.video_name || '未知视频');
-      html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,107,107,0.2);">' +
-        '<span style="font-size:12px;color:var(--text);">' + escapeHtml(label) + '</span>' +
-        '<span style="flex-shrink:0;">' +
-        '<button class="btn btn-primary" style="font-size:10px;padding:2px 8px;margin-left:8px;" onclick="resumeAsrJob(\'' + j.job_id + '\')">恢复</button>' +
-        '<button class="btn" style="font-size:10px;padding:2px 8px;margin-left:4px;background:var(--danger);color:#fff;" onclick="discardAsrJob(\'' + j.job_id + '\')">丢弃</button>' +
-        '</span></div>';
+    // --- Auto-restore running jobs ---
+    if (running.length) {
+      // Pick the most recent running job (there should be at most one)
+      var rj = running[0];
+      if (rj.type === 'folder') {
+        _asrFolderJobId = rj.job_id;
+        document.getElementById('asr-folder-progress').style.display = 'block';
+        document.getElementById('btn-asr-folder-cancel').style.display = 'inline-block';
+        document.getElementById('btn-asr-folder-run').disabled = true;
+        document.getElementById('btn-asr-folder-run').textContent = '处理中...';
+        startAsrFolderPolling();
+      } else {
+        _asrJobId = rj.job_id;
+        document.getElementById('asr-status').style.display = 'block';
+        document.getElementById('btn-asr-run').disabled = true;
+        document.getElementById('btn-asr-run').textContent = '识别中...';
+        startAsrPolling();
+      }
     }
-    html += '</div>';
-    cfgPanel.insertAdjacentHTML('beforeend', html);
+
+    // --- Show interrupted recovery UI ---
+    if (interrupted.length) {
+      var videoJobs = interrupted.filter(function(j) { return j.type !== 'folder'; });
+      var folderJobs = interrupted.filter(function(j) { return j.type === 'folder'; });
+      if (videoJobs.length) {
+        var vPanel = document.getElementById('asr-config-panel');
+        if (vPanel) vPanel.insertAdjacentHTML('beforeend', _renderInterruptedHtml(videoJobs, '视频任务'));
+      }
+      if (folderJobs.length) {
+        var fPanel = document.getElementById('asr-folder-panel');
+        if (fPanel) fPanel.insertAdjacentHTML('afterbegin', _renderInterruptedHtml(folderJobs, '文件夹任务'));
+      }
+    }
   } catch(e) { console.error(e); }
+}
+
+function _renderInterruptedHtml(jobs, typeLabel) {
+  var html = '<div id="asr-interrupted-section" style="margin-top:12px;padding:12px;border-radius:8px;background:#3a1a1a;border:1px solid #ff6b6b;">';
+  html += '<div style="font-size:13px;color:#ff6b6b;font-weight:600;margin-bottom:8px;">' +
+    '有 ' + jobs.length + ' 个' + typeLabel + '因服务器重启而中断</div>';
+  for (var i = 0; i < jobs.length; i++) {
+    var j = jobs[i];
+    var label = j.type === 'folder'
+      ? (j.folder_name || '文件夹任务') + ' (' + (j.completed || 0) + '/' + (j.total || 0) + ' 完成)'
+      : (j.video_name || '未知视频');
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,107,107,0.2);">' +
+      '<span style="font-size:12px;color:var(--text);">' + escapeHtml(label) + '</span>' +
+      '<span style="flex-shrink:0;">' +
+      '<button class="btn btn-primary" style="font-size:10px;padding:2px 8px;margin-left:8px;" onclick="resumeAsrJob(\'' + j.job_id + '\')">恢复</button>' +
+      '<button class="btn" style="font-size:10px;padding:2px 8px;margin-left:4px;background:var(--danger);color:#fff;" onclick="discardAsrJob(\'' + j.job_id + '\')">丢弃</button>' +
+      '</span></div>';
+  }
+  html += '</div>';
+  return html;
 }
 
 async function resumeAsrJob(jobId) {
@@ -6776,14 +6900,24 @@ async function resumeAsrJob(jobId) {
     var resp = await fetch(API + '/api/asr/job/' + jobId + '/resume', { method: 'POST' });
     if (!resp.ok) { var err = await resp.json(); toast('恢复失败: ' + (err.detail || '未知错误'), 'error'); return; }
     toast('ASR 任务已恢复');
-    // Remove interrupted section
-    var section = document.getElementById('asr-interrupted-section');
-    if (section) section.remove();
-    // Start polling this job
-    _asrJobId = jobId;
-    startAsrPolling();
-    document.getElementById('asr-status').style.display = 'block';
-    document.getElementById('asr-status-text').textContent = '恢复中...';
+    var sections = document.querySelectorAll('#asr-interrupted-section');
+    for (var s = 0; s < sections.length; s++) sections[s].remove();
+    // Fetch job to determine type for correct UI
+    var jr = await fetch(API + '/api/asr/job/' + jobId);
+    var job = await jr.json();
+    if (job.type === 'folder') {
+      _asrFolderJobId = jobId;
+      document.getElementById('asr-folder-progress').style.display = 'block';
+      document.getElementById('asr-folder-progress-fill').style.width = '0%';
+      document.getElementById('asr-folder-progress-text').textContent = '恢复中...';
+      document.getElementById('btn-asr-folder-cancel').style.display = 'inline-block';
+      startAsrFolderPolling();
+    } else {
+      _asrJobId = jobId;
+      startAsrPolling();
+      document.getElementById('asr-status').style.display = 'block';
+      document.getElementById('asr-status-text').textContent = '恢复中...';
+    }
   } catch(e) { toast('恢复失败', 'error'); }
 }
 
@@ -6885,6 +7019,11 @@ function jumpToSplitFromAsr(subPath, videoPath) {
   _pendingSplitSubPath = subPath;
   _pendingSplitMkvPath = videoPath;
   switchTab('split');
+  if (videoPath) {
+    var dir = videoPath.replace(/\\/g, '/');
+    dir = dir.substring(0, dir.lastIndexOf('/'));
+    loadSplitFolderBrowser(dir);
+  }
 }
 
 async function deleteAsrResult(path) {
@@ -8055,238 +8194,197 @@ document.getElementById('results-audio-player').addEventListener('ended', functi
 // ============================================================
 var _splitVideoPath = '';
 var _splitVideoName = '';
+var _splitFileExt = '';         // '.mkv', '.mp4', '.wav'
 var _splitMode = 'subtitle';
 var _splitJobId = null;
 window._splitLoaded = false;
 var _splitPollTimer = null;
 var _splitSubFiles = [];
-var _splitSelected = {};       // { path: true } for multi-select
-var _splitQueue = [];          // ordered array of { name, path } to process
+var _splitSelected = {};       // { full_path: true } for multi-select
+var _splitQueue = [];          // ordered array of { name, path, ext } to process
 var _splitQueueIndex = -1;     // current position in queue
-var _splitVideosCache = [];    // cached video list for batch use
 
-async function loadSplitVideos() {
-  var container = document.getElementById('split-video-list');
-  container.innerHTML = '<div class="empty-state"><p>加载中...</p></div>';
+// Folder browser state
+var _splitFolderPath = '';       // current directory being browsed
+var _splitFolderFiles = [];      // [{name, ext, size_mb, full_path, is_video}]
+var _splitFolderSubdirs = [];    // subdirectory names
+
+// --- Folder browser ---
+
+async function loadSplitFolderBrowser(path) {
+  if (!path) path = '';
   try {
-    var resp = await fetch(API + '/api/local/videos');
-    if (!resp.ok) throw new Error(await resp.text());
+    var resp = await fetch(API + '/api/split/dir-browse?path=' + encodeURIComponent(path));
+    if (!resp.ok) { console.error('split dir-browse failed:', resp.status); return; }
     var data = await resp.json();
-    var videos = data.videos || [];
+    _splitFolderPath = data.current_path;
+    _splitFolderSubdirs = data.subdirs || [];
 
-    // Load clip dirs to check split status
-    var clipDirMap = {};
-    try {
-      var cdResp = await fetch(API + '/api/split/clip-dirs');
-      if (cdResp.ok) {
-        var cdData = await cdResp.json();
-        var dirs = cdData.dirs || [];
-        for (var di = 0; di < dirs.length; di++) {
-          clipDirMap[dirs[di].name.toLowerCase()] = dirs[di].clip_count;
-        }
-      }
-    } catch(e) { console.error(e); }
-
-    // Show MKV and MP4 files
-    var filtered = [];
-    for (var i = 0; i < videos.length; i++) {
-      var ext = videos[i].name.toLowerCase().slice(-4);
-      if (ext === '.mkv' || ext === '.mp4') {
-        filtered.push(videos[i]);
-      }
+    // Merge video and audio files, sorted by name
+    _splitFolderFiles = [];
+    var vf = data.video_files || [];
+    for (var i = 0; i < vf.length; i++) {
+      vf[i].is_video = true;
+      _splitFolderFiles.push(vf[i]);
     }
-    _splitVideosCache = filtered;
-    if (!filtered.length) {
-      container.innerHTML = '<div class="empty-state"><p>未找到 MKV/MP4 文件<br><small>请将文件放入 data/downloads/ 目录</small></p></div>';
-      updateSplitBatchUI();
+    var af = data.audio_files || [];
+    for (var i = 0; i < af.length; i++) {
+      af[i].is_video = false;
+      _splitFolderFiles.push(af[i]);
+    }
+    _splitFolderFiles.sort(function(a, b) { return a.name.localeCompare(b.name); });
+
+    // Clear selection
+    _splitSelected = {};
+
+    // Breadcrumb
+    document.getElementById('split-folder-current-path').textContent = _splitFolderPath || '/';
+    var upBtn = document.getElementById('btn-split-folder-up');
+    upBtn.disabled = !data.parent_path;
+
+    // Subdirs list
+    var subdirsHtml = '';
+    if (_splitFolderSubdirs.length) {
+      for (var i = 0; i < _splitFolderSubdirs.length; i++) {
+        var subPath = (_splitFolderPath ? _splitFolderPath + '/' + _splitFolderSubdirs[i] : _splitFolderSubdirs[i]);
+        subdirsHtml += '<div class="file-item" onclick="loadSplitFolderBrowser(\'' + safeAttr(subPath) + '\')" style="cursor:pointer;display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--accent);">';
+        subdirsHtml += '<span style="font-size:14px;">📁</span>';
+        subdirsHtml += '<span style="font-size:12px;">' + escapeHtml(_splitFolderSubdirs[i]) + '</span>';
+        subdirsHtml += '</div>';
+      }
     } else {
-      var html = '';
-      for (var i = 0; i < filtered.length; i++) {
-        var v = filtered[i];
-        var sel = (v.path === _splitVideoPath) ? ' selected' : '';
-        var checkedClass = _splitSelected[v.path] ? ' checked' : '';
-        var vBase = v.name.replace(/\.[^.]+$/, '').toLowerCase();
-        var clipCount = clipDirMap[vBase] || 0;
-        var splitTag = clipCount > 0
-          ? '<span style="color:var(--success);font-size:10px;">已切片 (' + clipCount + '个)</span>'
-          : '<span style="color:var(--text2);font-size:10px;">未切片</span>';
-        var queueBadge = '';
-        if (_splitQueue.length > 0) {
-          var qi = -1;
-          for (var qj = 0; qj < _splitQueue.length; qj++) {
-            if (_splitQueue[qj].path === v.path) { qi = qj; break; }
-          }
-          if (qi >= 0) {
-            if (qi < _splitQueueIndex) {
-              queueBadge = '<span class="queue-badge queue-done">✅</span>';
-            } else if (qi === _splitQueueIndex) {
-              queueBadge = '<span class="queue-badge queue-processing">🔄 处理中</span>';
-            } else {
-              queueBadge = '<span class="queue-badge queue-waiting">⏳ 等待</span>';
-            }
-          }
-        }
-        html += '<div class="split-file-item' + sel + checkedClass + '" data-split-path="' + safeAttr(v.path) + '" style="flex-wrap:wrap;">' +
-          '<input type="checkbox" class="item-check" data-split-path="' + safeAttr(v.path) + '" onclick="event.stopPropagation();splitToggleItem(this)">' +
-          '<div style="flex:1;min-width:0;" onclick="selectSplitVideo(\'' +
-            escapeHtml(v.name).replace(/'/g, "\\'") + '\',\'' +
-            v.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">' +
-            '<div class="file-name">' + escapeHtml(v.name) + '</div>' +
-            '<div class="file-info" style="font-size:11px;color:var(--text2);margin-top:2px;">' + v.size_mb + ' MB | ' + (v.time_str || '') + ' | <span class="split-status">' + splitTag + '</span></div>' +
-          '</div>' +
-          queueBadge +
-          '</div>';
-      }
-      container.innerHTML = html;
-      updateSplitBatchUI();
+      subdirsHtml = '<div class="empty-state" style="padding:16px;"><p style="font-size:12px;">此目录下没有子文件夹</p></div>';
     }
-    // Auto-select pending MKV from extract→split jump
-    if (_pendingSplitMkvPath && filtered.length) {
-      for (var j = 0; j < filtered.length; j++) {
-        if (filtered[j].path.replace(/\\/g, '/') === _pendingSplitMkvPath.replace(/\\/g, '/')) {
-          selectSplitVideo(filtered[j].name, filtered[j].path);
+    document.getElementById('split-folder-subdirs').innerHTML = subdirsHtml;
+
+    // File list
+    var infoEl = document.getElementById('split-folder-file-info');
+    var barEl = document.getElementById('split-folder-select-bar');
+    var listEl = document.getElementById('split-folder-file-list');
+    if (_splitFolderFiles.length) {
+      infoEl.style.display = 'block';
+      var totalMb = 0;
+      for (var i = 0; i < _splitFolderFiles.length; i++) { totalMb += _splitFolderFiles[i].size_mb || 0; }
+      var vCount = (data.video_files || []).length;
+      var aCount = (data.audio_files || []).length;
+      var parts = [];
+      if (vCount) parts.push(vCount + ' 个视频');
+      if (aCount) parts.push(aCount + ' 个音频');
+      infoEl.textContent = '发现 ' + parts.join('，') + ' (' + totalMb.toFixed(1) + ' MB)';
+      barEl.style.display = 'flex';
+      _splitRenderFolderFileList();
+    } else {
+      infoEl.style.display = 'block';
+      infoEl.textContent = '此目录下没有视频或音频文件（支持 mkv, mp4, avi, mov, wmv, wav）';
+      barEl.style.display = 'none';
+      listEl.style.display = 'none';
+    }
+
+    // Handle pending cross-tab jump
+    if (_pendingSplitMkvPath && _splitFolderFiles.length) {
+      for (var j = 0; j < _splitFolderFiles.length; j++) {
+        if (_splitFolderFiles[j].full_path.replace(/\\/g, '/') === _pendingSplitMkvPath.replace(/\\/g, '/')) {
+          splitFolderSelectFile(_splitFolderFiles[j].name, _splitFolderFiles[j].full_path, _splitFolderFiles[j].ext);
           _pendingSplitMkvPath = null;
           break;
         }
       }
     }
-  } catch(e) {
-    container.innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
-  }
-}
-
-async function refreshSplitVideos() {
-  var container = document.getElementById('split-video-list');
-  // If list hasn't been loaded yet, do a full load
-  if (!container.querySelectorAll('.split-file-item').length) {
-    loadSplitVideos();
-    return;
-  }
-  try {
-    var resp = await fetch(API + '/api/local/videos');
-    if (!resp.ok) throw new Error(await resp.text());
-    var data = await resp.json();
-    var videos = data.videos || [];
-
-    var clipDirMap = {};
-    try {
-      var cdResp = await fetch(API + '/api/split/clip-dirs');
-      if (cdResp.ok) {
-        var cdData = await cdResp.json();
-        var dirs = cdData.dirs || [];
-        for (var di = 0; di < dirs.length; di++) {
-          clipDirMap[dirs[di].name.toLowerCase()] = dirs[di].clip_count;
-        }
-      }
-    } catch(e) { console.error(e); }
-
-    var filtered = [];
-    var newPathSet = {};
-    for (var i = 0; i < videos.length; i++) {
-      var ext = videos[i].name.toLowerCase().slice(-4);
-      if (ext === '.mkv' || ext === '.mp4') {
-        filtered.push(videos[i]);
-        newPathSet[videos[i].path] = true;
-      }
-    }
-    _splitVideosCache = filtered;
-
-    if (!filtered.length) {
-      container.innerHTML = '<div class="empty-state"><p>未找到 MKV/MP4 文件<br><small>请将文件放入 data/downloads/ 目录</small></p></div>';
-      updateSplitBatchUI();
-      return;
-    }
-
-    // Map existing DOM items by path
-    var existingItems = container.querySelectorAll('.split-file-item');
-    var existingByPath = {};
-    for (var i = 0; i < existingItems.length; i++) {
-      var p = existingItems[i].getAttribute('data-split-path');
-      if (p) existingByPath[p] = existingItems[i];
-    }
-
-    // Update existing items' status badges
-    for (var i = 0; i < existingItems.length; i++) {
-      var item = existingItems[i];
-      var path = item.getAttribute('data-split-path');
-      if (!path) continue;
-      if (!newPathSet[path]) {
-        item.remove();
-        continue;
-      }
-      // Find matching video in filtered list
-      var v = null;
-      for (var fi = 0; fi < filtered.length; fi++) {
-        if (filtered[fi].path === path) { v = filtered[fi]; break; }
-      }
-      if (!v) { item.remove(); continue; }
-      var vBase = v.name.replace(/\.[^.]+$/, '').toLowerCase();
-      var clipCount = clipDirMap[vBase] || 0;
-      var splitTag = clipCount > 0
-        ? '<span style="color:var(--success);font-size:10px;">已切片 (' + clipCount + '个)</span>'
-        : '<span style="color:var(--text2);font-size:10px;">未切片</span>';
-      var infoDiv = item.querySelector('.file-info');
-      if (infoDiv) {
-        var statusSpan = infoDiv.querySelector('.split-status');
-        var statusHtml = statusSpan ? '<span class="split-status">' + splitTag + '</span>' : splitTag;
-        infoDiv.innerHTML = v.size_mb + ' MB | ' + (v.time_str || '') + ' | ' + statusHtml;
-      }
-      // Update selection class
-      item.classList.toggle('selected', path === _splitVideoPath);
-      // Update checked class
-      item.classList.toggle('checked', _splitSelected[path]);
-      var cb = item.querySelector('.item-check');
-      if (cb) cb.checked = !!_splitSelected[path];
-    }
-
-    // Add new items in server order (newest first = prepend)
-    var firstItem = container.querySelector('.split-file-item');
-    for (var i = filtered.length - 1; i >= 0; i--) {
-      var v = filtered[i];
-      if (existingByPath[v.path]) continue;
-      var sel = (v.path === _splitVideoPath) ? ' selected' : '';
-      var checkedClass = _splitSelected[v.path] ? ' checked' : '';
-      var vBase = v.name.replace(/\.[^.]+$/, '').toLowerCase();
-      var clipCount = clipDirMap[vBase] || 0;
-      var splitTag = clipCount > 0
-        ? '<span style="color:var(--success);font-size:10px;">已切片 (' + clipCount + '个)</span>'
-        : '<span style="color:var(--text2);font-size:10px;">未切片</span>';
-      var div = document.createElement('div');
-      div.className = 'split-file-item' + sel + checkedClass;
-      div.setAttribute('data-split-path', v.path);
-      div.style.flexWrap = 'wrap';
-      div.innerHTML = '<input type="checkbox" class="item-check" data-split-path="' + safeAttr(v.path) + '" onclick="event.stopPropagation();splitToggleItem(this)"' + (_splitSelected[v.path] ? ' checked' : '') + '>' +
-        '<div style="flex:1;min-width:0;" onclick="selectSplitVideo(\'' +
-          escapeHtml(v.name).replace(/'/g, "\\'") + '\',\'' +
-          v.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">' +
-          '<div class="file-name">' + escapeHtml(v.name) + '</div>' +
-          '<div class="file-info" style="font-size:11px;color:var(--text2);margin-top:2px;">' + v.size_mb + ' MB | ' + (v.time_str || '') + ' | <span class="split-status">' + splitTag + '</span></div>' +
-        '</div>' +
-        '</div>';
-      container.insertBefore(div, firstItem);
-      firstItem = div;
-    }
-
     updateSplitBatchUI();
-  } catch(e) {
-    container.innerHTML = '<div class="empty-state"><p>刷新失败: ' + escapeHtml(e.message) + '</p></div>';
+  } catch(e) { console.error('loadSplitFolderBrowser:', e); }
+}
+
+function splitFolderGoUp() {
+  if (_splitFolderPath) {
+    var parent = _splitFolderPath.substring(0, _splitFolderPath.lastIndexOf('/'));
+    loadSplitFolderBrowser(parent);
   }
 }
+
+function _splitRenderFolderFileList() {
+  var listEl = document.getElementById('split-folder-file-list');
+  var html = '';
+  var selCount = 0;
+  for (var i = 0; i < _splitFolderFiles.length; i++) {
+    var f = _splitFolderFiles[i];
+    var fp = f.full_path;
+    if (_splitSelected[fp]) selCount++;
+    var sel = (fp === _splitVideoPath) ? ' selected' : '';
+    var checked = _splitSelected[fp] ? ' checked' : '';
+    var icon = f.is_video ? '🎬' : '🎵';
+    html += '<div class="file-item' + sel + checked + '" data-split-path="' + safeAttr(fp) + '" style="display:flex;align-items:center;gap:6px;padding:4px 8px;border-bottom:1px solid var(--border);">';
+    html += '<input type="checkbox" class="item-check" data-split-path="' + safeAttr(fp) + '" onclick="event.stopPropagation();splitFolderToggleItem(this)" style="cursor:pointer;flex-shrink:0;">';
+    html += '<span style="font-size:14px;flex-shrink:0;" title="' + (f.is_video ? '视频' : '音频') + '">' + icon + '</span>';
+    html += '<div style="flex:1;min-width:0;cursor:pointer;" onclick="splitFolderSelectFile(\'' + escapeHtml(f.name).replace(/'/g, "\\'") + '\',\'' + fp.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\',\'' + escapeHtml(f.ext) + '\')">';
+    html += '<span style="flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(f.name) + '">' + escapeHtml(f.name) + '</span>';
+    html += '</div>';
+    html += '<span style="font-size:10px;color:var(--text2);flex-shrink:0;">' + f.size_mb + ' MB</span>';
+    if (!f.is_video) {
+      html += '<button class="btn btn-secondary" onclick="event.stopPropagation();playSplitFolderAudio(\'' + safeAttr(fp) + '\')" style="font-size:10px;padding:2px 8px;flex-shrink:0;" title="播放">▶</button>';
+    }
+    html += '</div>';
+  }
+  listEl.innerHTML = html;
+  listEl.style.display = 'block';
+
+  document.getElementById('split-folder-select-all-cb').checked = selCount === _splitFolderFiles.length && _splitFolderFiles.length > 0;
+  document.getElementById('split-folder-selected-count').textContent = '已选 ' + selCount + '/' + _splitFolderFiles.length + ' 个';
+}
+
+function splitFolderToggleSelectAll() {
+  var checked = document.getElementById('split-folder-select-all-cb').checked;
+  _splitSelected = {};
+  if (checked) {
+    for (var i = 0; i < _splitFolderFiles.length; i++) {
+      _splitSelected[_splitFolderFiles[i].full_path] = true;
+    }
+  }
+  _splitRenderFolderFileList();
+  updateSplitBatchUI();
+}
+
+function splitFolderToggleItem(cb) {
+  var path = cb.getAttribute('data-split-path');
+  if (!path) return;
+  if (cb.checked) { _splitSelected[path] = true; }
+  else { delete _splitSelected[path]; }
+  _splitRenderFolderFileList();
+  updateSplitBatchUI();
+}
+
+function playSplitFolderAudio(path) {
+  if (!path) return;
+  var player = document.getElementById('split-folder-audio-player');
+  player.src = API + '/api/asr/stream?path=' + encodeURIComponent(path);
+  player.style.display = 'block';
+  player.play().catch(function(e) { console.error('Play failed:', e); });
+}
+
+// --- Old loadSplitVideos / refreshSplitVideos (kept as aliases) ---
+
+function loadSplitVideos() { loadSplitFolderBrowser(_splitFolderPath); }
+
+function refreshSplitVideos() { loadSplitFolderBrowser(_splitFolderPath); }
 
 function selectSplitVideo(name, path) {
+  // Backward-compat wrapper
+  var ext = '.' + name.split('.').pop().toLowerCase();
+  splitFolderSelectFile(name, path, ext);
+}
+
+function splitFolderSelectFile(name, path, ext) {
   // Don't interrupt active batch queue
   if (_splitQueue.length > 0 && _splitQueueIndex >= 0 && _splitQueueIndex < _splitQueue.length) return;
 
-  // Unescape backslashes in path
-  var realPath = path.replace(/\\\\/g, '\\');
-  _splitVideoPath = realPath;
+  _splitVideoPath = path;
   _splitVideoName = name;
+  _splitFileExt = ext;
 
   // Update visual selection
-  var items = document.querySelectorAll('#split-video-list .split-file-item');
+  var items = document.querySelectorAll('#split-folder-file-list .file-item');
   for (var i = 0; i < items.length; i++) {
     items[i].classList.remove('selected');
-    if (items[i].getAttribute('data-split-path') === realPath) {
+    if (items[i].getAttribute('data-split-path') === path) {
       items[i].classList.add('selected');
     }
   }
@@ -8300,48 +8398,37 @@ function selectSplitVideo(name, path) {
   var baseName = name.replace(/\.[^.]+$/, '');
   document.getElementById('split-output-dir').textContent = 'data/clips/' + baseName + '/';
 
-  // Load subtitles (will auto-match to this video)
-  loadSplitSubs();
-  // Load existing clips for this video
+  // WAV mode adaptation: hide subtitle mode, output format, hw accel
+  var isAudio = (ext === '.wav');
+  document.getElementById('split-mode-subtitle-btn').style.display = isAudio ? 'none' : '';
+  document.getElementById('split-output-format-section').style.display = isAudio ? 'none' : '';
+  document.getElementById('split-hw-accel-section').style.display = isAudio ? 'none' : '';
+  if (isAudio && _splitMode === 'subtitle') {
+    switchSplitMode('duration');
+  }
+
+  // Load subtitles (video only)
+  if (!isAudio) {
+    loadSplitSubs();
+  } else {
+    document.getElementById('split-sub-select').innerHTML = '<option value="">-- 音频文件不支持字幕模式 --</option>';
+  }
+  // Load existing clips for this file
   loadSplitClips();
   document.getElementById('split-results-section').style.display = 'block';
 }
 
-// --- Split batch selection ---
-function splitToggleItem(cb) {
-  var path = cb.getAttribute('data-split-path');
-  if (!path) return;
-  if (cb.checked) { _splitSelected[path] = true; }
-  else { delete _splitSelected[path]; }
-  updateSplitBatchUI();
-  var item = cb.closest('.split-file-item');
-  if (item) item.classList.toggle('checked', cb.checked);
-}
-
-function splitToggleSelectAll() {
-  var masterCb = document.getElementById('split-select-all-cb');
-  var checked = masterCb.checked;
-  _splitSelected = {};
-  var cbs = document.querySelectorAll('#split-video-list .item-check');
-  for (var i = 0; i < cbs.length; i++) {
-    cbs[i].checked = checked;
-    var path = cbs[i].getAttribute('data-split-path');
-    if (checked && path) _splitSelected[path] = true;
-    var item = cbs[i].closest('.split-file-item');
-    if (item) item.classList.toggle('checked', checked);
-  }
-  updateSplitBatchUI();
-}
+// --- Split batch selection (backward-compat wrappers) ---
+function splitToggleItem(cb) { splitFolderToggleItem(cb); }
+function splitToggleSelectAll() { splitFolderToggleSelectAll(); }
 
 function updateSplitBatchUI() {
-  var bar = document.getElementById('split-batch-bar');
   var count = Object.keys(_splitSelected).length;
-  document.getElementById('split-selected-count').textContent = '已选 ' + count + ' 个';
+  document.getElementById('split-folder-selected-count').textContent = '已选 ' + count + '/' + _splitFolderFiles.length + ' 个';
   document.getElementById('btn-split-batch-run').disabled = count === 0 || _splitQueue.length > 0;
-  bar.classList.toggle('visible', _splitVideosCache.length > 0);
 
-  var masterCb = document.getElementById('split-select-all-cb');
-  var cbs = document.querySelectorAll('#split-video-list .item-check');
+  var masterCb = document.getElementById('split-folder-select-all-cb');
+  var cbs = document.querySelectorAll('#split-folder-file-list .item-check');
   if (cbs.length === 0) {
     masterCb.checked = false;
     masterCb.indeterminate = false;
@@ -8367,15 +8454,16 @@ function runSplitBatch() {
   if (!keys.length) { toast('请先勾选文件', 'info'); return; }
 
   _splitQueue = [];
-  for (var i = 0; i < _splitVideosCache.length; i++) {
-    if (_splitSelected[_splitVideosCache[i].path]) {
-      _splitQueue.push({ name: _splitVideosCache[i].name, path: _splitVideosCache[i].path });
+  for (var i = 0; i < _splitFolderFiles.length; i++) {
+    var f = _splitFolderFiles[i];
+    if (_splitSelected[f.full_path]) {
+      _splitQueue.push({ name: f.name, path: f.full_path, ext: f.ext });
     }
   }
   _splitQueueIndex = 0;
 
   _splitSelected = {};
-  document.getElementById('split-select-all-cb').checked = false;
+  document.getElementById('split-folder-select-all-cb').checked = false;
   document.getElementById('btn-split-batch-run').disabled = true;
 
   // Preload subtitles for subtitle mode
@@ -8384,7 +8472,6 @@ function runSplitBatch() {
   } else {
     processNextSplitInQueue();
   }
-  loadSplitVideos();
 }
 
 function processNextSplitInQueue() {
@@ -8394,7 +8481,7 @@ function processNextSplitInQueue() {
     document.getElementById('split-queue-status').style.display = 'none';
     document.getElementById('btn-split-batch-run').disabled = Object.keys(_splitSelected).length === 0;
     resetSplitUI();
-    loadSplitVideos();
+    loadSplitFolderBrowser(_splitFolderPath);
     loadSplitClipDirs();
     toast('全部切割批量任务已完成', 'success');
     return;
@@ -8407,14 +8494,21 @@ function processNextSplitInQueue() {
 
   _splitVideoPath = item.path;
   _splitVideoName = item.name;
+  _splitFileExt = item.ext || '';
+
+  var isAudio = (_splitFileExt === '.wav');
 
   // Build payload (same as runSplit but for current queue item)
   var payload = {
     mode: _splitMode,
     video_path: item.path,
-    hw_accel: document.getElementById('split-hw-accel').value,
-    output_ext: document.getElementById('split-output-ext').value,
   };
+  if (!isAudio) {
+    payload.hw_accel = document.getElementById('split-hw-accel').value;
+    payload.output_ext = document.getElementById('split-output-ext').value;
+  } else {
+    payload.output_ext = '.wav';
+  }
 
   if (_splitMode === 'subtitle') {
     // Auto-match subtitle for this video
@@ -8442,7 +8536,7 @@ function processNextSplitInQueue() {
       toast('无效的片段时长，停止队列', 'error');
       resetSplitUI();
       _splitQueue = []; _splitQueueIndex = -1;
-      loadSplitVideos();
+      loadSplitFolderBrowser(_splitFolderPath);
       return;
     }
     payload.segment_duration = segDur;
@@ -8456,7 +8550,7 @@ function processNextSplitInQueue() {
       toast('无效的目标大小，停止队列', 'error');
       resetSplitUI();
       _splitQueue = []; _splitQueueIndex = -1;
-      loadSplitVideos();
+      loadSplitFolderBrowser(_splitFolderPath);
       return;
     }
     payload.target_size_mb = tsize;
@@ -8467,7 +8561,7 @@ function processNextSplitInQueue() {
       toast('无效的裁剪时间，停止队列', 'error');
       resetSplitUI();
       _splitQueue = []; _splitQueueIndex = -1;
-      loadSplitVideos();
+      loadSplitFolderBrowser(_splitFolderPath);
       return;
     }
     payload.start_time = trimStart;
@@ -8486,7 +8580,7 @@ function processNextSplitInQueue() {
   document.getElementById('split-progress-text').textContent = '队列 ' + (_splitQueueIndex + 1) + '/' + _splitQueue.length + ' — 提交任务...';
   document.getElementById('split-status-text').textContent = '';
 
-  loadSplitVideos();
+  loadSplitFolderBrowser(_splitFolderPath);
 
   fetch(API + '/api/split/run', {
     method: 'POST',
@@ -8508,6 +8602,8 @@ function processNextSplitInQueue() {
 }
 
 async function loadSplitSubs() {
+  // WAV audio files don't support subtitle mode
+  if (_splitFileExt === '.wav') return;
   var select = document.getElementById('split-sub-select');
   var preview = document.getElementById('split-sub-preview');
   select.innerHTML = '<option value="">-- 加载中 --</option>';
@@ -8661,6 +8757,11 @@ function onSplitSubSelect() {
 }
 
 function switchSplitMode(mode) {
+  // Block subtitle mode for WAV audio files
+  if (_splitFileExt === '.wav' && mode === 'subtitle') {
+    toast('WAV 音频文件不支持字幕分割模式', 'info');
+    return;
+  }
   _splitMode = mode;
   var buttons = document.querySelectorAll('.split-mode-tabs button');
   for (var i = 0; i < buttons.length; i++) {
@@ -8692,16 +8793,22 @@ function parseTimeInput(val) {
 
 async function runSplit() {
   if (!_splitVideoPath) {
-    toast('请先选择视频文件', 'error');
+    toast('请先选择文件', 'error');
     return;
   }
+
+  var isAudio = (_splitFileExt === '.wav');
 
   var payload = {
     mode: _splitMode,
     video_path: _splitVideoPath,
-    hw_accel: document.getElementById('split-hw-accel').value,
-    output_ext: document.getElementById('split-output-ext').value,
   };
+  if (!isAudio) {
+    payload.hw_accel = document.getElementById('split-hw-accel').value;
+    payload.output_ext = document.getElementById('split-output-ext').value;
+  } else {
+    payload.output_ext = '.wav';
+  }
 
   if (_splitMode === 'subtitle') {
     var subIdx = parseInt(document.getElementById('split-sub-select').value);
@@ -8843,7 +8950,7 @@ async function pollSplitJob() {
         _splitQueue = [];
         _splitQueueIndex = -1;
         document.getElementById('split-queue-status').style.display = 'none';
-        loadSplitVideos();
+        loadSplitFolderBrowser(_splitFolderPath);
       }
       resetSplitUI();
     }
@@ -9059,19 +9166,17 @@ function renderSettings() {
   html += '<div class="settings-section-title">降噪 — 默认处理步骤</div>';
   html += '<div style="font-size:11px;color:var(--text2);margin-bottom:6px;">勾选默认启用的步骤，此设置刷新页面后对新任务生效</div>';
   html += '<div class="settings-steps">';
-  var allStepKeys = ['male_voice','enhance','super_resolve','reverb','silence','vad','pad','clear_short'];
-  var allStepLabels = {'male_voice':'去除男声','enhance':'语音增强','super_resolve':'超分辨率','reverb':'混响检测','silence':'静音过滤','vad':'VAD','pad':'规范化','clear_short':'清除短音频'};
   var stepSet = {};
   if (steps && steps.length) {
     for (var s = 0; s < steps.length; s++) stepSet[steps[s]] = true;
   }
-  for (var s = 0; s < allStepKeys.length; s++) {
-    var sk = allStepKeys[s];
+  for (var s = 0; s < STEP_DEFAULTS.length; s++) {
+    var sk = STEP_DEFAULTS[s].key;
     var checked = stepSet[sk] ? ' checked' : '';
     html += '<label class="settings-step-item' + (checked ? '' : ' disabled') + '">';
     html += '<input type="checkbox" data-setting-step="' + sk + '"' + checked + ' onchange="this.parentElement.classList.toggle(\'disabled\',!this.checked)">';
-    html += '<span>' + (allStepLabels[sk] || sk) + '</span></label>';
-    if (s < allStepKeys.length - 1) html += '<span style="color:var(--text2);font-size:10px;">→</span>';
+    html += '<span>' + (STEP_DEFAULTS[s].label || sk) + '</span></label>';
+    if (s < STEP_DEFAULTS.length - 1) html += '<span style="color:var(--text2);font-size:10px;">→</span>';
   }
   html += '</div></div>';
 
@@ -9087,19 +9192,17 @@ function renderSettings() {
   html += '<div class="settings-section-title">视频管线 — 默认处理步骤</div>';
   html += '<div style="font-size:11px;color:var(--text2);margin-bottom:6px;">勾选默认启用的步骤，此设置刷新页面后对新任务生效</div>';
   html += '<div class="settings-steps">';
-  var pvAllKeys = ['duration_split','convert','music_separate','enhance','super_resolve','asr','cut'];
-  var pvAllLabels = {'duration_split':'时长切分','convert':'WAV转换','music_separate':'BGM分离','enhance':'语音增强','super_resolve':'超分辨率','asr':'ASR字幕识别','cut':'字幕切割'};
   var pvSet = {};
   if (pvSteps && pvSteps.length) {
     for (var s = 0; s < pvSteps.length; s++) pvSet[pvSteps[s]] = true;
   }
-  for (var s = 0; s < pvAllKeys.length; s++) {
-    var sk = pvAllKeys[s];
+  for (var s = 0; s < PV_STEP_DEFAULTS.length; s++) {
+    var sk = PV_STEP_DEFAULTS[s].key;
     var checked = pvSet[sk] ? ' checked' : '';
     html += '<label class="settings-step-item' + (checked ? '' : ' disabled') + '">';
     html += '<input type="checkbox" data-setting-pv-step="' + sk + '"' + checked + ' onchange="this.parentElement.classList.toggle(\'disabled\',!this.checked)">';
-    html += '<span>' + (pvAllLabels[sk] || sk) + '</span></label>';
-    if (s < pvAllKeys.length - 1) html += '<span style="color:var(--text2);font-size:10px;">→</span>';
+    html += '<span>' + (PV_STEP_DEFAULTS[s].label || sk) + '</span></label>';
+    if (s < PV_STEP_DEFAULTS.length - 1) html += '<span style="color:var(--text2);font-size:10px;">→</span>';
   }
   html += '</div></div>';
 
@@ -9479,15 +9582,66 @@ function pvRenderStepConfig() {
     durCfg.style.display = dsEnabled ? 'flex' : 'none';
   }
 
-  var hwCfg = document.getElementById('pv-asr-hotword-config');
-  if (hwCfg) {
+  var asrCfg = document.getElementById('pv-asr-config');
+  if (asrCfg) {
     var asrEnabled = false;
     for (var k = 0; k < _pvSteps.length; k++) {
       if (_pvSteps[k].key === 'asr' && _pvSteps[k].enabled) { asrEnabled = true; break; }
     }
-    hwCfg.style.display = asrEnabled ? 'flex' : 'none';
-    if (asrEnabled) pvPopulateHotwordDropdown();
+    asrCfg.style.display = asrEnabled ? 'flex' : 'none';
+    if (asrEnabled) pvPopulateAsrConfig();
   }
+}
+
+var _asrModelData = [];  // [{key, name, languages}]
+
+function pvPopulateAsrConfig() {
+  // Load ASR models if not already loaded
+  if (!_asrModelData.length) {
+    fetch(API + '/api/asr/models').then(function(r) { return r.json(); }).then(function(data) {
+      _asrModelData = data.models || [];
+      pvRenderAsrModelDropdown();
+      pvOnAsrModelChange();
+      pvPopulateHotwordDropdown();
+    }).catch(function() {});
+  } else {
+    pvRenderAsrModelDropdown();
+    pvOnAsrModelChange();
+    pvPopulateHotwordDropdown();
+  }
+}
+
+function pvRenderAsrModelDropdown() {
+  var sel = document.getElementById('pv-asr-model');
+  if (!sel) return;
+  var current = sel.getAttribute('data-selected') || 'qwen3-asr';
+  var opts = '';
+  for (var i = 0; i < _asrModelData.length; i++) {
+    var m = _asrModelData[i];
+    opts += '<option value="' + safeAttr(m.key) + '"' + (m.key === current ? ' selected' : '') + '>' + escapeHtml(m.name) + '</option>';
+  }
+  sel.innerHTML = opts;
+  sel.setAttribute('data-selected', current);
+}
+
+function pvOnAsrModelChange() {
+  var modelSel = document.getElementById('pv-asr-model');
+  var langSel = document.getElementById('pv-asr-lang');
+  if (!modelSel || !langSel) return;
+  var modelKey = modelSel.value;
+  modelSel.setAttribute('data-selected', modelKey);
+  // Find model and update language options
+  var langs = ['auto', 'zh', 'ja', 'en', 'ko'];
+  for (var i = 0; i < _asrModelData.length; i++) {
+    if (_asrModelData[i].key === modelKey) { langs = _asrModelData[i].languages || langs; break; }
+  }
+  var langLabels = { 'auto': '自动检测', 'zh': '中文', 'ja': '日本語', 'en': 'English', 'ko': '한국어', 'yue': '粤语', 'fr': 'Français', 'de': 'Deutsch' };
+  var currentLang = langSel.value || 'zh';
+  var opts = '';
+  for (var l = 0; l < langs.length; l++) {
+    opts += '<option value="' + safeAttr(langs[l]) + '"' + (langs[l] === currentLang ? ' selected' : '') + '>' + escapeHtml(langLabels[langs[l]] || langs[l]) + '</option>';
+  }
+  langSel.innerHTML = opts;
 }
 
 function pvPopulateHotwordDropdown() {
@@ -9575,6 +9729,8 @@ function pvStartPipeline() {
     }
     if (_pvSteps[d].key === 'asr' && _pvSteps[d].enabled) {
       _pvSteps[d].config = _pvSteps[d].config || {};
+      _pvSteps[d].config.model = document.getElementById('pv-asr-model').value || 'qwen3-asr';
+      _pvSteps[d].config.language = document.getElementById('pv-asr-lang').value || 'zh';
       _pvSteps[d].config.hotword_config = document.getElementById('pv-asr-hotword-select').value || '';
     }
   }
@@ -9584,7 +9740,7 @@ function pvStartPipeline() {
   var files = [];
   for (var i = 0; i < selectedPaths.length; i++) {
     files.push({
-      name: selectedPaths[i].replace(/\/g, '/').split('/').pop(),
+      name: selectedPaths[i].replace(/\\/g, '/').split('/').pop(),
       input_path: selectedPaths[i],
       wav_path: '',
       status: 'pending',
@@ -9610,6 +9766,7 @@ function pvStartPipeline() {
   _pvQueue.push(queueItem);
 
   pvRenderQueue();
+  _savePvQueue();
 
   if (_pvQueue.length === 1) {
     pvStartQueuedBackend(0);
@@ -9638,6 +9795,7 @@ function pvStartQueuedBackend(idx) {
     item.job_id = data.job_id;
     item.status = 'running';
     pvRenderQueue();
+    _savePvQueue();
     startPvPolling();
   })
   .catch(function(e) {
@@ -9649,7 +9807,8 @@ function pvStartQueuedBackend(idx) {
 function pvRemoveFromQueue(idx) {
   _pvQueue.splice(idx, 1);
   pvRenderQueue();
-  if (!_pvQueue.length) stopPvPolling();
+  if (!_pvQueue.length) { stopPvPolling(); _clearPvQueueStorage(); }
+  else _savePvQueue();
 }
 
 function startPvPolling() {
@@ -9662,6 +9821,17 @@ function stopPvPolling() {
   if (!_pvQueue.length || _pvQueue.every(function(q) { return q.status === 'completed' || q.status === 'cancelled'; })) {
     document.getElementById('pv-queue-section').style.display = 'none';
   }
+}
+
+var _pvQueueHash = '';
+
+function _pvQueueFingerprint() {
+  // Build a string that changes only when queue structure or item statuses change
+  var parts = [];
+  for (var i = 0; i < _pvQueue.length; i++) {
+    parts.push(_pvQueue[i].job_id + ':' + _pvQueue[i].status);
+  }
+  return parts.join('|');
 }
 
 function pollPvJobs() {
@@ -9679,9 +9849,16 @@ function pollPvJobs() {
               _pvQueue[k].progress = job.progress;
               _pvQueue[k].files = job.files;
               _pvQueue[k].folder_name = job.folder_name;
-              pvRenderQueue();
               break;
             }
+          }
+          // Only full re-render if queue structure or statuses changed
+          var fp = _pvQueueFingerprint();
+          if (fp !== _pvQueueHash) {
+            _pvQueueHash = fp;
+            pvRenderQueue();
+          } else {
+            pvUpdateQueueProgress();
           }
         }).catch(function() {});
     }
@@ -9700,6 +9877,7 @@ function pvProcessNextInQueue() {
     pvStartQueuedBackend(0);
   }
   pvRenderQueue();
+  if (!_pvQueue.length) _clearPvQueueStorage(); else _savePvQueue();
 }
 
 // ============================================================
@@ -9714,6 +9892,20 @@ function pvRenderQueue() {
   if (!_pvQueue.length) {
     section.style.display = 'none';
     return;
+  }
+
+  // Save scroll positions to prevent jank during polling updates
+  var scrollTop = container.scrollTop;
+  var detailScrollTops = {};
+  var cards = container.querySelectorAll('.pv-queue-card');
+  for (var ci = 0; ci < cards.length; ci++) {
+    var cardIdx = cards[ci].getAttribute('data-queue-idx');
+    if (cardIdx !== null) {
+      var detail = cards[ci].querySelector('.pv-queue-detail');
+      if (detail && detail.offsetParent !== null) {
+        detailScrollTops[cardIdx] = detail.scrollTop;
+      }
+    }
   }
 
   section.style.display = 'block';
@@ -9735,14 +9927,16 @@ function pvRenderQueue() {
       if (item.files[j].status === 'completed') completedCount++;
     }
 
-    html += '<div style="border:1px solid ' + cardBorder + ';border-radius:8px;overflow:hidden;background:var(--bg2);">';
+    var draggable = isPending ? ' draggable="true"' : '';
+    html += '<div class="pv-queue-card" data-queue-idx="' + i + '"' + draggable + ' style="border:1px solid ' + cardBorder + ';border-radius:8px;overflow:hidden;background:var(--bg2);">';
 
     html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;cursor:pointer;" onclick="pvToggleQueueItem(' + i + ')">';
     html += '<div style="flex:1;min-width:0;">';
     html += '<div style="display:flex;align-items:center;gap:8px;">';
+    if (isPending) html += '<span class="pv-drag-handle" style="cursor:grab;color:var(--text2);font-size:14px;" title="拖拽排序">⠿</span>';
     html += '<span style="font-size:12px;color:var(--text2);">' + (item.expanded ? '▾' : '▸') + '</span>';
     html += '<span style="font-size:13px;font-weight:600;color:var(--text);">#' + (i + 1) + ' ' + escapeHtml(item.folder_name) + '</span>';
-    html += '<span style="font-size:11px;color:' + statusColor + ';padding:1px 8px;border-radius:10px;background:var(--bg);">' + statusLabel + '</span>';
+    html += '<span class="pv-queue-status" style="font-size:11px;color:' + statusColor + ';padding:1px 8px;border-radius:10px;background:var(--bg);">' + statusLabel + '</span>';
     html += '<span style="font-size:11px;color:var(--text2);">' + item.files.length + ' 文件</span>';
     if (completedCount > 0) {
       html += '<span style="font-size:11px;color:var(--text2);">已完成 ' + completedCount + '/' + item.files.length + '</span>';
@@ -9759,7 +9953,6 @@ function pvRenderQueue() {
     }
     if (isPending) {
       html += '<button class="btn btn-secondary" onclick="pvDeleteQueuedJob(' + i + ')" style="font-size:10px;padding:2px 8px;color:var(--danger);">删除</button>';
-      html += '<button class="btn btn-primary" onclick="pvPromoteJob(' + i + ')" style="font-size:10px;padding:2px 8px;">提前执行</button>';
     }
     if (isCompleted || isCancelled) {
       html += '<button class="btn btn-secondary" onclick="pvRemoveFromQueue(' + i + ');pvRenderQueue();" style="font-size:10px;padding:2px 8px;">移除</button>';
@@ -9767,7 +9960,7 @@ function pvRenderQueue() {
     html += '</div></div>';
 
     if (item.expanded) {
-      html += '<div style="border-top:1px solid var(--border);padding:12px 14px;max-height:400px;overflow-y:auto;">';
+      html += '<div class="pv-queue-detail" style="border-top:1px solid var(--border);padding:12px 14px;max-height:400px;overflow-y:auto;">';
       html += '<div style="margin-bottom:8px;display:flex;gap:4px;flex-wrap:wrap;">';
       for (var s = 0; s < item.stepsConfig.length; s++) {
         var st = item.stepsConfig[s];
@@ -9787,7 +9980,7 @@ function pvRenderQueue() {
         if (file.status === 'running' || file.status === 'converting') {
           html += '<div class="progress-bar" style="margin:4px 0;"><div class="progress-fill" style="width:' + Math.round(file.progress) + '%;"></div></div>';
         }
-        html += '<div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:3px;">' + stepLabels + '</div>';
+        html += '<div class="pv-step-labels" style="display:flex;gap:3px;flex-wrap:wrap;margin-top:3px;">' + stepLabels + '</div>';
         html += '</div>';
       }
       html += '</div>';
@@ -9797,6 +9990,113 @@ function pvRenderQueue() {
   }
 
   container.innerHTML = html;
+  container.scrollTop = scrollTop;
+  _pvQueueHash = _pvQueueFingerprint();
+  for (var di in detailScrollTops) {
+    var card = container.querySelector('.pv-queue-card[data-queue-idx="' + di + '"]');
+    if (card) {
+      var detail = card.querySelector('.pv-queue-detail');
+      if (detail) detail.scrollTop = detailScrollTops[di];
+    }
+  }
+
+  // Drag-and-drop reordering for pending queue items
+  var dragSrcIdx = -1;
+  var dragCards = container.querySelectorAll('.pv-queue-card[draggable="true"]');
+  for (var dc = 0; dc < dragCards.length; dc++) {
+    dragCards[dc].addEventListener('dragstart', function(e) {
+      dragSrcIdx = parseInt(this.getAttribute('data-queue-idx'));
+      this.style.opacity = '0.4';
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    dragCards[dc].addEventListener('dragend', function(e) {
+      this.style.opacity = '';
+      dragSrcIdx = -1;
+    });
+    dragCards[dc].addEventListener('dragover', function(e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      this.style.borderTop = '2px solid var(--accent)';
+    });
+    dragCards[dc].addEventListener('dragleave', function(e) {
+      this.style.borderTop = '';
+    });
+    dragCards[dc].addEventListener('drop', function(e) {
+      e.preventDefault();
+      this.style.borderTop = '';
+      var dropIdx = parseInt(this.getAttribute('data-queue-idx'));
+      if (dragSrcIdx >= 0 && dragSrcIdx !== dropIdx) {
+        var moved = _pvQueue.splice(dragSrcIdx, 1)[0];
+        _pvQueue.splice(dropIdx, 0, moved);
+        _savePvQueue();
+        _pvQueueHash = '';
+        pvRenderQueue();
+      }
+    });
+  }
+}
+
+// Lightweight progress-only update — no DOM rebuild, no scroll jank
+function pvUpdateQueueProgress() {
+  var cards = document.querySelectorAll('#pv-queue-list .pv-queue-card');
+  for (var ci = 0; ci < cards.length; ci++) {
+    var card = cards[ci];
+    var idx = parseInt(card.getAttribute('data-queue-idx'));
+    if (isNaN(idx) || idx >= _pvQueue.length) continue;
+    var item = _pvQueue[idx];
+
+    // Update progress bar
+    var fill = card.querySelector('.progress-fill');
+    if (fill) fill.style.width = Math.round(item.progress) + '%';
+
+    // Update status label and border
+    var statusSpan = card.querySelector('.pv-queue-status');
+    var isRunning = item.status === 'running';
+    var isCompleted = item.status === 'completed';
+    var isCancelled = item.status === 'cancelled';
+    if (statusSpan) {
+      statusSpan.textContent = isRunning ? '处理中' : (isCompleted ? '完成' : (isCancelled ? '已取消' : '排队中'));
+      statusSpan.style.color = isRunning ? 'var(--accent)' : (isCompleted ? 'var(--success)' : (isCancelled ? 'var(--danger)' : 'var(--text2)'));
+    }
+    card.style.borderColor = isRunning ? 'var(--accent)' : (isCompleted ? 'var(--success)' : (isCancelled ? 'var(--danger)' : 'var(--border)'));
+
+    // Update file cards inside expanded detail
+    var detail = card.querySelector('.pv-queue-detail');
+    if (detail) {
+      var fileCards = detail.querySelectorAll('.pv-progress-card');
+      for (var fi = 0; fi < fileCards.length && fi < item.files.length; fi++) {
+        var fc = fileCards[fi];
+        var file = item.files[fi];
+
+        // Update status class
+        fc.className = 'pv-progress-card ' + file.status;
+
+        // Update status text
+        var st = fc.querySelector('.job-status');
+        if (st) {
+          st.textContent = pvStatusText(file);
+          st.className = 'job-status status-' + file.status;
+        }
+
+        // Update file progress bar
+        var ff = fc.querySelector('.progress-fill');
+        if (ff) {
+          if (file.status === 'running' || file.status === 'converting') {
+            ff.style.width = Math.round(file.progress) + '%';
+            ff.parentElement.style.display = '';
+          } else {
+            ff.parentElement.style.display = 'none';
+          }
+        }
+
+        // Update step labels
+        var slContainer = fc.querySelector('.pv-step-labels');
+        if (slContainer) {
+          slContainer.innerHTML = pvRenderStepLabels(file);
+        }
+      }
+    }
+  }
 }
 
 function pvToggleQueueItem(idx) {
@@ -9817,6 +10117,7 @@ function pvCancelQueuedJob(idx) {
         item.status = 'cancelled';
         toast('任务已中止', 'info');
         pvRenderQueue();
+        _savePvQueue();
       } else {
         toast('中止失败', 'error');
       }
@@ -9836,7 +10137,8 @@ function pvDeleteQueuedJob(idx) {
   var doRemove = function() {
     _pvQueue.splice(idx, 1);
     pvRenderQueue();
-    if (!_pvQueue.length) stopPvPolling();
+    if (!_pvQueue.length) { stopPvPolling(); _clearPvQueueStorage(); }
+    else _savePvQueue();
     toast('任务已删除', 'info');
   };
 
@@ -9857,6 +10159,7 @@ function pvPromoteJob(idx) {
   var item = _pvQueue.splice(idx, 1)[0];
   _pvQueue.splice(1, 0, item);
   pvRenderQueue();
+  _savePvQueue();
   toast('已提前到队列第 2 位', 'info');
 }
 
@@ -9918,7 +10221,7 @@ function pvRenderStepLabels(f) {
 function pvStatusText(f) {
   var map = {
     'pending': '等待中', 'converting': '转换中', 'running': '处理中',
-    'completed': '完成', 'error': '出错',
+    'completed': '完成', 'error': '出错', 'skipped': '已跳过',
   };
   return map[f.status] || f.status;
 }
@@ -9932,7 +10235,7 @@ function pvOnComplete(job) {
     var f = job.files[i];
     for (var j = 0; j < (f.output_clips || []).length; j++) {
       var clipPath = f.output_clips[j];
-      var clipName = clipPath.replace(/\/g, '/').split('/').pop();
+      var clipName = clipPath.replace(/\\/g, '/').split('/').pop();
       allClips.push({ name: clipName, path: clipPath, source: f.name });
     }
   }
@@ -9962,21 +10265,58 @@ function pvOnComplete(job) {
 // Job restore (page load / tab switch)
 // ============================================================
 
+function _savePvQueue() {
+  // Save pending items to localStorage so they survive page refresh.
+  // Running items get their file data from the backend; only save metadata.
+  var save = [];
+  for (var i = 0; i < _pvQueue.length; i++) {
+    var q = _pvQueue[i];
+    save.push({
+      job_id: q.job_id,
+      folder_name: q.folder_name,
+      stepsConfig: q.stepsConfig,
+      outputDir: q.outputDir,
+      status: q.status,
+      progress: q.progress,
+      created_at: q.created_at,
+      files: q.status === 'pending' ? q.files : q.files.map(function(f) {
+        return { name: f.name, input_path: f.input_path, status: f.status, progress: f.progress, steps: f.steps, error: f.error, current_step: f.current_step, output_clips: f.output_clips };
+      })
+    });
+  }
+  try { localStorage.setItem('pv_queue', JSON.stringify(save)); } catch(e) {}
+}
+
+function _loadPvQueueFromStorage() {
+  try {
+    var raw = localStorage.getItem('pv_queue');
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch(e) { return null; }
+}
+
+function _clearPvQueueStorage() {
+  try { localStorage.removeItem('pv_queue'); } catch(e) {}
+}
+
 function pvRestoreJobs() {
+  var stored = _loadPvQueueFromStorage();
+
   fetch(API + '/api/pipeline-video/jobs')
     .then(function(r) { return r.json(); })
     .then(function(data) {
-      if (!data.jobs || !data.jobs.length) return;
+      var backendJobs = data.jobs || [];
       var running = null, interrupted = null, lastCompleted = null;
-      for (var i = 0; i < data.jobs.length; i++) {
-        var j = data.jobs[i];
+      for (var i = 0; i < backendJobs.length; i++) {
+        var j = backendJobs[i];
         if (j.status === 'running' && !running) running = j;
         if (j.status === 'interrupted' && !interrupted) interrupted = j;
         if (j.status === 'completed' && !lastCompleted) lastCompleted = j;
       }
 
       if (running) {
-        var queueItem = {
+        // Rebuild queue: running from backend + pending from localStorage
+        _pvQueue = [{
           job_id: running.job_id,
           folder_name: running.folder_name,
           files: running.files,
@@ -9986,18 +10326,71 @@ function pvRestoreJobs() {
           progress: running.progress,
           created_at: running.created_at || Date.now() / 1000,
           expanded: false
-        };
-        _pvQueue = [queueItem];
+        }];
+
+        // Append pending items saved in localStorage (that haven't been started yet)
+        if (stored) {
+          var runningId = running.job_id;
+          for (var s = 0; s < stored.length; s++) {
+            var si = stored[s];
+            // Skip the running item itself and any completed/cancelled items
+            if (si.job_id === runningId) continue;
+            if (si.status === 'completed' || si.status === 'cancelled') continue;
+            // Reset any previously running items other than the current one to pending
+            if (si.status === 'running') si.status = 'pending';
+            _pvQueue.push(si);
+          }
+        }
+
+        _pvQueueHash = '';
         document.getElementById('pv-queue-section').style.display = 'block';
         pvRenderQueue();
         startPvPolling();
       } else if (interrupted) {
         document.getElementById('pv-interrupted-section').style.display = 'block';
         pvRenderInterrupted(interrupted);
+        _clearPvQueueStorage();
       } else if (lastCompleted) {
         document.getElementById('pv-results-section').style.display = 'block';
         document.getElementById('pv-interrupted-section').style.display = 'none';
         pvOnComplete(lastCompleted);
+        // Check if there are still pending items in localStorage
+        if (stored && stored.length > 0) {
+          var stillRunning = false;
+          _pvQueue = [];
+          for (var s2 = 0; s2 < stored.length; s2++) {
+            var si2 = stored[s2];
+            if (si2.status === 'completed' || si2.status === 'cancelled') continue;
+            if (si2.status === 'running') { stillRunning = true; _pvQueue.push(si2); continue; }
+            _pvQueue.push(si2);
+          }
+          if (_pvQueue.length > 0) {
+            _pvQueueHash = '';
+            document.getElementById('pv-queue-section').style.display = 'block';
+            document.getElementById('pv-results-section').style.display = 'none';
+            pvRenderQueue();
+            startPvPolling();
+          }
+        } else {
+          _clearPvQueueStorage();
+        }
+      } else {
+        // No backend jobs, but maybe there are pending items from localStorage
+        if (stored && stored.length > 0) {
+          _pvQueue = [];
+          for (var s3 = 0; s3 < stored.length; s3++) {
+            var si3 = stored[s3];
+            if (si3.status === 'completed' || si3.status === 'cancelled') continue;
+            if (si3.status === 'running') si3.status = 'pending';
+            _pvQueue.push(si3);
+          }
+          if (_pvQueue.length > 0) {
+            _pvQueueHash = '';
+            document.getElementById('pv-queue-section').style.display = 'block';
+            pvRenderQueue();
+            startPvPolling();
+          }
+        }
       }
     }).catch(function() {});
 }
@@ -10048,6 +10441,289 @@ async function pvDiscardInterrupted(jobId) {
     } else { toast('丢弃失败: ' + (data.detail || ''), 'error'); }
   } catch(e) { toast('Error: ' + e.message, 'error'); }
 }
+
+// ============================================================
+// Pipeline Video — folder/file browsing
+// ============================================================
+
+function pvBrowseFolder() {
+  var btn = document.querySelector('#tab-pipelinevideo button[onclick="pvBrowseFolder()"]');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 选择中...'; }
+  function resetBtn() { if (btn) { btn.disabled = false; btn.textContent = '📁 添加文件夹'; } }
+
+  openFolderPicker('添加文件夹', '/mnt/nas/Persons/jiangyichen/videodownload').then(function(path) {
+    if (!path) { resetBtn(); return; }
+    for (var i = 0; i < _pvFolders.length; i++) {
+      if (_pvFolders[i].path === path) { resetBtn(); return; }
+    }
+    var name = path.replace(/\\/g, '/').split('/').pop() || path;
+    _pvFolders.push({ path: path, name: name });
+    pvRenderFolderList();
+    resetBtn();
+  });
+}
+
+function pvRenderFolderList() {
+  var container = document.getElementById('pv-folder-list');
+  var hint = document.getElementById('pv-folder-hint');
+  var scanBtn = document.getElementById('btn-pv-scan');
+  scanBtn.disabled = _pvFolders.length === 0;
+
+  if (_pvFolders.length === 0) {
+    hint.style.display = '';
+    container.innerHTML = '';
+    _pvFiles = [];
+    _pvSelected = {};
+    _pvCollapsed = {};
+    document.getElementById('pv-file-section').style.display = 'none';
+    return;
+  }
+  hint.style.display = 'none';
+  var html = '';
+  for (var i = 0; i < _pvFolders.length; i++) {
+    html += '<span class="pv-folder-chip" data-pv-folder-idx="' + i + '" style="display:inline-flex;align-items:center;gap:6px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:6px 12px;font-size:13px;">' +
+      '📁 ' + escapeHtml(_pvFolders[i].name) +
+      ' <span class="pv-folder-remove" data-pv-folder-idx="' + i + '" style="cursor:pointer;color:var(--text2);font-size:16px;line-height:1;padding:2px 4px;border-radius:4px;" title="移除此文件夹">✕</span>' +
+    '</span>';
+  }
+  container.innerHTML = html;
+
+  container.onclick = function(e) {
+    var target = e.target;
+    if (target.classList.contains('pv-folder-remove')) {
+      var idx = parseInt(target.getAttribute('data-pv-folder-idx'));
+      if (!isNaN(idx) && idx >= 0 && idx < _pvFolders.length) {
+        pvRemoveFolder(idx);
+      }
+    }
+  };
+}
+
+function pvRemoveFolder(idx) {
+  var folderPath = _pvFolders[idx].path;
+  _pvFolders.splice(idx, 1);
+  delete _pvCollapsed[folderPath];
+  _pvFiles = _pvFiles.filter(function(f) { return f.folder !== folderPath; });
+  pvCleanSelected();
+  pvRenderFolderList();
+}
+
+function pvScanFolders() {
+  if (!_pvFolders.length) { toast('请先添加文件夹', 'info'); return; }
+
+  var scanBtn = document.getElementById('btn-pv-scan');
+  if (scanBtn._scanning) return;
+  scanBtn._scanning = true;
+  scanBtn.disabled = true;
+  scanBtn.textContent = '⏳ 扫描中...';
+
+  document.getElementById('pv-file-section').style.display = 'block';
+  document.getElementById('pv-progress-section').style.display = 'none';
+  document.getElementById('pv-results-section').style.display = 'none';
+  document.getElementById('pv-player-bar').style.display = 'none';
+  document.getElementById('pv-file-list').innerHTML = '<div class="empty-state"><p>⏳ 正在扫描文件夹...</p></div>';
+
+  var paths = _pvFolders.map(function(f) { return f.path; });
+
+  fetch(API + '/api/pipeline-video/scan-folders', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ folder_paths: paths }),
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      _pvFiles = data.files || [];
+      _pvSelected = {};
+      for (var i = 0; i < _pvFiles.length; i++) {
+        _pvSelected[_pvFiles[i].path] = true;
+      }
+      pvRenderStepConfig();
+      pvRenderFileList();
+      if (_pvFiles.length === 0) {
+        toast('所选文件夹中未找到视频或音频文件', 'info');
+      } else {
+        toast('扫描完成，找到 ' + _pvFiles.length + ' 个文件', 'success');
+      }
+      scanBtn._scanning = false;
+      scanBtn.disabled = false;
+      scanBtn.textContent = '🔍 扫描';
+    })
+    .catch(function(e) {
+      toast('扫描失败: ' + e.message, 'error');
+      document.getElementById('pv-file-section').style.display = 'none';
+      scanBtn._scanning = false;
+      scanBtn.disabled = false;
+      scanBtn.textContent = '🔍 扫描';
+    });
+}
+
+function pvRefreshScan() { pvScanFolders(); }
+
+function pvRenderFileList() {
+  var container = document.getElementById('pv-file-list');
+  var selectedCount = 0;
+
+  var grouped = {};
+  var folderOrder = [];
+  for (var i = 0; i < _pvFiles.length; i++) {
+    var f = _pvFiles[i];
+    if (_pvSelected[f.path]) selectedCount++;
+    var fp = f.folder || '';
+    if (!grouped[fp]) { grouped[fp] = []; folderOrder.push(fp); }
+    grouped[fp].push(f);
+  }
+
+  var html = '';
+
+  if (folderOrder.length === 0) {
+    html = '<div class="empty-state"><p>未找到媒体文件</p></div>';
+  } else {
+    for (var gi = 0; gi < folderOrder.length; gi++) {
+      var folderPath = folderOrder[gi];
+      var folderFiles = grouped[folderPath];
+      var folderName = folderPath.replace(/\\/g, '/').split('/').pop() || folderPath;
+
+      var folderSelCount = 0;
+      for (var fi = 0; fi < folderFiles.length; fi++) {
+        if (_pvSelected[folderFiles[fi].path]) folderSelCount++;
+      }
+      var allChecked = folderSelCount === folderFiles.length && folderFiles.length > 0;
+
+      var collapsed = !!_pvCollapsed[folderPath];
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:' +
+        (collapsed ? '6px' : '6px 6px 0 0') + ';' + (gi > 0 ? 'margin-top:12px;' : '') + '">';
+      html += '<span class="pv-folder-toggle" data-pv-folder-toggle="' + gi + '" data-pv-folder-path="' + escapeHtmlAttr(folderPath) +
+        '" style="cursor:pointer;font-size:12px;line-height:1;padding:2px 4px;border-radius:4px;user-select:none;" title="折叠/展开">' +
+        (collapsed ? '▶' : '▼') + '</span>';
+      html += '<label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;">';
+      html += '<input type="checkbox" class="pv-folder-cb" ' + (allChecked ? 'checked' : '') +
+        ' data-pv-folder="' + escapeHtmlAttr(folderPath) + '" onchange="pvToggleFolder(this)" style="cursor:pointer;">';
+      html += '<span style="font-weight:600;color:var(--text);">📁 ' + escapeHtml(folderName) + '</span>';
+      html += '</label>';
+      html += '<span style="font-size:11px;color:var(--text2);">' + folderFiles.length + ' 个文件</span>';
+      html += '<span class="pv-folder-sec-remove" data-pv-folder-path="' + escapeHtmlAttr(folderPath) +
+        '" style="cursor:pointer;color:var(--text2);font-size:14px;line-height:1;padding:2px 6px;border-radius:4px;margin-left:auto;" title="移除此文件夹的全部文件">✕</span>';
+      html += '</div>';
+
+      html += '<div class="pv-folder-body" data-pv-folder-body="' + gi +
+        '" style="border:1px solid var(--border);border-top:none;border-radius:0 0 6px 6px;margin-bottom:2px;' +
+        (collapsed ? 'display:none;' : '') + '">';
+      for (var fi = 0; fi < folderFiles.length; fi++) {
+        var f = folderFiles[fi];
+        var checked = _pvSelected[f.path] ? 'checked' : '';
+        var isVideo = ['.mp4','.mkv','.avi','.mov','.wmv','.webm','.flv'].indexOf(f.ext) >= 0;
+        var icon = isVideo ? '🎬' : '🎵';
+        var durStr = f.duration_s > 0 ? pvFormatDuration(f.duration_s) : '';
+        html += '<div class="pv-file-item" style="padding-left:22px;">' +
+          '<input type="checkbox" class="pv-item-cb" ' + checked + ' onchange="pvToggleItem(this)" data-path="' + escapeHtmlAttr(f.path) + '">' +
+          '<span>' + icon + '</span>' +
+          '<span class="file-name" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(f.name) + '</span>' +
+          '<span class="file-size" style="font-size:12px;color:var(--text2);white-space:nowrap;">' + (f.size_mb || 0).toFixed(1) + ' MB</span>' +
+          '<span class="file-size" style="font-size:12px;color:var(--text2);white-space:nowrap;">' + (durStr || '') + '</span>' +
+          (isVideo ? '<button class="btn btn-secondary" style="font-size:10px;padding:2px 8px;white-space:nowrap;" onclick="pvPreviewFile(event, \'' + escapeHtmlAttr(f.path) + '\')">预览</button>' : '') +
+          ' <span class="pv-file-remove" data-pv-file-path="' + escapeHtmlAttr(f.path) +
+          '" style="cursor:pointer;color:var(--text2);font-size:16px;line-height:1;padding:2px 4px;border-radius:4px;flex-shrink:0;" title="从列表中移除">✕</span>' +
+        '</div>';
+      }
+      html += '</div>';
+    }
+  }
+
+  container.innerHTML = html;
+
+  container.onclick = function(e) {
+    var target = e.target;
+    if (target.classList.contains('pv-folder-toggle') || target.closest('.pv-folder-toggle')) {
+      var tog = target.classList.contains('pv-folder-toggle') ? target : target.closest('.pv-folder-toggle');
+      var fpath = tog.getAttribute('data-pv-folder-path');
+      if (_pvCollapsed[fpath]) { delete _pvCollapsed[fpath]; }
+      else { _pvCollapsed[fpath] = true; }
+      pvRenderFileList();
+      return;
+    }
+    if (target.classList.contains('pv-file-remove')) {
+      var filePath = target.getAttribute('data-pv-file-path');
+      if (filePath) {
+        _pvFiles = _pvFiles.filter(function(f) { return f.path !== filePath; });
+        delete _pvSelected[filePath];
+        pvRenderFileList();
+      }
+      return;
+    }
+    if (target.classList.contains('pv-folder-sec-remove')) {
+      var fPath = target.getAttribute('data-pv-folder-path');
+      if (fPath) {
+        _pvFiles = _pvFiles.filter(function(f) { return f.folder !== fPath; });
+        pvCleanSelected();
+        pvRenderFileList();
+      }
+      return;
+    }
+  };
+
+  document.getElementById('pv-selected-count').textContent = '已选 ' + selectedCount + ' 个';
+  document.getElementById('pv-total-files').textContent = '共 ' + _pvFiles.length + ' 个文件';
+  document.getElementById('pv-select-all-cb').checked = selectedCount === _pvFiles.length && _pvFiles.length > 0;
+  document.getElementById('btn-pv-start').disabled = selectedCount === 0;
+}
+
+function pvCleanSelected() {
+  var keep = {};
+  for (var i = 0; i < _pvFiles.length; i++) {
+    if (_pvSelected[_pvFiles[i].path]) keep[_pvFiles[i].path] = true;
+  }
+  _pvSelected = keep;
+}
+
+function pvToggleFolder(cb) {
+  var folderPath = cb.getAttribute('data-pv-folder');
+  var checked = cb.checked;
+  for (var i = 0; i < _pvFiles.length; i++) {
+    if (_pvFiles[i].folder === folderPath) {
+      if (checked) { _pvSelected[_pvFiles[i].path] = true; }
+      else { delete _pvSelected[_pvFiles[i].path]; }
+    }
+  }
+  pvRenderFileList();
+}
+
+function escapeHtmlAttr(str) {
+  return str.replace(/&/g, '&amp;').replace(/'/g, '&#39;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function pvFormatDuration(sec) {
+  var m = Math.floor(sec / 60);
+  var s = Math.floor(sec % 60);
+  if (m > 0) return m + '分' + s + '秒';
+  return s + '秒';
+}
+
+function pvToggleItem(cb) {
+  var path = cb.getAttribute('data-path');
+  if (cb.checked) _pvSelected[path] = true;
+  else delete _pvSelected[path];
+  pvRenderFileList();
+}
+
+function pvToggleSelectAll() {
+  var checked = document.getElementById('pv-select-all-cb').checked;
+  if (checked) {
+    for (var i = 0; i < _pvFiles.length; i++) { _pvSelected[_pvFiles[i].path] = true; }
+  } else {
+    _pvSelected = {};
+  }
+  pvRenderFileList();
+}
+
+function pvPreviewFile(event, path) {
+  event.stopPropagation();
+  var player = document.getElementById('pv-video-player');
+  var bar = document.getElementById('pv-player-bar');
+  bar.style.display = 'block';
+  player.src = API + '/api/pipeline-video/stream?path=' + encodeURIComponent(path);
+  player.load();
+}
+
 // MFA Japanese Aligner
 // ============================================================
 var _mfaJobId = null;
@@ -10454,6 +11130,330 @@ async function mfaCancelJob(jobId) {
     var data = await resp.json();
     if (data.status === 'ok') { toast('任务已取消', 'info'); loadMfaJobs(); }
   } catch(e) { toast('取消失败: ' + e.message, 'error'); }
+}
+
+// ============================================================
+// TextGrid Viewer — waveform + tier timeline + audio sync
+// ============================================================
+var _mfaViewerDir = '';
+var _mfaViewerTgPath = '';
+var _mfaViewerWavPath = '';
+var _mfaViewerTgData = null;
+var _mfaViewerAudio = null;
+var _mfaViewerAudioCtx = null;
+var _mfaViewerAnimId = null;
+
+function _mfaViewerGetColorClass(text) {
+  if (!text) return 'sil0';
+  var t = text.trim().toLowerCase();
+  if (t === '' || t === '<eps>' || t === '<sil>' || t === 'sil') return 'sil0';
+  if (t === '<sp0>' || t === 'sp0') return 'sil0';
+  if (t === '<sp1>' || t === 'sp1') return 'sil1';
+  if (t === '<sp2>' || t === 'sp2') return 'sil2';
+  if (t === '<sp3>' || t === 'sp3' || t === 'spn') return 'sil3';
+  if (t === '?') return 'question';
+  return '';
+}
+
+function _mfaViewerGetTierClass(name) {
+  var n = (name || '').toLowerCase();
+  if (n === 'raw_text') return 'raw';
+  if (n === 'tokenized_text') return 'token';
+  if (n === 'words') return 'word';
+  if (n === 'romaji') return 'romaji';
+  if (n === 'phones') return 'phone';
+  return '';
+}
+
+// --- Directory browser for TextGrid files ---
+async function mfaViewerLoadDir(path) {
+  var container = document.getElementById('mfa-viewer-file-list');
+  container.innerHTML = '<div class="empty-state" style="padding:20px;"><p>加载中...</p></div>';
+  try {
+    var resp = await fetch(API + '/api/mfa/browse-dir?path=' + encodeURIComponent(path || ''));
+    var data = await resp.json();
+    _mfaViewerDir = data.path;
+
+    var bread = document.getElementById('mfa-viewer-breadcrumb');
+    var parts = data.path.split('/').filter(function(p){return p;});
+    var bc = '', cum = '';
+    for (var i = 0; i < parts.length; i++) {
+      cum += '/' + parts[i];
+      if (i > 0) bc += ' / ';
+      bc += '<span style="cursor:pointer;color:var(--accent);" onclick="mfaViewerNavigate(\'' + cum.replace(/'/g, "\\'") + '\')">' + escapeHtml(parts[i]) + '</span>';
+    }
+    bread.innerHTML = bc || '/';
+    document.getElementById('mfa-viewer-back').disabled = !data.parent;
+
+    // Also accept .TextGrid files (not just .srt)
+    var tgFiles = [];
+    var allFiles = data.files || [];
+    for (var j = 0; j < allFiles.length; j++) {
+      if (allFiles[j].name.toLowerCase().endsWith('.textgrid')) tgFiles.push(allFiles[j]);
+    }
+
+    var html = '';
+    var folders = data.folders || [];
+    for (var k = 0; k < folders.length; k++) {
+      var f = folders[k];
+      html += '<div class="mfa-browser-item dir" onclick="mfaViewerNavigate(\'' + f.path.replace(/'/g, "\\'") + '\')">' +
+        '<span class="mfa-folder-icon">📁</span><span class="mfa-item-name">' + escapeHtml(f.name) + '</span></div>';
+    }
+    for (var m = 0; m < tgFiles.length; m++) {
+      var tg = tgFiles[m];
+      var sel = (_mfaViewerTgPath === tg.path) ? ' selected' : '';
+      html += '<div class="mfa-browser-item file' + sel + '" onclick="mfaViewerSelectTg(\'' + tg.path.replace(/'/g, "\\'") + '\', \'' + escapeHtml(tg.name).replace(/'/g, "\\'") + '\')">' +
+        '<span class="mfa-file-icon">📄</span><span class="mfa-item-name">' + escapeHtml(tg.name) + '</span></div>';
+    }
+    if (!html) html = '<div class="empty-state" style="padding:20px;"><p>此目录下没有 TextGrid 文件</p></div>';
+    container.innerHTML = html;
+  } catch(e) {
+    container.innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
+  }
+}
+
+function mfaViewerNavigate(path) {
+  if (path === '..') { mfaViewerLoadDir(''); return; }
+  mfaViewerLoadDir(path);
+}
+
+async function mfaViewerBrowseOther() {
+  var current = _mfaViewerDir || '/mnt/project/ComicCut/anime-pipeline/data/mfa/';
+  var path = await openFolderPicker('选择目录', current);
+  if (path) mfaViewerLoadDir(path);
+}
+
+// --- Select & render ---
+async function mfaViewerSelectTg(path, name) {
+  _mfaViewerTgPath = path;
+  mfaViewerLoadDir(_mfaViewerDir);
+  document.getElementById('mfa-viewer-empty').style.display = 'none';
+
+  try {
+    // Parse TextGrid
+    var tgResp = await fetch(API + '/api/mfa/parse-textgrid?path=' + encodeURIComponent(path));
+    if (!tgResp.ok) { toast('解析失败', 'error'); return; }
+    _mfaViewerTgData = await tgResp.json();
+
+    // Find matching WAV
+    var wavResp = await fetch(API + '/api/mfa/find-wav?textgrid_path=' + encodeURIComponent(path));
+    var wavData = await wavResp.json();
+    if (wavData.wav_path) {
+      _mfaViewerWavPath = wavData.wav_path;
+      document.getElementById('mfa-viewer-wav-name').textContent = wavData.stem + '.wav';
+    } else {
+      _mfaViewerWavPath = '';
+      document.getElementById('mfa-viewer-wav-name').textContent = '(未找到 WAV)';
+    }
+
+    mfaViewerRender();
+  } catch(e) { toast('加载失败: ' + e.message, 'error'); }
+}
+
+function mfaViewerRender() {
+  var data = _mfaViewerTgData;
+  if (!data || !data.tiers) return;
+  document.getElementById('mfa-viewer-main').style.display = 'block';
+  document.getElementById('mfa-viewer-empty').style.display = 'none';
+
+  var totalDur = data.xmax || data.xmin || 1;
+  if (totalDur < 0.01) totalDur = 1;
+
+  // Seek bar max
+  var seek = document.getElementById('mfa-viewer-seek');
+  seek.max = Math.round(totalDur * 1000);
+  seek.value = 0;
+  document.getElementById('mfa-viewer-time').textContent = '0.00s / ' + totalDur.toFixed(2) + 's';
+
+  // Render tiers
+  var tiersHtml = '';
+  for (var i = 0; i < data.tiers.length; i++) {
+    var tier = data.tiers[i];
+    var barClass = _mfaViewerGetTierClass(tier.name);
+    tiersHtml += '<div class="mfa-tier-row">' +
+      '<div class="mfa-tier-label">' + escapeHtml(tier.name) + '</div>' +
+      '<div class="mfa-tier-bars" style="position:relative;height:22px;">';
+
+    for (var j = 0; j < tier.intervals.length; j++) {
+      var iv = tier.intervals[j];
+      var leftPct = (iv.xmin / totalDur * 100).toFixed(3);
+      var wPct = ((iv.xmax - iv.xmin) / totalDur * 100).toFixed(3);
+      if (wPct < 0.1) wPct = '0.1';
+      var segClass = _mfaViewerGetColorClass(iv.text) || barClass || 'raw';
+      var displayText = iv.text || '';
+      if (displayText.length > 12) displayText = displayText.substring(0, 11) + '…';
+      tiersHtml += '<div class="mfa-tier-seg ' + segClass + '" ' +
+        'style="left:' + leftPct + '%;width:' + wPct + '%;" ' +
+        'data-xmin="' + iv.xmin + '" data-xmax="' + iv.xmax + '" ' +
+        'title="' + escapeHtmlAttr(iv.text) + ' ' + iv.xmin.toFixed(3) + '-' + iv.xmax.toFixed(3) + 's" ' +
+        'onclick="mfaViewerPlaySegment(' + iv.xmin + ',' + iv.xmax + ')">' +
+        escapeHtml(displayText) + '</div>';
+    }
+    tiersHtml += '</div></div>';
+  }
+  document.getElementById('mfa-viewer-tiers').innerHTML = tiersHtml;
+
+  // Draw waveform if WAV available
+  if (_mfaViewerWavPath) mfaViewerDrawWaveform(_mfaViewerWavPath);
+  else {
+    var canvas = document.getElementById('mfa-waveform-canvas');
+    var ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#333'; ctx.font = '14px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('未找到对应 WAV 文件', canvas.width/2, canvas.height/2);
+  }
+}
+
+// --- Waveform rendering ---
+function mfaViewerDrawWaveform(wavUrl) {
+  var canvas = document.getElementById('mfa-waveform-canvas');
+  var ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#333'; ctx.font = '14px monospace'; ctx.textAlign = 'center';
+  ctx.fillText('加载波形中...', canvas.width/2, canvas.height/2);
+
+  // Decode audio via Web Audio API
+  var url = API + '/api/mfa/stream?path=' + encodeURIComponent(wavUrl);
+  if (_mfaViewerAudioCtx) _mfaViewerAudioCtx.close();
+  try {
+    _mfaViewerAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  } catch(e) { ctx.fillText('浏览器不支持音频', canvas.width/2, canvas.height/2); return; }
+
+  fetch(url).then(function(r) { return r.arrayBuffer(); }).then(function(buf) {
+    return _mfaViewerAudioCtx.decodeAudioData(buf);
+  }).then(function(audioBuffer) {
+    // Setup audio element for playback
+    _mfaViewerSetupAudio(url);
+    // Draw
+    var data = audioBuffer.getChannelData(0);
+    var step = Math.max(1, Math.floor(data.length / canvas.width));
+    var ampMax = 0;
+    var peaks = [];
+    for (var i = 0; i < canvas.width; i++) {
+      var start = i * step;
+      var end = Math.min(start + step, data.length);
+      var max = 0;
+      for (var j = start; j < end; j++) {
+        var abs = Math.abs(data[j]);
+        if (abs > max) max = abs;
+      }
+      peaks.push(max);
+      if (max > ampMax) ampMax = max;
+    }
+    if (ampMax < 0.001) ampMax = 1;
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    var mid = canvas.height / 2;
+    for (var k = 0; k < peaks.length; k++) {
+      var h = (peaks[k] / ampMax) * (canvas.height * 0.45);
+      var alpha = 0.3 + (peaks[k] / ampMax) * 0.7;
+      ctx.fillStyle = 'rgba(78, 204, 163, ' + alpha.toFixed(2) + ')';
+      ctx.fillRect(k, mid - h, 1, h * 2);
+    }
+    // Playhead line
+    ctx.strokeStyle = 'rgba(233, 69, 96, 0.5)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(canvas.width, mid); ctx.stroke();
+  }).catch(function(e) {
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#633'; ctx.font = '12px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('WAV 加载失败', canvas.width/2, canvas.height/2);
+  });
+}
+
+function _mfaViewerSetupAudio(url) {
+  if (_mfaViewerAudio) { _mfaViewerAudio.pause(); _mfaViewerAudio = null; }
+  var audio = new Audio(url);
+  audio.addEventListener('timeupdate', _mfaViewerOnTimeUpdate);
+  audio.addEventListener('loadedmetadata', function() {
+    document.getElementById('mfa-viewer-seek').max = Math.round(audio.duration * 1000);
+  });
+  audio.addEventListener('ended', function() {
+    document.getElementById('mfa-viewer-play').textContent = '▶ 播放';
+  });
+  _mfaViewerAudio = audio;
+}
+
+function _mfaViewerOnTimeUpdate() {
+  if (!_mfaViewerAudio) return;
+  var t = _mfaViewerAudio.currentTime;
+  var dur = _mfaViewerAudio.duration || 0;
+  document.getElementById('mfa-viewer-time').textContent = t.toFixed(2) + 's / ' + dur.toFixed(2) + 's';
+  document.getElementById('mfa-viewer-seek').value = Math.round(t * 1000);
+  _mfaViewerDrawPlayhead(t);
+}
+
+function _mfaViewerDrawPlayhead(t) {
+  if (!_mfaViewerTgData) return;
+  var totalDur = _mfaViewerTgData.xmax || 1;
+  var canvas = document.getElementById('mfa-waveform-canvas');
+  var ctx = canvas.getContext('2d');
+  var x = (t / totalDur) * canvas.width;
+  // Simple redraw approach: just draw a vertical line overlay
+  // We do this by showing/hiding a positioned div since redrawing canvas is expensive
+  var existing = document.getElementById('mfa-playhead');
+  if (!existing) {
+    existing = document.createElement('div');
+    existing.id = 'mfa-playhead';
+    existing.style.cssText = 'position:absolute;top:0;bottom:0;width:1px;background:#e94560;pointer-events:none;z-index:5;';
+    canvas.parentNode.style.position = 'relative';
+    canvas.parentNode.appendChild(existing);
+  }
+  var pct = (t / totalDur * 100).toFixed(2);
+  existing.style.left = pct + '%';
+  existing.style.display = 'block';
+  // Highlight current tier segments
+  _mfaViewerHighlightSegments(t);
+}
+
+function _mfaViewerHighlightSegments(t) {
+  var segs = document.querySelectorAll('#mfa-viewer-tiers .mfa-tier-seg');
+  for (var i = 0; i < segs.length; i++) {
+    var el = segs[i];
+    var xmin = parseFloat(el.getAttribute('data-xmin') || '0');
+    var xmax = parseFloat(el.getAttribute('data-xmax') || '0');
+    if (t >= xmin && t < xmax) {
+      el.style.boxShadow = '0 0 6px rgba(233,69,96,0.8)';
+      el.style.zIndex = '3';
+    } else {
+      el.style.boxShadow = '';
+      el.style.zIndex = '';
+    }
+  }
+}
+
+function mfaViewerTogglePlay() {
+  if (!_mfaViewerAudio) return;
+  var btn = document.getElementById('mfa-viewer-play');
+  if (_mfaViewerAudio.paused) {
+    _mfaViewerAudio.play();
+    btn.textContent = '⏸ 暂停';
+  } else {
+    _mfaViewerAudio.pause();
+    btn.textContent = '▶ 播放';
+  }
+}
+
+function mfaViewerSeek(value) {
+  var t = parseInt(value) / 1000;
+  if (_mfaViewerAudio) _mfaViewerAudio.currentTime = t;
+  _mfaViewerDrawPlayhead(t);
+}
+
+function mfaViewerPlaySegment(xmin, xmax) {
+  if (_mfaViewerAudio) {
+    _mfaViewerAudio.currentTime = xmin;
+    _mfaViewerAudio.play();
+    document.getElementById('mfa-viewer-play').textContent = '⏸ 暂停';
+    // Stop after segment
+    var stopAt = xmax;
+    var check = setInterval(function() {
+      if (!_mfaViewerAudio || _mfaViewerAudio.currentTime >= stopAt) {
+        if (_mfaViewerAudio) _mfaViewerAudio.pause();
+        clearInterval(check);
+        document.getElementById('mfa-viewer-play').textContent = '▶ 播放';
+      }
+    }, 50);
+  }
 }
 
 </script>

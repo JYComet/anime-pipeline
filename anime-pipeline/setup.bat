@@ -5,6 +5,7 @@ setlocal enabledelayedexpansion
 :: ============================================================
 ::  Anime Pipeline — One-Click Setup & Launch
 ::  First run installs everything; subsequent runs just start.
+::  Works on any new machine — auto-detects paths.
 :: ============================================================
 
 title Anime Pipeline Setup
@@ -19,13 +20,14 @@ pushd "%PROJECT_ROOT%" 2>nul || (
     exit /b 1
 )
 
-:: Resolve COMICUT_ROOT to absolute
+:: Resolve to absolute paths
 for %%i in ("%COMICUT_ROOT%") do set "COMICUT_ROOT=%%~fi"
 for %%i in ("%PROJECT_ROOT%") do set "PROJECT_ROOT=%%~fi"
 
 set "VENV_DIR=%PROJECT_ROOT%\venv"
 set "PYTHON=%VENV_DIR%\Scripts\python.exe"
 set "PIP=%VENV_DIR%\Scripts\pip.exe"
+set "PIPW=%VENV_DIR%\Scripts\pip.exe"
 set "SETUP_DONE_FILE=%PROJECT_ROOT%\.setup_done"
 
 echo ============================================
@@ -39,7 +41,7 @@ echo.
 :: ============================================================
 :: Step 1 — Check Python
 :: ============================================================
-echo [1/8] Checking Python installation...
+echo [1/10] Checking Python installation...
 set "GLOBAL_PYTHON="
 for %%p in (python3 python) do (
     where %%p >nul 2>&1
@@ -63,7 +65,7 @@ echo         Found: !PYVER!  (!GLOBAL_PYTHON!)
 :: Step 2 — Create / activate virtual environment
 :: ============================================================
 echo.
-echo [2/8] Setting up virtual environment...
+echo [2/10] Setting up virtual environment...
 
 if exist "%PYTHON%" (
     echo         venv already exists, skipping creation.
@@ -82,14 +84,107 @@ if exist "%PYTHON%" (
 "%PYTHON%" -m pip install --upgrade pip >nul 2>&1
 
 :: ============================================================
-:: Step 3 — Install Python dependencies
+:: Step 3 — Clean stale settings from other machines
 :: ============================================================
 echo.
-echo [3/8] Installing Python dependencies...
+echo [3/10] Checking configuration...
+
+set "SETTINGS_FILE=%PROJECT_ROOT%\data\settings.json"
+set "STALE_DETECTED=0"
+
+if exist "%SETTINGS_FILE%" (
+    :: Check if CLIPS_DIR in settings.json points to a non-existent path
+    "%PYTHON%" -c "import json; d=json.load(open(r'%SETTINGS_FILE%',encoding='utf-8')); p=d.get('paths',{}); c=p.get('CLIPS_DIR',''); import os; exit(0 if c and not os.path.isdir(c) else 1)" 2>nul
+    if !errorlevel! equ 0 (
+        echo         Stale settings.json detected ^(paths from another machine^).
+        echo         Removing old settings — fresh defaults will be used.
+        del "%SETTINGS_FILE%"
+        set "STALE_DETECTED=1"
+    ) else (
+        echo         settings.json looks OK for this machine.
+    )
+) else (
+    echo         No existing settings.json — defaults will be used.
+)
+
+:: ============================================================
+:: Step 4 — Create data directories
+:: ============================================================
+echo.
+echo [4/10] Creating data directories...
+
+set "DATA_DIR=%PROJECT_ROOT%\data"
+
+:: Create all default data directories
+for %%d in (
+    "%DATA_DIR%\downloads"
+    "%DATA_DIR%\subtitles"
+    "%DATA_DIR%\clips"
+    "%DATA_DIR%\temp"
+    "%DATA_DIR%\approved"
+    "%DATA_DIR%\cleaned"
+    "%DATA_DIR%\cleaned_unreviewed"
+    "%DATA_DIR%\denoised_approved"
+    "%DATA_DIR%\stitched"
+    "%DATA_DIR%\pipelinevideo"
+    "%DATA_DIR%\asr"
+    "%DATA_DIR%\asr\audio"
+    "%DATA_DIR%\asr\subtitles"
+    "%DATA_DIR%\asr_compare"
+    "%DATA_DIR%\asr_compare\subtitles"
+    "%DATA_DIR%\asr_compare\audio"
+    "%DATA_DIR%\asr_compare\discarded"
+    "%DATA_DIR%\asr_compare_output"
+    "%DATA_DIR%\hotwords"
+    "%DATA_DIR%\情绪"
+    "%DATA_DIR%\情绪降噪"
+    "%DATA_DIR%\mfa"
+    "%DATA_DIR%\mfa\raw_wav"
+    "%DATA_DIR%\mfa\wav"
+    "%DATA_DIR%\mfa\txt"
+    "%DATA_DIR%\mfa\aligned"
+    "%DATA_DIR%\mfa\post"
+    "%DATA_DIR%\mfa\filtered"
+    "%DATA_DIR%\mfa\validate"
+) do (
+    if not exist %%d mkdir %%d >nul 2>&1
+)
+
+echo         All data directories ready.
+
+:: ============================================================
+:: Step 5 — Path configuration for new environment
+:: ============================================================
+echo.
+echo [5/10] Path configuration...
+
+if "!STALE_DETECTED!"=="1" (
+    echo.
+    echo   ==============================================================
+    echo   Fresh environment detected!
+    echo   Default data directories are under: %DATA_DIR%
+    echo.
+    echo   If you want to use custom locations (e.g., different drives),
+    echo   you can configure them later in the Web UI under:
+    echo   Settings ^> File Paths
+    echo.
+    echo   Current defaults:
+    echo     Downloads : %DATA_DIR%\downloads
+    echo     Clips     : %DATA_DIR%\clips
+    echo     Cleaned   : %DATA_DIR%\cleaned
+    echo   ==============================================================
+    echo.
+)
+
+:: ============================================================
+:: Step 6 — Install Python dependencies
+:: ============================================================
+echo.
+echo [6/10] Installing Python dependencies...
 
 if exist "%SETUP_DONE_FILE%" (
     echo         Setup already completed — skipping to launch.
-    echo         (Delete .setup_done to force full reinstall.)
+    echo         ^(Delete .setup_done to force full reinstall.^)
     goto :launch
 )
 
@@ -105,15 +200,15 @@ if !errorlevel! neq 0 (
 echo         Core dependencies installed.
 
 :: ============================================================
-:: Step 4 — Optional ASR dependencies
+:: Step 7 — Optional ASR dependencies
 :: ============================================================
 echo.
-echo [4/8] Optional ASR dependencies...
+echo [7/10] Optional ASR dependencies...
 
 set "ASR_REQ=%PROJECT_ROOT%\requirements-asr.txt"
 if exist "%ASR_REQ%" (
     echo.
-    echo         ASR (speech recognition) packages are optional but large ^(~4GB^).
+    echo         ASR (speech recognition) packages are optional but large (~4GB).
     echo         Required for: auto-subtitle generation, ASR model comparison.
     echo.
     set /p ASR_INSTALL="         Install ASR dependencies? [y/N]: "
@@ -129,8 +224,11 @@ if exist "%ASR_REQ%" (
     )
 )
 
+:: ============================================================
+:: Step 8 — ClearerVoice-Studio (audio denoising)
+:: ============================================================
 echo.
-echo [5/8] Checking ClearerVoice-Studio...
+echo [8/10] Checking ClearerVoice-Studio...
 
 set "CV_DIR=%COMICUT_ROOT%\ClearerVoice-Studio-main\ClearerVoice-Studio-main"
 set "CV_CLEARVOICE=%CV_DIR%\clearvoice"
@@ -140,7 +238,6 @@ if exist "%CV_CLEARVOICE%\clearvoice.py" (
     goto :clearvoice_install
 )
 
-:: Not found — attempt to clone
 echo         ClearerVoice-Studio not found.
 echo.
 echo         It will be cloned from GitHub (~200MB).
@@ -166,14 +263,12 @@ if !errorlevel! neq 0 (
     goto :skip_clearvoice
 )
 
-:: Create the nested structure expected by config.py
 if not exist "%CV_PARENT%" mkdir "%CV_PARENT%"
 move "%CV_TEMP%" "%CV_DIR%" >nul 2>&1
 rmdir /s /q "%CV_TEMP%" 2>nul
 echo         Cloned successfully.
 
 :clearvoice_install
-:: Install ClearVoice package
 echo         Installing ClearVoice package...
 "%PIP%" install -e "%CV_DIR%" >nul 2>&1
 if !errorlevel! neq 0 (
@@ -185,10 +280,10 @@ echo         ClearVoice ready.
 :skip_clearvoice
 
 :: ============================================================
-:: Step 5 — External tools (ffmpeg, mkvtoolnix)
+:: Step 9 — External tools (ffmpeg, mkvtoolnix)
 :: ============================================================
 echo.
-echo [6/8] Checking external tools...
+echo [9/10] Checking external tools...
 
 set "QUICKCUT_DIR=%COMICUT_ROOT%\QuickCut"
 set "MKV_DIR=%COMICUT_ROOT%\mkvtoolnix"
@@ -222,41 +317,25 @@ if "!TOOLS_OK!"=="0" (
 )
 
 :: ============================================================
-:: Step 6 — Clean up stale settings.json
-:: ============================================================
-echo.
-echo [7/8] Checking configuration...
-
-set "SETTINGS_FILE=%PROJECT_ROOT%\data\settings.json"
-if exist "%SETTINGS_FILE%" (
-    :: Check if settings.json has hardcoded absolute paths (from another machine)
-    findstr /c:"E:\\ComicCut" "%SETTINGS_FILE%" >nul 2>&1
-    if !errorlevel! equ 0 (
-        echo         Removing old settings.json with hardcoded paths...
-        del "%SETTINGS_FILE%"
-        echo         Fresh settings will be generated on first save.
-    ) else (
-        echo         settings.json looks OK, keeping it.
-    )
-) else (
-    echo         No existing settings.json — defaults will be used.
-)
-
-:: ============================================================
-:: Step 8 — Launch server
+:: Step 10 — Launch server
 :: ============================================================
 :launch
 echo.
-echo [8/8] Starting Anime Pipeline Server...
+echo [10/10] Starting Anime Pipeline Server...
 echo.
 echo ============================================
 echo   Frontend : http://localhost:5800
 echo   API docs : http://localhost:5800/docs
+echo.
+echo   Data root: %DATA_DIR%
 echo ============================================
 echo.
 
 :: Mark setup as done
 echo %DATE% %TIME% > "%SETUP_DONE_FILE%"
+
+:: Fix PyTorch GBK encoding issue on Chinese Windows
+set PYTHONUTF8=1
 
 :: Check if port 5800 is in use
 for /f "tokens=5" %%a in ('netstat -ano 2^>nul ^| findstr ":5800.*LISTENING"') do (
@@ -264,9 +343,6 @@ for /f "tokens=5" %%a in ('netstat -ano 2^>nul ^| findstr ":5800.*LISTENING"') d
     taskkill /F /PID %%a >nul 2>&1
     timeout /t 2 /nobreak >nul
 )
-
-:: Fix PyTorch GBK encoding issue on Chinese Windows
-set PYTHONUTF8=1
 
 :: Launch server with venv python
 "%PYTHON%" "%PROJECT_ROOT%\scripts\server.py"

@@ -1,12 +1,30 @@
-# Optional: ASR (speech recognition) dependencies
-# Uncomment to install, or run: pip install -r requirements-asr.txt
+# ============================================================
+# Anime Pipeline — ASR (Speech Recognition) Dependencies
+# ============================================================
+# Install: pip install -r requirements-asr.txt
+# These are large (~4GB+), install only if you need:
+#   - Auto-subtitle generation (ASR)
+#   - ASR model comparison
+# ============================================================
+
+# FunASR — SenseVoice / Paraformer / VAD models
 funasr>=1.0.0
+
+# HuggingFace Transformers — Cohere Transcribe / Whisper models
 transformers>=4.40.0
+
+# NVIDIA NeMo — Parakeet Japanese ASR
 nemo_toolkit[asr]>=1.23.0
 
-# Optional: FlashAttention 2 for faster transformer attention (Linux/GPU only)
+# Qwen3-ASR — Alibaba's multilingual ASR model (1.7B)
+qwen-asr>=0.1.0
+
+# ONNX Runtime — Wav2Vec2 gender detection model
+onnxruntime>=1.18.0
+
+# HuggingFace Hub — download ONNX models from HF
+huggingface-hub>=0.20.0
+
+# Optional: FlashAttention 2 — faster transformer attention (Linux/GPU only)
 # Windows: PyTorch native SDPA is used as fallback (~80% of flash-attn speed)
 # flash-attn>=2.7.0
-
-# Optional: ONNX Runtime for gender detection model
-# onnxruntime>=1.18.0

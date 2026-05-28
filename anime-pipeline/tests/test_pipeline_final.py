@@ -1,7 +1,7 @@
 """Pipeline test — quick 1-segment timing + full extrapolation. Uses CPU to avoid GPU OOM."""
 import os, sys, time, json, subprocess, shutil
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'scripts'))
 from config import FFMPEG, FFPROBE, TEMP_DIR
 # Suppress noise
 import warnings

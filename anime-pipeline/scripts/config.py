@@ -154,6 +154,7 @@ _CONFIG_KEYS = {
     'ASR_COMPARE_MODEL_B': 'cohere-transcribe',
     'ASR_DEFAULT_HOTWORDS': '',
     'FIRERED_ASR2_MODELS_DIR': os.path.join(DATA_DIR, "models", "firered_asr2"),
+    'FIRERED_ASR2S_PATH': os.path.join(COMICUT_ROOT, "FireRedASR2S"),
     'MFA_PYTHON': 'python',
     'MFA_DEFAULT_ACOUSTIC': 'japanese_mfa',
     'MFA_DEFAULT_DICTIONARY': 'japanese_mfa',
@@ -183,8 +184,78 @@ def _register_path_vars():
 _register_path_vars()
 
 
+def _is_stale_settings(paths: dict) -> bool:
+    """Check if settings.json paths are from another machine.
+
+    Returns True if any path override points to a non-existent directory,
+    indicating the settings were copied from a different environment.
+    """
+    if not paths:
+        return False
+    # Check CLIPS_DIR as the canary — if it doesn't exist, likely all paths are stale
+    clip = paths.get('CLIPS_DIR', '')
+    if clip and not os.path.isdir(clip):
+        return True
+    # Extra check: if DOWNLOAD_DIR override exists but doesn't match current root
+    dl = paths.get('DOWNLOAD_DIR', '')
+    if dl and not os.path.isdir(dl):
+        return True
+    return False
+
+
+def _reset_to_default_paths():
+    """Reset all user-configurable path vars to their computed defaults."""
+    global PROJECT_ROOT, COMICUT_ROOT, DATA_DIR
+    # Recompute root-derived paths
+    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    COMICUT_ROOT = os.path.dirname(PROJECT_ROOT)
+
+    new_defaults = {
+        'DOWNLOAD_DIR': os.path.join(DATA_DIR, "downloads"),
+        'SUBTITLE_DIR': os.path.join(DATA_DIR, "subtitles"),
+        'CLIPS_DIR': os.path.join(DATA_DIR, "clips"),
+        'TEMP_DIR': os.path.join(DATA_DIR, "temp"),
+        'APPROVED_DIR': os.path.join(DATA_DIR, "approved"),
+        'CLEANED_DIR': os.path.join(DATA_DIR, "cleaned"),
+        'CLEANED_UNREVIEWED_DIR': os.path.join(DATA_DIR, "cleaned_unreviewed"),
+        'DENOISED_APPROVED_DIR': os.path.join(DATA_DIR, "denoised_approved"),
+        'STITCHED_DIR': os.path.join(DATA_DIR, "stitched"),
+        'EMOTION_DIR': os.path.join(DATA_DIR, "情绪"),
+        'EMOTION_DENOISE_DIR': os.path.join(DATA_DIR, "情绪降噪"),
+        'ASR_DIR': os.path.join(DATA_DIR, "asr"),
+        'ASR_AUDIO_DIR': os.path.join(DATA_DIR, "asr", "audio"),
+        'ASR_SUBTITLE_DIR': os.path.join(DATA_DIR, "asr", "subtitles"),
+        'ASR_COMPARE_DIR': os.path.join(DATA_DIR, "asr_compare"),
+        'ASR_COMPARE_SUBTITLE_DIR': os.path.join(DATA_DIR, "asr_compare", "subtitles"),
+        'ASR_COMPARE_AUDIO_DIR': os.path.join(DATA_DIR, "asr_compare", "audio"),
+        'ASR_COMPARE_OUTPUT_DIR': os.path.join(DATA_DIR, "asr_compare_output"),
+        'ASR_COMPARE_DISCARD_DIR': os.path.join(DATA_DIR, "asr_compare", "discarded"),
+        'HOTWORDS_DIR': os.path.join(DATA_DIR, "hotwords"),
+        'PIPELINE_VIDEO_DIR': os.path.join(DATA_DIR, "pipelinevideo"),
+        'MFA_RAW_WAV_DIR': os.path.join(DATA_DIR, "mfa", "raw_wav"),
+        'MFA_WAV_DIR': os.path.join(DATA_DIR, "mfa", "wav"),
+        'MFA_TXT_DIR': os.path.join(DATA_DIR, "mfa", "txt"),
+        'MFA_ALIGNED_DIR': os.path.join(DATA_DIR, "mfa", "aligned"),
+        'MFA_POST_DIR': os.path.join(DATA_DIR, "mfa", "post"),
+        'MFA_FILTERED_DIR': os.path.join(DATA_DIR, "mfa", "filtered"),
+        'MFA_VALIDATE_DIR': os.path.join(DATA_DIR, "mfa", "validate"),
+        'MFA_MODELS_DIR': os.path.join(COMICUT_ROOT, "demo", "models", "mfa"),
+        'MFA_TEMP_DIR': os.path.join(COMICUT_ROOT, "demo", "models", "temp"),
+        'MFA_DICT_PATH': os.path.join(COMICUT_ROOT, "demo", "models", "mfa", "pretrained_models", "dictionary", "japanese_mfa.dict"),
+    }
+    for key, val in new_defaults.items():
+        globals()[key] = val
+        if key in _PATH_VARS:
+            _PATH_VARS[key] = val
+
+
 def load_settings():
-    """Load user settings overrides from settings.json and patch module globals."""
+    """Load user settings overrides from settings.json and patch module globals.
+
+    If settings.json contains paths from another machine (non-existent dirs),
+    ignores the stale paths and falls back to auto-computed defaults.
+    Non-path config (model selections, steps) is preserved across migrations.
+    """
     _register_path_vars()
     if not os.path.exists(SETTINGS_FILE):
         return
@@ -195,30 +266,21 @@ def load_settings():
         return
 
     paths = data.get('paths', {})
+    stale = _is_stale_settings(paths)
 
-    # Detect stale settings from another machine: if the CLIPS_DIR override
-    # points to a path that doesn't exist, ignore all overrides and use defaults.
-    if paths:
-        _clip = paths.get('CLIPS_DIR', '')
-        if _clip and not os.path.isdir(_clip):
-            # Stale settings detected — keep defaults, save corrected on next save
-            steps = data.get('denoise_default_steps', None)
-            if steps is not None:
-                globals()['DENOISE_DEFAULT_STEPS'] = steps
-            pv_steps = data.get('pv_default_steps', None)
-            if pv_steps is not None:
-                globals()['PV_DEFAULT_STEPS'] = pv_steps
-            config_vals = data.get('config', {})
-            for key, val in config_vals.items():
-                if key in _CONFIG_KEYS and isinstance(val, str) and val:
-                    globals()[key] = val
-            return
+    if stale:
+        # Stale settings from another machine — reset paths to current defaults,
+        # but preserve non-path config (model choices, step order, etc.)
+        print("[config] Stale settings.json detected (paths point to another machine).")
+        print("[config] Resetting paths to current environment defaults.")
+        _reset_to_default_paths()
+    else:
+        for key, val in paths.items():
+            if key in _USER_PATH_KEYS and isinstance(val, str) and val:
+                globals()[key] = val
+                _PATH_VARS[key] = val
 
-    for key, val in paths.items():
-        if key in _USER_PATH_KEYS and isinstance(val, str) and val:
-            globals()[key] = val
-            _PATH_VARS[key] = val
-
+    # Non-path settings — always load (survive machine migration)
     steps = data.get('denoise_default_steps', None)
     if steps is not None:
         globals()['DENOISE_DEFAULT_STEPS'] = steps

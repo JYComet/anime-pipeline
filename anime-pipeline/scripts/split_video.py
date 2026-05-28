@@ -491,32 +491,43 @@ def split_video_single_range(
     output_path: str,
     hw_accel: str = "auto",
 ) -> bool:
-    """Cut a single time range from a video.
+    """Cut a single time range from a video or audio file.
 
     Args:
-        video_path: Source video
+        video_path: Source video or audio file
         start: Start time in seconds
         end: End time in seconds
         output_path: Output file path
-        hw_accel: Hardware acceleration type
+        hw_accel: Hardware acceleration type (ignored for audio)
 
     Returns:
         True on success, False on failure.
     """
-    hw_config = get_hw_accel_params(hw_accel)
+    is_audio = video_path.lower().endswith('.wav')
     duration = end - start
 
-    cmd = [FFMPEG, "-y"]
-    cmd.extend(hw_config["hwaccel_in"])
-    cmd.extend(["-ss", str(start)])
-    cmd.extend(["-i", video_path])
-    cmd.extend(["-t", str(duration)])
-    cmd.extend(["-map", "0:v", "-map", "0:a?"])
-    cmd.extend(["-c:a", "copy"])
-    cmd.extend(["-c:v", hw_config["video_encoder"]])
-    cmd.extend(hw_config["extra_flags"])
-    cmd.extend(["-avoid_negative_ts", "make_zero"])
-    cmd.append(output_path)
+    if is_audio:
+        cmd = [FFMPEG, "-y",
+            "-ss", str(start),
+            "-i", video_path,
+            "-t", str(duration),
+            "-map", "0:a",
+            "-c:a", "pcm_s16le",
+            output_path,
+        ]
+    else:
+        hw_config = get_hw_accel_params(hw_accel)
+        cmd = [FFMPEG, "-y"]
+        cmd.extend(hw_config["hwaccel_in"])
+        cmd.extend(["-ss", str(start)])
+        cmd.extend(["-i", video_path])
+        cmd.extend(["-t", str(duration)])
+        cmd.extend(["-map", "0:v", "-map", "0:a?"])
+        cmd.extend(["-c:a", "copy"])
+        cmd.extend(["-c:v", hw_config["video_encoder"]])
+        cmd.extend(hw_config["extra_flags"])
+        cmd.extend(["-avoid_negative_ts", "make_zero"])
+        cmd.append(output_path)
 
     result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=600)
     return result.returncode == 0 and os.path.exists(output_path)
@@ -557,7 +568,8 @@ def trim_video(
                 return f"{m}m{int(s)}s" if s == int(s) else f"{m}m{s:.1f}s"
             return f"{int(s)}s" if s == int(s) else f"{s:.1f}s"
 
-        output_name = f"{base_name}_trim_{_fmt(start)}-{_fmt(end)}.mp4"
+        output_ext = ".wav" if video_path.lower().endswith('.wav') else ".mp4"
+        output_name = f"{base_name}_trim_{_fmt(start)}-{_fmt(end)}{output_ext}"
         output_path = os.path.join(output_dir, output_name)
 
         ok = split_video_single_range(video_path, start, end, output_path, hw_accel)
@@ -622,6 +634,10 @@ def _split_video_by_duration_impl(
         print(f"Invalid segment duration: {segment_duration}")
         return []
 
+    is_audio = video_path.lower().endswith('.wav')
+    if is_audio:
+        output_ext = ".wav"
+
     video_duration = get_video_duration(video_path)
     if video_duration <= 0:
         print(f"Could not determine video duration for {video_path}")
@@ -661,17 +677,27 @@ def _split_video_by_duration_impl(
         output_name = f"{base_name}_D{i+1:04d}{output_ext}"
         output_path = os.path.join(output_dir, output_name)
 
-        cmd = [FFMPEG, "-y"]
-        cmd.extend(hw_config["hwaccel_in"])
-        cmd.extend(["-ss", str(seg_start)])
-        cmd.extend(["-i", video_path])
-        cmd.extend(["-t", str(seg_dur)])
-        cmd.extend(["-map", "0:v", "-map", "0:a?"])
-        cmd.extend(["-c:a", "copy"])
-        cmd.extend(["-c:v", hw_config["video_encoder"]])
-        cmd.extend(hw_config["extra_flags"])
-        cmd.extend(["-avoid_negative_ts", "make_zero"])
-        cmd.append(output_path)
+        if is_audio:
+            cmd = [FFMPEG, "-y",
+                "-ss", str(seg_start),
+                "-i", video_path,
+                "-t", str(seg_dur),
+                "-map", "0:a",
+                "-c:a", "pcm_s16le",
+                output_path,
+            ]
+        else:
+            cmd = [FFMPEG, "-y"]
+            cmd.extend(hw_config["hwaccel_in"])
+            cmd.extend(["-ss", str(seg_start)])
+            cmd.extend(["-i", video_path])
+            cmd.extend(["-t", str(seg_dur)])
+            cmd.extend(["-map", "0:v", "-map", "0:a?"])
+            cmd.extend(["-c:a", "copy"])
+            cmd.extend(["-c:v", hw_config["video_encoder"]])
+            cmd.extend(hw_config["extra_flags"])
+            cmd.extend(["-avoid_negative_ts", "make_zero"])
+            cmd.append(output_path)
 
         try:
             result = subprocess.run(
@@ -684,15 +710,25 @@ def _split_video_by_duration_impl(
                     on_progress(i + 1, total_segments)
             else:
                 # Fallback: stream copy
-                fb_cmd = [FFMPEG, "-y",
-                    "-ss", str(seg_start),
-                    "-i", video_path,
-                    "-t", str(seg_dur),
-                    "-map", "0:v", "-map", "0:a?",
-                    "-c", "copy",
-                    "-avoid_negative_ts", "make_zero",
-                    output_path,
-                ]
+                if is_audio:
+                    fb_cmd = [FFMPEG, "-y",
+                        "-ss", str(seg_start),
+                        "-i", video_path,
+                        "-t", str(seg_dur),
+                        "-map", "0:a",
+                        "-c:a", "pcm_s16le",
+                        output_path,
+                    ]
+                else:
+                    fb_cmd = [FFMPEG, "-y",
+                        "-ss", str(seg_start),
+                        "-i", video_path,
+                        "-t", str(seg_dur),
+                        "-map", "0:v", "-map", "0:a?",
+                        "-c", "copy",
+                        "-avoid_negative_ts", "make_zero",
+                        output_path,
+                    ]
                 subprocess.run(fb_cmd, capture_output=True, text=True,
                              encoding='utf-8', errors='replace', timeout=300)
                 if os.path.exists(output_path):

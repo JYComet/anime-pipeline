@@ -261,6 +261,10 @@ def _get_asr_model(model_key="qwen3-asr", device="cuda", use_fp16=True, use_flas
         elif model_info.get("framework") == "firered":
             import config as _cfg
             models_dir = getattr(_cfg, 'FIRERED_ASR2_MODELS_DIR', os.path.join(DATA_DIR, "models", "firered_asr2"))
+            firered_path = getattr(_cfg, 'FIRERED_ASR2S_PATH', os.path.join(COMICUT_ROOT, "FireRedASR2S"))
+
+            if firered_path not in sys.path:
+                sys.path.insert(0, firered_path)
 
             from fireredasr2s import FireRedAsr2System, FireRedAsr2SystemConfig
             from fireredasr2s.fireredasr2 import FireRedAsr2Config
@@ -516,6 +520,46 @@ def _merge_segments_by_text(segments: list) -> list:
     return merged
 
 
+def _is_hotword_hallucination(text: str, audio_chunk, hotword_terms: set) -> bool:
+    """Detect if ASR output is a hotword hallucination during silence.
+
+    When given hotwords as context, some ASR models (Qwen3-ASR) may output
+    the hotwords themselves as transcription text during silent / near-silent
+    segments.  This filter checks two conditions:
+      1. The text is dominated by hotword terms (>50% of characters).
+      2. The audio energy is very low (<1% of full-scale RMS).
+    If both are true the segment is discarded.
+    """
+    if not hotword_terms or not text:
+        return False
+
+    # Condition 1: hotword coverage ratio
+    matched_chars = 0
+    remaining = text
+    for term in hotword_terms:
+        pos = 0
+        while True:
+            pos = remaining.find(term, pos)
+            if pos == -1:
+                break
+            matched_chars += len(term)
+            pos += len(term)
+    total_chars = len(text.replace(" ", "").replace(",", "").replace("，", "").replace("。", "").replace("！", "").replace("？", "").replace(".", "").replace("!", "").replace("?", ""))
+    if total_chars == 0:
+        return False
+    hw_ratio = matched_chars / total_chars
+
+    # Condition 2: audio energy (RMS relative to full-scale float32)
+    import numpy as np
+    if len(audio_chunk) == 0:
+        return hw_ratio > 0.5
+    rms = np.sqrt(np.mean(audio_chunk.astype(np.float64) ** 2))
+    # Full-scale sine RMS ≈ 0.707; threshold at ~0.7% ≈ 0.005
+    is_silent = rms < 0.005
+
+    return hw_ratio > 0.5 and is_silent
+
+
 def vad_asr_pipeline(
     audio_path: str,
     model_key: str = "qwen3-asr",
@@ -561,6 +605,14 @@ def vad_asr_pipeline(
     # Use batch_size=1 for Qwen3; other models (SenseVoice, Parakeet, etc.) benefit from batching.
     is_qwen3 = model_key in ("qwen3-asr",)
 
+    # Build hotword term set for silence hallucination filtering
+    _hotword_terms = set()
+    if hotwords:
+        for t in re.split(r"[,，、\s]+", hotwords):
+            t = t.strip()
+            if t:
+                _hotword_terms.add(t)
+
     if is_qwen3:
         # Qwen3: one VAD segment at a time (model is 1.7B, OOM risk with batching)
         for i, (start_ms, end_ms) in enumerate(vad_segments):
@@ -574,7 +626,7 @@ def vad_asr_pipeline(
                 tr_results = asr_model.transcribe([(chunk, sr)], language=qwen3_lang, context=hotwords)
                 for tr in tr_results:
                     text = (tr.text or "").strip()
-                    if text:
+                    if text and not _is_hotword_hallucination(text, chunk, _hotword_terms):
                         results.append({"text": text, "start_ms": start_ms, "end_ms": end_ms})
             except Exception:
                 continue
@@ -705,31 +757,49 @@ def _firered_asr_pipeline(audio_path: str, model_key: str, language: str, device
     FireRedASR2S includes built-in VAD, so it handles segmentation internally.
     Returns a list of {text, start_ms, end_ms} dicts.
     """
-    asr_model = _get_asr_model(model_key, device=device)
-    result = asr_model.process(audio_path)
+    # FireRedASR2S requires exactly 16kHz mono int16 WAV — resample if needed
+    work_path = audio_path
+    temp_wav = None
+    try:
+        import soundfile as sf
+        info = sf.info(audio_path)
+        if info.samplerate != 16000 or info.channels != 1:
+            os.makedirs(TEMP_DIR, exist_ok=True)
+            temp_wav = os.path.join(TEMP_DIR, f"firered_{os.path.basename(audio_path)}")
+            _convert_to_pcm_wav(audio_path, temp_wav)
+            work_path = temp_wav
 
-    segments = []
-    for sent in result.get("sentences", []):
-        text = sent.get("text", "").strip()
-        if text:
-            segments.append({
-                "text": text,
-                "start_ms": sent["start_ms"],
-                "end_ms": sent["end_ms"],
-            })
+        asr_model = _get_asr_model(model_key, device=device)
+        result = asr_model.process(work_path)
 
-    # Fallback: if sentences is empty, use top-level text + vad_segments_ms
-    if not segments and result.get("text"):
-        vad_segs = result.get("vad_segments_ms", [])
-        full_text = result["text"].strip()
-        if vad_segs and len(vad_segs) == 1:
-            segments.append({
-                "text": full_text,
-                "start_ms": vad_segs[0][0],
-                "end_ms": vad_segs[0][1],
-            })
+        segments = []
+        for sent in result.get("sentences", []):
+            text = sent.get("text", "").strip()
+            if text:
+                segments.append({
+                    "text": text,
+                    "start_ms": sent["start_ms"],
+                    "end_ms": sent["end_ms"],
+                })
 
-    return segments
+        # Fallback: if sentences is empty, use top-level text + vad_segments_ms
+        if not segments and result.get("text"):
+            vad_segs = result.get("vad_segments_ms", [])
+            full_text = result["text"].strip()
+            if vad_segs and len(vad_segs) == 1:
+                segments.append({
+                    "text": full_text,
+                    "start_ms": vad_segs[0][0],
+                    "end_ms": vad_segs[0][1],
+                })
+
+        return segments
+    finally:
+        if temp_wav and os.path.exists(temp_wav):
+            try:
+                os.remove(temp_wav)
+            except OSError:
+                pass
 
 
 def segments_to_srt(segments: list, output_srt: str) -> str:

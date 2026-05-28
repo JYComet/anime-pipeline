@@ -2,6 +2,7 @@
 # ============================================================
 #  Anime Pipeline — One-Click Setup & Launch (Linux/macOS)
 #  Supports both online and offline install modes.
+#  Auto-detects paths for new environments.
 # ============================================================
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -13,6 +14,8 @@ PYTHON="$VENV_DIR/bin/python"
 PIP="$VENV_DIR/bin/pip"
 SETUP_DONE_FILE="$PROJECT_ROOT/.setup_done"
 WHEELS_DIR="$PROJECT_ROOT/offline_wheels"
+SETTINGS_FILE="$PROJECT_ROOT/data/settings.json"
+DATA_DIR="$PROJECT_ROOT/data"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -40,7 +43,7 @@ echo ""
 # ============================================================
 # Step 1 — Check Python
 # ============================================================
-echo "[1/9] Checking Python installation..."
+echo "[1/10] Checking Python installation..."
 
 PYTHON3=""
 for p in python3 python; do
@@ -70,7 +73,7 @@ fi
 # Step 2 — Create / activate virtual environment
 # ============================================================
 echo ""
-echo "[2/9] Setting up virtual environment..."
+echo "[2/10] Setting up virtual environment..."
 
 if [ -f "$PYTHON" ] && "$PYTHON" -m pip --version &>/dev/null 2>&1; then
     echo "        venv already exists and working."
@@ -105,10 +108,10 @@ else
         echo "        Installing pip into venv..."
         PIP_INSTALLED=0
 
-        # Method 1: ensurepip (needs python3-venv system package)
+        # Method 1: ensurepip
         "$PYTHON" -m ensurepip --upgrade 2>/dev/null && PIP_INSTALLED=1
 
-        # Method 2: pip wheel from offline_wheels (uses Python zipfile, no unzip needed)
+        # Method 2: pip wheel from offline_wheels
         if [ $PIP_INSTALLED -eq 0 ]; then
             PIP_WHL=$(ls "$WHEELS_DIR"/pip-*.whl 2>/dev/null | head -1)
             if [ -n "$PIP_WHL" ]; then
@@ -122,7 +125,7 @@ with zipfile.ZipFile(sys.argv[1]) as z:
             fi
         fi
 
-        # Method 3: download get-pip.py (online only, skipped in offline mode)
+        # Method 3: download get-pip.py (online only)
         if [ $PIP_INSTALLED -eq 0 ] && [ "$OFFLINE" -eq 0 ]; then
             curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py 2>/dev/null && \
                 "$PYTHON" /tmp/get-pip.py 2>/dev/null && PIP_INSTALLED=1
@@ -142,13 +145,11 @@ with zipfile.ZipFile(sys.argv[1]) as z:
         echo ""
         echo -e "${RED}[ERROR] Cannot create venv with pip.${NC}"
         echo ""
-        echo "        This server appears to have no internet access."
-        echo "        To fix this, run on your Windows machine first:"
+        echo "        Run on a machine with internet access first:"
         echo ""
-        echo -e "          ${GREEN}download_wheels.bat${NC}"
+        echo -e "          ${GREEN}./download_wheels.sh --linux${NC}"
         echo ""
         echo "        This downloads all needed packages to offline_wheels/"
-        echo "        (the folder is shared via the network mount)."
         echo "        Then re-run ./setup.sh — it will install from local files."
         exit 1
     fi
@@ -164,7 +165,7 @@ fi
 # Step 3 — Install Python dependencies
 # ============================================================
 echo ""
-echo "[3/9] Installing Python dependencies..."
+echo "[3/10] Installing Python dependencies..."
 
 if [ -f "$SETUP_DONE_FILE" ]; then
     if "$PYTHON" -c "import fastapi" &>/dev/null 2>&1; then
@@ -206,7 +207,7 @@ done < "$PROJECT_ROOT/requirements.txt"
 
 if [ -n "$FAILED_PKGS" ]; then
     echo -e "${YELLOW}[WARNING] Failed to install:$FAILED_PKGS${NC}"
-    echo "          Run download_all.py on Windows to fill missing wheels."
+    echo "          Run tools/download_wheels.py --linux on a machine with internet."
 fi
 
 # Verify at least fastapi is installed
@@ -214,7 +215,7 @@ if "$PYTHON" -c "import fastapi" &>/dev/null 2>&1; then
     echo "        Core dependencies installed."
 else
     echo -e "${RED}[ERROR] fastapi failed to install. Server cannot start.${NC}"
-    echo "        Run: python download_all.py on Windows, then re-run setup.sh"
+    echo "        Run: python tools/download_wheels.py --linux on a machine with internet"
     exit 1
 fi
 
@@ -222,7 +223,7 @@ fi
 # Step 4 — Optional ASR dependencies
 # ============================================================
 echo ""
-echo "[4/9] Optional ASR dependencies..."
+echo "[4/10] Optional ASR dependencies..."
 
 ASR_REQ="$PROJECT_ROOT/requirements-asr.txt"
 if [ -f "$ASR_REQ" ]; then
@@ -250,7 +251,7 @@ fi
 # Step 5 — System tools
 # ============================================================
 echo ""
-echo "[5/9] Checking system tools..."
+echo "[5/10] Checking system tools..."
 
 check_tool() {
     local name="$1"
@@ -293,7 +294,7 @@ fi
 # Step 6 — ClearerVoice-Studio (audio denoising)
 # ============================================================
 echo ""
-echo "[6/9] Checking ClearerVoice-Studio..."
+echo "[6/10] Checking ClearerVoice-Studio..."
 
 CV_DIR="$COMICUT_ROOT/ClearerVoice-Studio-main/ClearerVoice-Studio-main"
 CV_CLEARVOICE="$CV_DIR/clearvoice"
@@ -303,7 +304,7 @@ if [ -f "$CV_CLEARVOICE/clearvoice.py" ]; then
 else
     echo "        ClearerVoice-Studio not found."
     if [ "$OFFLINE" -eq 1 ]; then
-        echo -e "        ${YELLOW}Copy the folder from your Windows machine to:${NC}"
+        echo -e "        ${YELLOW}Copy the folder from your online machine to:${NC}"
         echo "        $COMICUT_ROOT/ClearerVoice-Studio-main/"
     else
         echo "        It will be cloned from GitHub (~200MB)."
@@ -334,7 +335,7 @@ fi
 # Step 7 — Post-install fixes
 # ============================================================
 echo ""
-echo "[7/9] Post-install fixes..."
+echo "[7/10] Post-install fixes..."
 
 # Fix torch GPU compatibility — downgrade to CPU if CUDA fails
 if "$PYTHON" -c "import torch; torch.cuda.is_available()" &>/dev/null 2>&1; then
@@ -364,28 +365,74 @@ else
 fi
 
 # ============================================================
-# Step 9 — Clean up stale settings.json
+# Step 8 — Create data directories
 # ============================================================
 echo ""
-echo "[8/9] Checking configuration..."
+echo "[8/10] Creating data directories..."
 
-SETTINGS_FILE="$PROJECT_ROOT/data/settings.json"
+mkdir -p "$DATA_DIR"/{downloads,subtitles,clips,temp,approved,cleaned,cleaned_unreviewed,denoised_approved,stitched,pipelinevideo,hotwords,情绪,情绪降噪}
+mkdir -p "$DATA_DIR"/asr/{audio,subtitles}
+mkdir -p "$DATA_DIR"/asr_compare/{subtitles,audio,discarded}
+mkdir -p "$DATA_DIR"/asr_compare_output
+mkdir -p "$DATA_DIR"/mfa/{raw_wav,wav,txt,aligned,post,filtered,validate}
+
+echo "        Data directories ready."
+
+# ============================================================
+# Step 9 — Clean stale settings + path configuration
+# ============================================================
+echo ""
+echo "[9/10] Checking configuration..."
+
+STALE_DETECTED=0
+
 if [ -f "$SETTINGS_FILE" ]; then
-    if grep -q '[A-Z]:\\\\' "$SETTINGS_FILE" 2>/dev/null; then
-        echo "        Removing old settings.json with Windows absolute paths..."
+    # Check if CLIPS_DIR in settings points to a non-existent path
+    if "$PYTHON" -c "
+import json, os
+try:
+    d = json.load(open('$SETTINGS_FILE', encoding='utf-8'))
+    paths = d.get('paths', {})
+    clip = paths.get('CLIPS_DIR', '')
+    if clip and not os.path.isdir(clip):
+        exit(0)
+    exit(1)
+except:
+    exit(1)
+" 2>/dev/null; then
+        echo -e "        ${YELLOW}Stale settings.json detected (paths from another machine).${NC}"
+        echo "        Removing old settings — fresh defaults will be used."
         rm "$SETTINGS_FILE"
+        STALE_DETECTED=1
     else
-        echo "        settings.json OK."
+        echo "        settings.json OK for this environment."
     fi
 else
-    echo "        Using default paths."
+    echo "        Using default paths (auto-detected from project location)."
+fi
+
+if [ "$STALE_DETECTED" -eq 1 ]; then
+    echo ""
+    echo "  =============================================================="
+    echo "  Fresh environment detected!"
+    echo "  Default data directories are under: $DATA_DIR"
+    echo ""
+    echo "  To customize (e.g., different drives), use the Web UI:"
+    echo "  Settings > File Paths"
+    echo ""
+    echo "  Current defaults:"
+    echo "    Downloads : $DATA_DIR/downloads"
+    echo "    Clips     : $DATA_DIR/clips"
+    echo "    Cleaned   : $DATA_DIR/cleaned"
+    echo "  =============================================================="
+    echo ""
 fi
 
 # ============================================================
-# Step 9 — Launch server
+# Step 10 — Launch server
 # ============================================================
 echo ""
-echo "[9/9] Starting Anime Pipeline Server..."
+echo "[10/10] Starting Anime Pipeline Server..."
 
 if [ ! -f "$PYTHON" ]; then
     echo -e "${RED}[ERROR] Python not found in venv.${NC}"
@@ -394,8 +441,9 @@ fi
 
 echo ""
 echo "============================================"
-echo "  Frontend : http://192.168.103.163:5800"
-echo "  API docs : http://192.168.103.163:5800/docs"
+echo "  Frontend : http://localhost:5800"
+echo "  API docs : http://localhost:5800/docs"
+echo "  Data root: $DATA_DIR"
 echo "============================================"
 echo ""
 
@@ -409,5 +457,8 @@ elif command -v lsof &>/dev/null; then
     PID=$(lsof -ti :5800 2>/dev/null || true)
     [ -n "$PID" ] && kill -9 "$PID" 2>/dev/null && sleep 1
 fi
+
+# Fix PyTorch encoding issues
+export PYTHONUTF8=1
 
 exec "$PYTHON" "$PROJECT_ROOT/scripts/server.py"
