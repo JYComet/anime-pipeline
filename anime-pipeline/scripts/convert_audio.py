@@ -6,8 +6,8 @@ import subprocess
 from config import FFMPEG
 
 
-def mp4_to_wav(mp4_path: str, wav_path: str = "", sample_rate: int = 44100,
-               channels: int = 2) -> str:
+def mp4_to_wav(mp4_path: str, wav_path: str = "", sample_rate: int = 32000,
+               channels: int = 1) -> str:
     """Extract audio from an MP4 file and save as 16-bit PCM WAV.
 
     Args:

@@ -21,6 +21,17 @@ DOWNLOAD_DIR = os.path.join(DATA_DIR, "downloads")
 SUBTITLE_DIR = os.path.join(DATA_DIR, "subtitles")
 CLIPS_DIR = os.path.join(DATA_DIR, "clips")
 TEMP_DIR = os.path.join(DATA_DIR, "temp")
+
+# --- Model cache: redirect all downloads into project folder ---
+_MODELS_DIR = os.path.join(DATA_DIR, "models")
+_HF_CACHE = os.path.join(_MODELS_DIR, "huggingface")
+_MS_CACHE = os.path.join(_MODELS_DIR, "modelscope")
+os.environ.setdefault("HF_HOME", _HF_CACHE)
+os.environ.setdefault("HUGGINGFACE_HUB_CACHE", _HF_CACHE)
+os.environ.setdefault("MODELSCOPE_CACHE", _MS_CACHE)
+os.environ["HF_HUB_OFFLINE"] = "1"          # block all HuggingFace network access
+os.environ["TRANSFORMERS_OFFLINE"] = "1"    # transformers offline mode
+
 APPROVED_DIR = os.path.join(DATA_DIR, "approved")  # clips that pass audio review
 CLEANED_DIR = os.path.join(DATA_DIR, "cleaned")    # denoised audio output (reviewed clips)
 CLEANED_UNREVIEWED_DIR = os.path.join(DATA_DIR, "cleaned_unreviewed")  # denoised from unreviewed
@@ -110,6 +121,9 @@ HEADERS = {
 STITCHED_DIR = os.path.join(DATA_DIR, "stitched")
 PIPELINE_VIDEO_DIR = os.path.join(DATA_DIR, "pipelinevideo")
 
+# --- Video splitting / cutting ---
+SPLIT_DIR = os.path.join(DATA_DIR, "split")
+
 # --- MFA (Montreal Forced Aligner) directories ---
 MFA_DIR = os.path.join(DATA_DIR, "mfa")
 MFA_RAW_WAV_DIR = os.path.join(MFA_DIR, "raw_wav")
@@ -120,10 +134,11 @@ MFA_JSONL_DIR = os.path.join(MFA_DIR, "jsonl")
 MFA_POST_DIR = os.path.join(MFA_DIR, "post")
 MFA_FILTERED_DIR = os.path.join(MFA_DIR, "filtered")
 MFA_VALIDATE_DIR = os.path.join(MFA_DIR, "validate")
-MFA_SCRIPTS_DIR = os.path.join(COMICUT_ROOT, "demo", "scripts")
-MFA_MODELS_DIR = os.path.join(COMICUT_ROOT, "demo", "models", "mfa")
-MFA_TEMP_DIR = os.path.join(COMICUT_ROOT, "demo", "models", "temp")
+MFA_SCRIPTS_DIR = os.path.join(PROJECT_ROOT, "scripts", "mfa")
+MFA_MODELS_DIR = os.path.join(MFA_DIR, "models")
+MFA_TEMP_DIR = os.path.join(MFA_DIR, "temp")
 MFA_DICT_PATH = os.path.join(MFA_MODELS_DIR, "pretrained_models", "dictionary", "japanese_mfa.dict")
+MFA_DICT_PATH_ZH = os.path.join(MFA_MODELS_DIR, "pretrained_models", "dictionary", "fullpinyin_enword.dict")
 
 # --- Hotword configurations ---
 HOTWORDS_DIR = os.path.join(DATA_DIR, "hotwords")
@@ -140,11 +155,13 @@ _USER_PATH_KEYS = {
     'ASR_DIR', 'ASR_AUDIO_DIR', 'ASR_SUBTITLE_DIR',
     'ASR_COMPARE_DIR', 'ASR_COMPARE_SUBTITLE_DIR', 'ASR_COMPARE_AUDIO_DIR',
     'ASR_COMPARE_OUTPUT_DIR', 'ASR_COMPARE_DISCARD_DIR',
+    'ASR_COMPARE_SEGMENTS_DIR', 'ASR_COMPARE_KEPT_DIR',
     'HOTWORDS_DIR',
     'PIPELINE_VIDEO_DIR',
+    'SPLIT_DIR',
     'MFA_RAW_WAV_DIR', 'MFA_WAV_DIR', 'MFA_TXT_DIR',
     'MFA_ALIGNED_DIR', 'MFA_JSONL_DIR', 'MFA_POST_DIR', 'MFA_FILTERED_DIR',
-    'MFA_VALIDATE_DIR', 'MFA_MODELS_DIR', 'MFA_TEMP_DIR', 'MFA_DICT_PATH',
+    'MFA_VALIDATE_DIR', 'MFA_MODELS_DIR', 'MFA_TEMP_DIR', 'MFA_DICT_PATH', 'MFA_DICT_PATH_ZH',
 }
 
 # Non-path config keys stored in settings.json (model/language selections etc.)
@@ -152,11 +169,11 @@ _CONFIG_KEYS = {
     'ASR_DEFAULT_MODEL': 'qwen3-asr',
     'ASR_DEFAULT_LANGUAGE': 'zh',
     'ASR_COMPARE_MODEL_A': 'qwen3-asr',
-    'ASR_COMPARE_MODEL_B': 'cohere-transcribe',
+    'ASR_COMPARE_MODEL_B': 'firered-asr2',
     'ASR_DEFAULT_HOTWORDS': '',
     'FIRERED_ASR2_MODELS_DIR': os.path.join(DATA_DIR, "models", "firered_asr2"),
     'FIRERED_ASR2S_PATH': os.path.join(COMICUT_ROOT, "FireRedASR2S"),
-    'MFA_PYTHON': 'python',
+    'MFA_PYTHON': sys.executable,
     'MFA_DEFAULT_ACOUSTIC': 'japanese_mfa',
     'MFA_DEFAULT_DICTIONARY': 'japanese_mfa',
     'MFA_DEFAULT_NUM_JOBS': '8',
@@ -231,8 +248,12 @@ def _reset_to_default_paths():
         'ASR_COMPARE_AUDIO_DIR': os.path.join(DATA_DIR, "asr_compare", "audio"),
         'ASR_COMPARE_OUTPUT_DIR': os.path.join(DATA_DIR, "asr_compare_output"),
         'ASR_COMPARE_DISCARD_DIR': os.path.join(DATA_DIR, "asr_compare", "discarded"),
+        'ASR_COMPARE_SEGMENTS_DIR': os.path.join(DATA_DIR, "asr_compare", "segments"),
+        'ASR_COMPARE_KEPT_DIR': os.path.join(DATA_DIR, "asr_compare", "kept"),
+        'ASR_COMPARE_DEFAULT_PATH': '\\\\RS3621\\CompanyShare-Confidential\\Persons\\jiangyichen\\Enhanced\\529',
         'HOTWORDS_DIR': os.path.join(DATA_DIR, "hotwords"),
         'PIPELINE_VIDEO_DIR': os.path.join(DATA_DIR, "pipelinevideo"),
+        'SPLIT_DIR': os.path.join(DATA_DIR, "split"),
         'MFA_RAW_WAV_DIR': os.path.join(DATA_DIR, "mfa", "raw_wav"),
         'MFA_WAV_DIR': os.path.join(DATA_DIR, "mfa", "wav"),
         'MFA_TXT_DIR': os.path.join(DATA_DIR, "mfa", "txt"),
@@ -240,9 +261,10 @@ def _reset_to_default_paths():
         'MFA_POST_DIR': os.path.join(DATA_DIR, "mfa", "post"),
         'MFA_FILTERED_DIR': os.path.join(DATA_DIR, "mfa", "filtered"),
         'MFA_VALIDATE_DIR': os.path.join(DATA_DIR, "mfa", "validate"),
-        'MFA_MODELS_DIR': os.path.join(COMICUT_ROOT, "demo", "models", "mfa"),
-        'MFA_TEMP_DIR': os.path.join(COMICUT_ROOT, "demo", "models", "temp"),
-        'MFA_DICT_PATH': os.path.join(COMICUT_ROOT, "demo", "models", "mfa", "pretrained_models", "dictionary", "japanese_mfa.dict"),
+        'MFA_MODELS_DIR': os.path.join(DATA_DIR, "mfa", "models"),
+        'MFA_TEMP_DIR': os.path.join(DATA_DIR, "mfa", "temp"),
+        'MFA_DICT_PATH': os.path.join(DATA_DIR, "mfa", "models", "pretrained_models", "dictionary", "japanese_mfa.dict"),
+        'MFA_DICT_PATH_ZH': os.path.join(DATA_DIR, "mfa", "models", "pretrained_models", "dictionary", "fullpinyin_enword.dict"),
     }
     for key, val in new_defaults.items():
         globals()[key] = val
@@ -335,9 +357,19 @@ ASR_COMPARE_SUBTITLE_DIR = os.path.join(ASR_COMPARE_DIR, "subtitles")
 ASR_COMPARE_AUDIO_DIR = os.path.join(ASR_COMPARE_DIR, "audio")
 ASR_COMPARE_OUTPUT_DIR = os.path.join(DATA_DIR, "asr_compare_output")
 ASR_COMPARE_DISCARD_DIR = os.path.join(ASR_COMPARE_DIR, "discarded")
+ASR_COMPARE_SEGMENTS_DIR = os.path.join(ASR_COMPARE_DIR, "segments")
+ASR_COMPARE_KEPT_DIR = os.path.join(ASR_COMPARE_DIR, "kept")
+# Default browse path for ASR comparison tab (can be a network share / UNC path)
+ASR_COMPARE_DEFAULT_PATH = _CONFIG_KEYS.get('ASR_COMPARE_DEFAULT_PATH', '')
+
+# Model cache directories (all downloads go into project folder)
+MODELS_DIR = _MODELS_DIR
+ASR_MODELS_DIR = os.path.join(_MODELS_DIR, "asr")
+HF_CACHE_DIR = _HF_CACHE
+MS_CACHE_DIR = _MS_CACHE
 
 # Ensure all data directories exist
-for d in [DOWNLOAD_DIR, SUBTITLE_DIR, CLIPS_DIR, TEMP_DIR, APPROVED_DIR, CLEANED_DIR, CLEANED_UNREVIEWED_DIR, DENOISED_APPROVED_DIR, STITCHED_DIR, PIPELINE_VIDEO_DIR, ASR_DIR, ASR_AUDIO_DIR, ASR_SUBTITLE_DIR, ASR_COMPARE_DIR, ASR_COMPARE_SUBTITLE_DIR, ASR_COMPARE_AUDIO_DIR, ASR_COMPARE_OUTPUT_DIR, ASR_COMPARE_DISCARD_DIR, EMOTION_DIR, EMOTION_DENOISE_DIR, MFA_DIR, MFA_RAW_WAV_DIR, MFA_WAV_DIR, MFA_TXT_DIR, MFA_ALIGNED_DIR, MFA_JSONL_DIR, MFA_POST_DIR, MFA_FILTERED_DIR, MFA_VALIDATE_DIR]:
+for d in [DOWNLOAD_DIR, SUBTITLE_DIR, CLIPS_DIR, TEMP_DIR, APPROVED_DIR, CLEANED_DIR, CLEANED_UNREVIEWED_DIR, DENOISED_APPROVED_DIR, STITCHED_DIR, PIPELINE_VIDEO_DIR, ASR_DIR, ASR_AUDIO_DIR, ASR_SUBTITLE_DIR, ASR_COMPARE_DIR, ASR_COMPARE_SUBTITLE_DIR, ASR_COMPARE_AUDIO_DIR, ASR_COMPARE_OUTPUT_DIR, ASR_COMPARE_DISCARD_DIR, ASR_COMPARE_SEGMENTS_DIR, ASR_COMPARE_KEPT_DIR, EMOTION_DIR, EMOTION_DENOISE_DIR, SPLIT_DIR, MFA_DIR, MFA_RAW_WAV_DIR, MFA_WAV_DIR, MFA_TXT_DIR, MFA_ALIGNED_DIR, MFA_JSONL_DIR, MFA_POST_DIR, MFA_FILTERED_DIR, MFA_VALIDATE_DIR, MFA_MODELS_DIR, MFA_TEMP_DIR]:
     os.makedirs(d, exist_ok=True)
 
 

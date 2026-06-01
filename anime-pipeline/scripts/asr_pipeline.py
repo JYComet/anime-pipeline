@@ -21,12 +21,47 @@ from config import (
     ASR_DIR, ASR_AUDIO_DIR, ASR_SUBTITLE_DIR,
     ASR_COMPARE_DIR, ASR_COMPARE_SUBTITLE_DIR, ASR_COMPARE_AUDIO_DIR,
     ASR_COMPARE_OUTPUT_DIR, ASR_COMPARE_DISCARD_DIR,
+    ASR_COMPARE_SEGMENTS_DIR, ASR_COMPARE_KEPT_DIR,
+    HF_CACHE_DIR, MS_CACHE_DIR,
 )
 
 # Ensure ffmpeg is on PATH for funasr's internal audio loading
 _QUICKCUT_DIR = os.path.join(COMICUT_ROOT, "QuickCut")
 if os.path.isdir(_QUICKCUT_DIR) and _QUICKCUT_DIR not in os.environ.get("PATH", ""):
     os.environ["PATH"] = _QUICKCUT_DIR + os.pathsep + os.environ.get("PATH", "")
+
+# --- Monkey-patch Modelscope patcher bug ---
+# The modelscope patcher monkey-patches transformers' get_class_from_dynamic_module
+# and tries to mutate the *args tuple with args[0]=..., which raises:
+#   TypeError: 'tuple' object does not support item assignment
+# This breaks all models loaded with trust_remote_code=True (cohere-transcribe, etc.)
+# when modelscope is installed. We fix this by converting tuple args to a mutable list
+# before the patcher body runs.
+try:
+    import modelscope.utils.hf_util.patcher as _ms_patcher_mod
+    _ms_orig = _ms_patcher_mod.get_class_from_dynamic_module
+
+    def _ms_fixed_get_class_from_dynamic_module(class_reference, *args, **kwargs):
+        return _ms_orig(class_reference, *list(args), **kwargs)
+
+    _ms_patcher_mod.get_class_from_dynamic_module = _ms_fixed_get_class_from_dynamic_module
+except Exception:
+    pass
+
+# --- Monkey-patch transformers torch.load safety check ---
+# transformers 4.57+ requires torch>=2.6 for torch.load with weights_only=True
+# (CVE-2025-32434). This project uses torch 2.5.x. We patch the check at every
+# import site to allow loading legacy .bin checkpoints (needed by firered-asr2).
+try:
+    import transformers.utils.import_utils as _tf_iu
+    _tf_iu.check_torch_load_is_safe = lambda: None
+except Exception:
+    pass
+try:
+    import transformers.modeling_utils as _tf_mu
+    _tf_mu.check_torch_load_is_safe = lambda: None
+except Exception:
+    pass
 
 # Extensions that soundfile (libsndfile) cannot decode — need ffmpeg pre-conversion
 _SF_UNSUPPORTED = {'.aac', '.mp3', '.m4a', '.wma', '.opus', '.wv'}
@@ -43,63 +78,57 @@ def _convert_to_pcm_wav(input_path: str, output_path: str) -> None:
 
 # --- Available ASR models ---
 ASR_MODELS = {
-    "sensevoice": {
-        "name": "SenseVoiceSmall",
-        "model_id": "iic/SenseVoiceSmall",
-        "description": "阿里 SenseVoice 多语言模型，支持中/英/日/韩/粤语等",
-        "languages": ["auto", "zh", "en", "ja", "ko", "yue"],
-        "abbr": "sensevoice",
-    },
     "qwen3-asr": {
         "name": "Qwen3-ASR-1.7B",
         "model_id": "Qwen/Qwen3-ASR-1.7B",
-        "description": "Qwen3 ASR 多语言模型，支持中/英/日/韩/粤语等",
+        "description": "Qwen3 多语言模型，中/英/日/韩/粤语",
         "languages": ["auto", "zh", "en", "ja", "ko", "yue"],
         "abbr": "qwen3",
-    },
-    "parakeet-ja": {
-        "name": "Parakeet-TDT-0.6B-ja",
-        "model_id": "nvidia/parakeet-tdt_ctc-0.6b-ja",
-        "description": "NVIDIA Parakeet TDT 日语特化模型 (NeMo)",
-        "languages": ["ja"],
-        "abbr": "parakeet",
-        "framework": "nemo",
     },
     "cohere-transcribe": {
         "name": "Cohere Transcribe",
         "model_id": "CohereLabs/cohere-transcribe-03-2026",
-        "description": "Cohere Transcribe 2B ASR 模型，支持14种语言含日语",
-        "languages": ["ja", "en", "zh", "ko", "fr", "de", "it", "es", "pt", "el", "nl", "pl", "ar", "vi"],
+        "description": "Cohere Transcribe 多语言模型，14 种语言",
+        "languages": ["auto", "zh", "en", "ja", "ko", "de", "fr", "es", "pt", "ar", "ru", "hi", "tr", "vi", "nl", "id"],
         "abbr": "cohere",
         "framework": "transformers",
     },
+    "whisper-base": {
+        "name": "Whisper Base",
+        "model_id": "openai/whisper-base",
+        "description": "OpenAI Whisper Base，99 种语言，需 16kHz 单声道",
+        "languages": ["auto", "zh", "en", "ja", "ko", "de", "fr", "es", "pt", "ar", "ru", "hi", "tr", "vi", "nl", "id", "it"],
+        "abbr": "whisper",
+        "framework": "whisper",
+    },
     "firered-asr2": {
         "name": "FireRedASR2-AED",
-        "model_id": "FireRedTeam/FireRedASR2-AED",
-        "description": "FireRedASR2 工业级多合一ASR系统（内置VAD/语种识别/标点），支持中/英/方言/中英混",
+        "model_id": "",
+        "description": "FireRedASR2 AED 模型，中/英文，自带 VAD+LID+标点",
         "languages": ["auto", "zh", "en"],
-        "abbr": "firered2",
+        "abbr": "firered",
         "framework": "firered",
     },
-    "paraformer": {
-        "name": "Paraformer-Large",
-        "model_id": "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
-        "description": "阿里 Paraformer 非自回归中文ASR，推理极快（FunASR）",
-        "languages": ["zh"],
-        "abbr": "paraformer",
+    "sensevoice-small": {
+        "name": "SenseVoiceSmall",
+        "model_id": "iic/SenseVoiceSmall",
+        "description": "阿里 SenseVoiceSmall，中/英/日/韩/粤语，含情感/事件标签",
+        "languages": ["auto", "zh", "en", "ja", "ko", "yue"],
+        "abbr": "svs",
+        "framework": "funasr",
     },
-    "whisper-v3": {
-        "name": "Whisper Large v3",
-        "model_id": "openai/whisper-large-v3",
-        "description": "OpenAI Whisper v3 多语言ASR，支持99种语言，高精度",
-        "languages": ["auto", "zh", "ja", "en", "ko", "yue", "fr", "de", "es", "pt", "it", "nl", "pl", "ar", "vi", "ru", "th"],
-        "abbr": "whisper3",
-        "framework": "whisper",
+    "paraformer-large": {
+        "name": "Paraformer-Large",
+        "model_id": "iic/speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+        "description": "阿里 Paraformer-Large，中文普通话专用，自带 VAD+标点",
+        "languages": ["zh"],
+        "abbr": "pf",
+        "framework": "funasr",
     },
 }
 
 # Models used for ASR comparison
-COMPARE_MODELS = ["qwen3-asr", "cohere-transcribe", "firered-asr2", "paraformer", "whisper-v3"]
+COMPARE_MODELS = ["qwen3-asr", "cohere-transcribe", "whisper-base", "firered-asr2", "sensevoice-small", "paraformer-large"]
 
 # --- Model singletons ---
 _asr_models: dict[tuple, object] = {}  # keyed by (model_key, device, use_fp16, use_flash_attn)
@@ -157,7 +186,7 @@ def _get_vad_model(device="cuda"):
         if _vad_model is not None:
             return _vad_model
         from funasr import AutoModel
-        _vad_model = AutoModel(model="fsmn-vad", device=device)
+        _vad_model = AutoModel(model="fsmn-vad", device=device, model_dir=MS_CACHE_DIR)
         return _vad_model
 
 
@@ -221,6 +250,8 @@ def _get_asr_model(model_key="qwen3-asr", device="cuda", use_fp16=True, use_flas
 
             model = Qwen3ASRModel.from_pretrained(
                 model_info["model_id"],
+                cache_dir=HF_CACHE_DIR,
+                local_files_only=True,
                 **load_kwargs,
             )
             if device != "cpu":
@@ -252,11 +283,31 @@ def _get_asr_model(model_key="qwen3-asr", device="cuda", use_fp16=True, use_flas
             else:
                 load_kwargs["device_map"] = "cpu"
 
-            processor = AutoProcessor.from_pretrained(model_info["model_id"], trust_remote_code=True)
-            model = AutoModelForSpeechSeq2Seq.from_pretrained(
-                model_info["model_id"],
-                **load_kwargs,
-            )
+            processor = AutoProcessor.from_pretrained(model_info["model_id"], trust_remote_code=True,
+                                                      cache_dir=HF_CACHE_DIR, local_files_only=True)
+            try:
+                model = AutoModelForSpeechSeq2Seq.from_pretrained(
+                    model_info["model_id"],
+                    cache_dir=HF_CACHE_DIR,
+                    local_files_only=True,
+                    **load_kwargs,
+                )
+            except (ValueError, RuntimeError) as e:
+                # Some models (e.g. cohere-transcribe) don't support SDPA/flash_attn.
+                # Fall back to eager attention implementation.
+                err_msg = str(e)
+                if "attn_implementation" in err_msg or "attention" in err_msg.lower():
+                    fallback_kwargs = {k: v for k, v in load_kwargs.items()
+                                       if k != "attn_implementation"}
+                    fallback_kwargs["attn_implementation"] = "eager"
+                    model = AutoModelForSpeechSeq2Seq.from_pretrained(
+                        model_info["model_id"],
+                        cache_dir=HF_CACHE_DIR,
+                        local_files_only=True,
+                        **fallback_kwargs,
+                    )
+                else:
+                    raise
             _asr_models[cache_key] = (model, processor)
         elif model_info.get("framework") == "firered":
             import config as _cfg
@@ -299,6 +350,7 @@ def _get_asr_model(model_key="qwen3-asr", device="cuda", use_fp16=True, use_flas
                 model=model_info["model_id"],
                 trust_remote_code=True,
                 device=device,
+                model_dir=MS_CACHE_DIR,
             )
             _asr_models[cache_key] = model
 
@@ -1017,30 +1069,10 @@ def run_asr_on_audio(
 
 # --- ASR Comparison ---
 
-def srt_to_plain_text(srt_path: str) -> str:
-    """Extract normalized plain text from an SRT file for comparison."""
-    if not os.path.exists(srt_path):
-        return ""
-    with open(srt_path, "r", encoding="utf-8") as f:
-        content = f.read()
-
-    lines = []
-    for line in content.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        # Skip index numbers and timestamp lines
-        if line.isdigit():
-            continue
-        if "-->" in line:
-            continue
-        lines.append(line)
-
-    text = " ".join(lines)
-    # Normalize: remove punctuation, normalize whitespace, lowercase
+def _normalize_text(text: str) -> str:
+    """Normalize text for comparison: NFKC, strip punctuation, lowercase, collapse whitespace."""
     import unicodedata
     text = unicodedata.normalize("NFKC", text)
-    # Remove all punctuation/symbols, keep only word characters and spaces
     cleaned = []
     for ch in text:
         cat = unicodedata.category(ch)
@@ -1048,10 +1080,120 @@ def srt_to_plain_text(srt_path: str) -> str:
             cleaned.append(ch)
         else:
             cleaned.append(" ")
-    text = "".join(cleaned)
-    # Collapse whitespace
-    text = " ".join(text.split())
-    return text.lower()
+    return " ".join("".join(cleaned).split()).lower()
+
+
+def _parse_srt_timestamp(ts: str) -> int:
+    """Parse SRT timestamp HH:MM:SS,mmm to milliseconds."""
+    ts = ts.strip().replace(",", ".")
+    parts = ts.split(":")
+    h = int(parts[0])
+    m = int(parts[1])
+    s_parts = parts[2].split(".")
+    s = int(s_parts[0])
+    ms = int(s_parts[1]) if len(s_parts) > 1 else 0
+    return h * 3600000 + m * 60000 + s * 1000 + ms
+
+
+def parse_srt_to_segments(srt_path: str) -> list:
+    """Parse an SRT file into a list of segment dicts.
+
+    Each segment: {index, start_ms, end_ms, text, normalized_text}
+    """
+    segments = []
+    if not os.path.exists(srt_path):
+        return segments
+
+    with open(srt_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    blocks = content.strip().split("\n\n")
+    for block in blocks:
+        lines = block.strip().splitlines()
+        if len(lines) < 2:
+            continue
+        # Line 0: index number
+        idx_line = lines[0].strip()
+        if not idx_line.isdigit():
+            continue
+        idx = int(idx_line)
+        # Line 1: timestamp "00:00:00,000 --> 00:00:02,500"
+        ts_line = lines[1].strip()
+        if "-->" not in ts_line:
+            continue
+        parts = ts_line.split("-->")
+        start_ms = _parse_srt_timestamp(parts[0])
+        end_ms = _parse_srt_timestamp(parts[1])
+        # Remaining lines: text (may span multiple lines)
+        text = " ".join(line.strip() for line in lines[2:] if line.strip())
+        if not text:
+            continue
+        segments.append({
+            "index": idx,
+            "start_ms": start_ms,
+            "end_ms": end_ms,
+            "text": text,
+            "normalized_text": _normalize_text(text),
+        })
+
+    return segments
+
+
+def _time_overlap(a_start: int, a_end: int, b_start: int, b_end: int) -> int:
+    """Return overlap duration in ms between two time ranges."""
+    return max(0, min(a_end, b_end) - max(a_start, b_start))
+
+
+def align_segments_by_time(segs_a: list, segs_b: list, min_overlap_ratio: float = 0.3) -> dict:
+    """Align segments from two SRTs by time overlap.
+
+    Returns:
+        aligned_pairs: list of (seg_a, seg_b, overlap_ms) for matched pairs
+        unmatched_a: list of seg_a with no match
+        unmatched_b: list of seg_b with no match
+    """
+    aligned_pairs = []
+    used_b = set()
+
+    for seg_a in segs_a:
+        best_b = None
+        best_overlap = 0
+        for j, seg_b in enumerate(segs_b):
+            if j in used_b:
+                continue
+            overlap = _time_overlap(
+                seg_a["start_ms"], seg_a["end_ms"],
+                seg_b["start_ms"], seg_b["end_ms"]
+            )
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_b = (j, seg_b)
+
+        if best_b and best_overlap > 0:
+            seg_b_dur = best_b[1]["end_ms"] - best_b[1]["start_ms"]
+            seg_a_dur = seg_a["end_ms"] - seg_a["start_ms"]
+            min_dur = min(seg_a_dur, seg_b_dur) if seg_b_dur > 0 else 0
+            overlap_ratio = best_overlap / min_dur if min_dur > 0 else 0
+            if overlap_ratio >= min_overlap_ratio:
+                used_b.add(best_b[0])
+                aligned_pairs.append((seg_a, best_b[1], best_overlap))
+
+    unmatched_a = [s for s in segs_a if not any(s is pair[0] for pair in aligned_pairs)]
+    unmatched_b = [s for j, s in enumerate(segs_b) if j not in used_b]
+
+    return {
+        "aligned_pairs": aligned_pairs,
+        "unmatched_a": unmatched_a,
+        "unmatched_b": unmatched_b,
+    }
+
+
+def srt_to_plain_text(srt_path: str) -> str:
+    """Extract normalized plain text from an SRT file for comparison."""
+    segments = parse_srt_to_segments(srt_path)
+    if not segments:
+        return ""
+    return " ".join(seg["normalized_text"] for seg in segments)
 
 
 def _levenshtein(s1: str, s2: str) -> int:
@@ -1089,6 +1231,180 @@ def compare_srt_texts(srt_path1: str, srt_path2: str) -> float:
     return round((dist / max_len) * 100, 1)
 
 
+def _compute_diff_chunks(text_a: str, text_b: str) -> list:
+    """Compute character-level diff between two texts using LCS backtracking.
+
+    Returns a list of chunk dicts:
+      {type: "equal"|"diff", text_a: str, text_b: str}
+    Groups consecutive same-type operations for readability.
+    """
+    a = text_a or ""
+    b = text_b or ""
+    if not a and not b:
+        return []
+    if not a:
+        return [{"type": "diff", "text_a": "", "text_b": b}]
+    if not b:
+        return [{"type": "diff", "text_a": a, "text_b": ""}]
+
+    m, n = len(a), len(b)
+    # Build LCS DP table
+    dp = [[0] * (n + 1) for _ in range(m + 1)]
+    for i in range(m):
+        for j in range(n):
+            if a[i] == b[j]:
+                dp[i + 1][j + 1] = dp[i][j] + 1
+            else:
+                dp[i + 1][j + 1] = max(dp[i][j + 1], dp[i + 1][j])
+
+    # Backtrack to produce diff ops
+    ops = []
+    i, j = m, n
+    while i > 0 or j > 0:
+        if i > 0 and j > 0 and a[i - 1] == b[j - 1]:
+            ops.append(("equal", a[i - 1], b[j - 1]))
+            i -= 1
+            j -= 1
+        elif j > 0 and (i == 0 or dp[i][j - 1] >= dp[i - 1][j]):
+            ops.append(("diff", "", b[j - 1]))
+            j -= 1
+        else:
+            ops.append(("diff", a[i - 1], ""))
+            i -= 1
+    ops.reverse()
+
+    # Group consecutive same-type ops into chunks
+    chunks = []
+    for op, ca, cb in ops:
+        if not chunks or chunks[-1]["type"] != op:
+            chunks.append({"type": op, "text_a": ca, "text_b": cb})
+        else:
+            chunks[-1]["text_a"] += ca
+            chunks[-1]["text_b"] += cb
+
+    return chunks
+
+
+def compare_srt_sentences(srt_path1: str, srt_path2: str) -> dict:
+    """Compare two SRT files sentence-by-sentence with time-based alignment.
+
+    Returns a dict with match_rate, overall diff and per-sentence breakdown
+    including character-level diff_chunks for highlighting.
+    """
+    segs_a = parse_srt_to_segments(srt_path1)
+    segs_b = parse_srt_to_segments(srt_path2)
+
+    if not segs_a and not segs_b:
+        return {
+            "overall_diff_percent": 0.0,
+            "match_rate": 100.0,
+            "sentence_results": [],
+            "matched_count": 0,
+            "unmatched_a": 0,
+            "unmatched_b": 0,
+        }
+    if not segs_a or not segs_b:
+        return {
+            "overall_diff_percent": 100.0,
+            "match_rate": 0.0,
+            "sentence_results": [],
+            "matched_count": 0,
+            "unmatched_a": len(segs_a),
+            "unmatched_b": len(segs_b),
+        }
+
+    alignment = align_segments_by_time(segs_a, segs_b)
+    sentence_results = []
+    total_weight = 0
+    weighted_diff_sum = 0.0
+
+    # Process aligned pairs
+    for seg_a, seg_b, overlap_ms in alignment["aligned_pairs"]:
+        start_ms = max(seg_a["start_ms"], seg_b["start_ms"])
+        end_ms = min(seg_a["end_ms"], seg_b["end_ms"])
+
+        t_a = seg_a["normalized_text"]
+        t_b = seg_b["normalized_text"]
+        if not t_a and not t_b:
+            diff = 0.0
+        elif not t_a or not t_b:
+            diff = 100.0
+        else:
+            dist = _levenshtein(t_a, t_b)
+            max_len = max(len(t_a), len(t_b))
+            diff = round((dist / max_len) * 100, 1)
+
+        weight = max(len(t_a), len(t_b))
+        weighted_diff_sum += diff * weight
+        total_weight += weight
+
+        # Compute character diff for this sentence pair
+        diff_chunks = _compute_diff_chunks(seg_a["text"], seg_b["text"])
+
+        sentence_results.append({
+            "idx_a": seg_a["index"],
+            "idx_b": seg_b["index"],
+            "start_ms": start_ms,
+            "end_ms": end_ms,
+            "text_a": seg_a["text"],
+            "text_b": seg_b["text"],
+            "diff_percent": diff,
+            "match_rate": round(100.0 - diff, 1),
+            "flagged": diff > 10.0,
+            "diff_chunks": diff_chunks,
+        })
+
+    # Process unmatched segments from A
+    for seg_a in alignment["unmatched_a"]:
+        weight = len(seg_a["normalized_text"])
+        weighted_diff_sum += 100.0 * weight
+        total_weight += weight
+        sentence_results.append({
+            "idx_a": seg_a["index"],
+            "idx_b": None,
+            "start_ms": seg_a["start_ms"],
+            "end_ms": seg_a["end_ms"],
+            "text_a": seg_a["text"],
+            "text_b": "",
+            "diff_percent": 100.0,
+            "match_rate": 0.0,
+            "flagged": True,
+            "diff_chunks": [{"type": "diff", "text_a": seg_a["text"], "text_b": ""}],
+        })
+
+    # Process unmatched segments from B
+    for seg_b in alignment["unmatched_b"]:
+        weight = len(seg_b["normalized_text"])
+        weighted_diff_sum += 100.0 * weight
+        total_weight += weight
+        sentence_results.append({
+            "idx_a": None,
+            "idx_b": seg_b["index"],
+            "start_ms": seg_b["start_ms"],
+            "end_ms": seg_b["end_ms"],
+            "text_a": "",
+            "text_b": seg_b["text"],
+            "diff_percent": 100.0,
+            "match_rate": 0.0,
+            "flagged": True,
+            "diff_chunks": [{"type": "diff", "text_a": "", "text_b": seg_b["text"]}],
+        })
+
+    overall_diff = round(weighted_diff_sum / total_weight, 1) if total_weight > 0 else 0.0
+
+    # Sort results by time
+    sentence_results.sort(key=lambda r: r["start_ms"])
+
+    return {
+        "overall_diff_percent": overall_diff,
+        "match_rate": round(100.0 - overall_diff, 1),
+        "sentence_results": sentence_results,
+        "matched_count": len(alignment["aligned_pairs"]),
+        "unmatched_a": len(alignment["unmatched_a"]),
+        "unmatched_b": len(alignment["unmatched_b"]),
+    }
+
+
 def compare_asr_pipeline(
     audio_path: str,
     language: str = "ja",
@@ -1118,70 +1434,92 @@ def compare_asr_pipeline(
     os.makedirs(srt_out_dir, exist_ok=True)
 
     if progress_callback:
-        progress_callback("vad", 5)
+        progress_callback("loading_models", 5)
+
+    # Preload both ASR models BEFORE any processing.
+    # This is critical when running in background/daemon threads (e.g. the server's
+    # comparison endpoints), because FunASR / ModelScope model downloads can hang
+    # indefinitely when triggered from daemon threads.
+    # Preloading here also gives the user immediate feedback that models are loading
+    # rather than an unexplained hang after VAD completes.
+    for model_key in compare_models:
+        model_info = ASR_MODELS.get(model_key)
+        if model_info is None:
+            raise ValueError(f"Unknown ASR model: {model_key}")
+        try:
+            _get_asr_model(model_key, device=device, use_compile=False)
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to load ASR model '{model_key}' ({model_info['name']}): {e}"
+            ) from e
+
+    if progress_callback:
+        progress_callback("vad", 8)
 
     model_results = {}
     srt_paths = {}
 
-    for i, model_key in enumerate(compare_models):
+    # Run both ASR models in parallel — each model processes the same audio
+    # independently. On GPUs with sufficient VRAM (e.g. RTX 4090 24GB), both
+    # models can reside in memory and run concurrently, nearly halving the
+    # total comparison time.
+    def _run_one_model(model_key):
+        """Run a single ASR model on the audio file. Returns (model_key, segments)."""
         model_info = ASR_MODELS[model_key]
-        abbr = model_info.get("abbr", model_key)
         framework = model_info.get("framework", "funasr")
 
-        if progress_callback:
-            progress_callback(f"asr_{model_key}", 10 + i * 40)
-
         if framework == "nemo":
-            segments = _nemo_asr_pipeline(
-                audio_path,
-                model_key=model_key,
-                language=language,
-                device=device,
-            )
+            segs = _nemo_asr_pipeline(audio_path, model_key=model_key,
+                                       language=language, device=device)
         elif framework == "transformers":
-            segments = _transformers_asr_pipeline(
-                audio_path,
-                model_key=model_key,
-                language=language,
-                device=device,
-            )
+            segs = _transformers_asr_pipeline(audio_path, model_key=model_key,
+                                               language=language, device=device)
+        elif framework == "whisper":
+            segs = _whisper_asr_pipeline(audio_path, model_key=model_key,
+                                          language=language, device=device)
         elif framework == "firered":
-            segments = _firered_asr_pipeline(
-                audio_path,
-                model_key=model_key,
-                language=language,
-                device=device,
-            )
+            segs = _firered_asr_pipeline(audio_path, model_key=model_key,
+                                          language=language, device=device)
         else:
-            segments = vad_asr_pipeline(
-                audio_path,
-                model_key=model_key,
-                language=language,
-                device=device,
-                progress_callback=None,
-                hotwords=hotwords,
-            )
+            segs = vad_asr_pipeline(audio_path, model_key=model_key,
+                                     language=language, device=device,
+                                     progress_callback=None, hotwords=hotwords)
+        return model_key, segs
 
-        srt_path = os.path.join(srt_out_dir, f"{base_name}_{abbr}.srt")
-        counter = 1
-        while os.path.exists(srt_path):
-            srt_path = os.path.join(srt_out_dir, f"{base_name}_{abbr}_{counter}.srt")
-            counter += 1
-
-        if segments:
-            segments_to_srt(segments, srt_path)
-        else:
-            with open(srt_path, "w", encoding="utf-8") as f:
-                f.write("")
-
-        model_results[model_key] = {
-            "model_key": model_key,
-            "model_name": model_info["name"],
-            "abbr": abbr,
-            "segments_count": len(segments) if segments else 0,
-            "srt_path": srt_path,
+    # Execute both models concurrently via thread pool
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as _executor:
+        _futures = {
+            _executor.submit(_run_one_model, mk): mk
+            for mk in compare_models
         }
-        srt_paths[model_key] = srt_path
+        for _future in concurrent.futures.as_completed(_futures):
+            mk, segments = _future.result()
+            model_info = ASR_MODELS[mk]
+            abbr = model_info.get("abbr", mk)
+
+            if progress_callback:
+                progress_callback(f"asr_{mk}", 10 + len(model_results) * 40)
+
+            srt_path = os.path.join(srt_out_dir, f"{base_name}_{abbr}.srt")
+            counter = 1
+            while os.path.exists(srt_path):
+                srt_path = os.path.join(srt_out_dir, f"{base_name}_{abbr}_{counter}.srt")
+                counter += 1
+
+            if segments:
+                segments_to_srt(segments, srt_path)
+            else:
+                with open(srt_path, "w", encoding="utf-8") as f:
+                    f.write("")
+
+            model_results[mk] = {
+                "model_key": mk,
+                "model_name": model_info["name"],
+                "abbr": abbr,
+                "segments_count": len(segments) if segments else 0,
+                "srt_path": srt_path,
+            }
+            srt_paths[mk] = srt_path
 
     if progress_callback:
         progress_callback("comparing", 90)
@@ -1192,10 +1530,11 @@ def compare_asr_pipeline(
         if mr["segments_count"] == 0:
             empty_models.append(mr["model_name"])
 
-    # Compare the two SRT outputs
-    diff_percent = compare_srt_texts(
+    # Sentence-level comparison
+    sentence_cmp = compare_srt_sentences(
         srt_paths[compare_models[0]], srt_paths[compare_models[1]]
     )
+    diff_percent = sentence_cmp["overall_diff_percent"]
     flagged = diff_percent > 10.0 or len(empty_models) > 0
 
     if progress_callback:
@@ -1208,6 +1547,306 @@ def compare_asr_pipeline(
         "results": model_results,
         "srt_paths": srt_paths,
         "diff_percent": diff_percent,
+        "match_rate": sentence_cmp["match_rate"],
         "flagged": flagged,
         "empty_models": empty_models,
+        "sentence_results": sentence_cmp["sentence_results"],
+        "matched_count": sentence_cmp["matched_count"],
+        "unmatched_a": sentence_cmp["unmatched_a"],
+        "unmatched_b": sentence_cmp["unmatched_b"],
+    }
+
+
+def _chunk_vad_segments(vad_segments: list, min_s: float = 9.0, max_s: float = 16.0) -> list:
+    """Split VAD segments into chunks of roughly min_s–max_s seconds.
+
+    Long segments are split evenly; short adjacent segments are merged when
+    the combined duration stays under max_s.
+    Returns [(start_ms, end_ms), ...] in chronological order.
+    """
+    if not vad_segments:
+        return []
+
+    MIN_MS = int(min_s * 1000)
+    MAX_MS = int(max_s * 1000)
+
+    # Merged pass: combine very short adjacent segments
+    merged = []
+    buf_start, buf_end = vad_segments[0]
+    for s, e in vad_segments[1:]:
+        gap = s - buf_end
+        total = e - buf_start
+        if gap < 2000 and total <= MAX_MS:
+            buf_end = e
+        else:
+            merged.append((buf_start, buf_end))
+            buf_start, buf_end = s, e
+    merged.append((buf_start, buf_end))
+
+    # Split pass: chunk long segments
+    chunks = []
+    for start_ms, end_ms in merged:
+        dur_ms = end_ms - start_ms
+        if dur_ms <= MAX_MS:
+            chunks.append((start_ms, end_ms))
+        else:
+            n = max(1, round(dur_ms / ((MIN_MS + MAX_MS) / 2)))
+            piece = dur_ms / n
+            for i in range(n):
+                s = int(start_ms + i * piece)
+                e = int(start_ms + (i + 1) * piece) if i < n - 1 else end_ms
+                chunks.append((s, e))
+
+    return chunks
+
+
+def _transcribe_segment(audio_path: str, model_key: str, language: str, device: str, hotwords: str = "") -> str:
+    """Transcribe a short audio file with a single ASR model. Returns plain text."""
+    model_info = ASR_MODELS[model_key]
+    framework = model_info.get("framework", "funasr")
+
+    if model_key in ("qwen3-asr",):
+        audio, sr = sf.read(audio_path, dtype="float32")
+        if audio.ndim > 1:
+            audio = audio.mean(axis=1)
+        model = _get_asr_model(model_key, device=device)
+        lang = _QWEN3_LANG_MAP.get(language) if language and language != "auto" else None
+        results = model.transcribe([(audio, sr)], language=lang, context=hotwords)
+        return " ".join((r.text or "").strip() for r in results if (r.text or "").strip())
+
+    elif framework == "firered":
+        model = _get_asr_model(model_key, device=device)
+        result = model.process(audio_path)
+        segs = result.get("sentences", [])
+        if not segs and result.get("text"):
+            return result["text"].strip()
+        return " ".join(s.get("text", "").strip() for s in segs if s.get("text", "").strip())
+
+    elif framework in ("transformers", "whisper"):
+        import torch
+        from transformers.audio_utils import load_audio
+        model, processor = _get_asr_model(model_key, device=device)
+        audio = load_audio(audio_path, sampling_rate=16000)
+        inputs = processor(audio, sampling_rate=16000, return_tensors="pt", language=language)
+        inputs = {k: v.to(model.device, dtype=model.dtype) for k, v in inputs.items()}
+        gen_kwargs = {"max_new_tokens": 256}
+        # Whisper language handling
+        if framework == "whisper" and language and language != "auto":
+            try:
+                gen_kwargs["forced_decoder_ids"] = processor.get_decoder_prompt_ids(
+                    language=language, task="transcribe"
+                )
+            except Exception:
+                pass
+        with torch.no_grad():
+            outputs = model.generate(**inputs, **gen_kwargs)
+        return processor.decode(outputs[0], skip_special_tokens=True).strip()
+
+    else:
+        # funasr / default: use AutoModel
+        model = _get_asr_model(model_key, device=device)
+        try:
+            results = model.generate(input=audio_path)
+        except Exception:
+            # Fallback: load audio and transcribe directly
+            audio, sr = sf.read(audio_path, dtype="float32")
+            if audio.ndim > 1:
+                audio = audio.mean(axis=1)
+            results = model.generate(input=audio)
+        if isinstance(results, list) and results:
+            texts = []
+            for r in results:
+                t = (r.get("text", "") if isinstance(r, dict) else (r.text if hasattr(r, "text") else str(r))).strip()
+                if t:
+                    texts.append(t)
+            return " ".join(texts)
+        return ""
+
+
+def segment_and_compare_pipeline(
+    audio_path: str,
+    language: str = "zh",
+    device: str = "cuda",
+    model_a: str = "qwen3-asr",
+    model_b: str = "cohere-transcribe",
+    hotwords: str = "",
+    segment_min_s: float = 9.0,
+    segment_max_s: float = 16.0,
+    progress_callback=None,
+    source_dir: str = "",
+) -> dict:
+    """Split audio into 10-15s segments via VAD, run two ASR models on each, compare.
+
+    1. Run VAD to find speech regions
+    2. Chunk speech into segment_min_s–segment_max_s pieces
+    3. Save each chunk as WAV in ASR_COMPARE_SEGMENTS_DIR/{audio_name}/
+    4. Run model_a and model_b on each segment
+    5. Compare normalized texts, compute match_rate
+    6. Return per-segment results
+
+    Returns dict with keys: audio_path, audio_name, source_dir, duration_sec,
+    segment_count, segments (list of per-segment dicts), model_a, model_b.
+    """
+    if not os.path.exists(audio_path):
+        raise FileNotFoundError(f"Audio not found: {audio_path}")
+
+    base_name = os.path.splitext(os.path.basename(audio_path))[0]
+    duration = get_audio_duration(audio_path)
+    duration_ms = int(duration * 1000)
+
+    # Output dir for segment WAVs
+    seg_out_dir = os.path.join(ASR_COMPARE_SEGMENTS_DIR, base_name)
+    os.makedirs(seg_out_dir, exist_ok=True)
+
+    if progress_callback:
+        progress_callback("loading_models", 2)
+
+    # Preload both ASR models BEFORE VAD and processing.
+    # Critical when running in background/daemon threads — model downloads
+    # from FunASR/ModelScope can hang indefinitely in daemon threads.
+    # Preloading gives immediate feedback that models are loading.
+    compare_models = [model_a, model_b]
+    for mk in compare_models:
+        mi = ASR_MODELS.get(mk)
+        if mi is None:
+            raise ValueError(f"Unknown ASR model: {mk}")
+        try:
+            _get_asr_model(mk, device=device, use_compile=False)
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to load ASR model '{mk}' ({mi['name']}): {e}"
+            ) from e
+
+    if progress_callback:
+        progress_callback("vad", 5)
+
+    # Step 1: VAD
+    vad_segments = run_vad(audio_path, device=device)
+    if not vad_segments:
+        # Fallback: treat whole audio as one segment (only if short enough)
+        if duration <= segment_max_s * 2:
+            vad_segments = [(0, duration_ms)]
+        else:
+            # Split whole audio into fixed chunks
+            chunk_ms = int((segment_min_s + segment_max_s) / 2 * 1000)
+            vad_segments = [(i * chunk_ms, min((i + 1) * chunk_ms, duration_ms))
+                            for i in range((duration_ms + chunk_ms - 1) // chunk_ms)]
+
+    # Step 2: Chunk into 10-15s pieces
+    chunks = _chunk_vad_segments(vad_segments, segment_min_s, segment_max_s)
+    if not chunks:
+        chunks = [(0, duration_ms)]
+
+    # Step 3: Load full audio, extract and save each segment
+    audio, sr = sf.read(audio_path, dtype="float32")
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+
+    segment_files = []
+    for i, (start_ms, end_ms) in enumerate(chunks):
+        start_samp = max(0, int(start_ms * sr / 1000))
+        end_samp = min(len(audio), int(end_ms * sr / 1000))
+        if end_samp <= start_samp:
+            continue
+        chunk = audio[start_samp:end_samp]
+        seg_name = f"{base_name}_seg{i + 1:03d}.wav"
+        seg_path = os.path.join(seg_out_dir, seg_name)
+        sf.write(seg_path, chunk, sr, subtype="PCM_16")
+        segment_files.append({
+            "index": i + 1,
+            "start_ms": start_ms,
+            "end_ms": end_ms,
+            "duration_s": round((end_ms - start_ms) / 1000, 1),
+            "wav_path": seg_path,
+            "name": seg_name,
+        })
+
+    total = len(segment_files)
+    if progress_callback:
+        progress_callback("segments_ready", 10)
+
+    # Step 4 & 5: Run both models on each segment and compare
+    model_a_info = ASR_MODELS[model_a]
+    model_b_info = ASR_MODELS[model_b]
+    segment_results = []
+
+    for idx, seg in enumerate(segment_files):
+        if progress_callback:
+            progress_callback(f"processing_{idx + 1}", 10 + int((idx / total) * 85))
+
+        # Run both models on the SAME segment in parallel
+        text_a = ""
+        text_b = ""
+        error_a = None
+        error_b = None
+
+        def _transcribe_a():
+            nonlocal text_a, error_a
+            try:
+                text_a = _transcribe_segment(seg["wav_path"], model_a, language, device, hotwords)
+            except Exception as e:
+                error_a = str(e)
+
+        def _transcribe_b():
+            nonlocal text_b, error_b
+            try:
+                text_b = _transcribe_segment(seg["wav_path"], model_b, language, device, hotwords)
+            except Exception as e:
+                error_b = str(e)
+
+        # Execute both transcriptions concurrently
+        t_a = threading.Thread(target=_transcribe_a, daemon=True)
+        t_b = threading.Thread(target=_transcribe_b, daemon=True)
+        t_a.start()
+        t_b.start()
+        t_a.join()
+        t_b.join()
+
+        # Compare
+        norm_a = _normalize_text(text_a)
+        norm_b = _normalize_text(text_b)
+
+        if not norm_a and not norm_b:
+            diff_percent = 0.0
+        elif not norm_a or not norm_b:
+            diff_percent = 100.0
+        else:
+            dist = _levenshtein(norm_a, norm_b)
+            max_len = max(len(norm_a), len(norm_b))
+            diff_percent = round((dist / max_len) * 100, 1)
+
+        match_rate = round(100.0 - diff_percent, 1)
+        diff_chunks = _compute_diff_chunks(text_a, text_b) if (text_a or text_b) else []
+
+        segment_results.append({
+            "seg_index": seg["index"],
+            "seg_name": seg["name"],
+            "start_ms": seg["start_ms"],
+            "end_ms": seg["end_ms"],
+            "duration_s": seg["duration_s"],
+            "wav_path": seg["wav_path"],
+            "text_a": text_a,
+            "text_b": text_b,
+            "error_a": error_a,
+            "error_b": error_b,
+            "diff_percent": diff_percent,
+            "match_rate": match_rate,
+            "flagged": diff_percent > 20.0,  # 20% diff = 80% match threshold
+            "diff_chunks": diff_chunks,
+            "user_action": None,
+        })
+
+    if progress_callback:
+        progress_callback("completed", 100)
+
+    return {
+        "audio_path": audio_path,
+        "audio_name": base_name,
+        "source_dir": source_dir,
+        "duration_sec": round(duration, 1),
+        "segment_count": len(segment_results),
+        "model_a": {"key": model_a, "name": model_a_info["name"], "abbr": model_a_info.get("abbr", model_a)},
+        "model_b": {"key": model_b, "name": model_b_info["name"], "abbr": model_b_info.get("abbr", model_b)},
+        "segments_dir": seg_out_dir,
+        "segments": segment_results,
     }

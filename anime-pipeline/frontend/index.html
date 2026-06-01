@@ -492,6 +492,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
 .cmp-result-table td { padding: 6px 12px; border-bottom: 1px solid var(--border); }
 .cmp-result-table tr:hover td { background: rgba(255,255,255,0.02); }
 .cmp-result-table .actions-cell { display: flex; gap: 6px; }
+.cmp-sent-row td { padding: 0 !important; border-bottom: 2px solid var(--border) !important; }
+.cmp-main-row { cursor: default; }
 
 /* Settings */
 .header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
@@ -1334,10 +1336,11 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
           <h3 style="margin:0;">音频文件夹</h3>
           <button class="btn btn-secondary" onclick="loadCmpFolderBrowser(_cmpFolderPath)" style="font-size:11px;padding:4px 10px;">刷新</button>
         </div>
-        <!-- Breadcrumb bar -->
+        <!-- Path input bar -->
         <div id="cmp-folder-breadcrumb" style="display:flex;align-items:center;gap:6px;margin-bottom:8px;padding:6px 10px;border-radius:6px;background:var(--bg2);border:1px solid var(--border);font-size:12px;">
           <button class="btn btn-secondary" onclick="cmpFolderGoUp()" style="font-size:11px;padding:2px 8px;flex-shrink:0;" id="btn-cmp-folder-up" disabled>⬆ 上级</button>
-          <span id="cmp-folder-current-path" style="flex:1;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left;">加载中...</span>
+          <input id="cmp-folder-path-input" type="text" onkeydown="if(event.key==='Enter')loadCmpFolderBrowser(this.value)" placeholder="输入文件夹路径，按回车跳转..." style="flex:1;font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);min-width:0;">
+          <button class="btn btn-secondary" onclick="loadCmpFolderBrowser(document.getElementById('cmp-folder-path-input').value)" style="font-size:11px;padding:2px 8px;flex-shrink:0;">跳转</button>
         </div>
         <!-- Subdirectory list -->
         <div id="cmp-folder-subdirs" class="file-list" style="max-height:400px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;">
@@ -1367,6 +1370,12 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
       <div style="flex:1;min-width:400px;">
         <!-- Settings -->
         <div style="margin-bottom:16px;padding:12px 16px;border-radius:8px;background:var(--bg2);border:1px solid var(--border);">
+          <!-- Mode toggle -->
+          <div style="display:flex;gap:6px;margin-bottom:10px;">
+            <button id="cmp-mode-file-btn" class="btn btn-secondary" onclick="switchCmpMode('file')" style="font-size:11px;padding:4px 12px;">整文件对比</button>
+            <button id="cmp-mode-seg-btn" class="btn btn-primary" onclick="switchCmpMode('seg')" style="font-size:11px;padding:4px 12px;">📦 分段对比</button>
+            <span id="cmp-seg-hint" style="font-size:10px;color:var(--text2);display:flex;align-items:center;">VAD分割10-15s片段逐一对比</span>
+          </div>
           <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;">
             <div style="flex:1;min-width:160px;">
               <label style="display:block;font-size:13px;color:var(--text2);margin-bottom:4px;">模型 A</label>
@@ -1422,37 +1431,61 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
               <div style="font-size:11px;color:var(--text2);">总计</div>
             </div>
             <div class="cmp-summary-item">
-              <div class="num" id="cmp-normal-num" style="color:var(--success);">0</div>
-              <div style="font-size:11px;color:var(--text2);">正常（差异≤10%）</div>
+              <div class="num" id="cmp-good-num" style="color:var(--success);">0</div>
+              <div style="font-size:11px;color:var(--text2);">匹配率≥阈值</div>
             </div>
             <div class="cmp-summary-item">
-              <div class="num" id="cmp-flagged-num" style="color:var(--danger);">0</div>
-              <div style="font-size:11px;color:var(--text2);">异常（差异>10%）</div>
+              <div class="num" id="cmp-low-num" style="color:var(--danger);">0</div>
+              <div style="font-size:11px;color:var(--text2);">匹配率&lt;阈值</div>
             </div>
             <div class="cmp-summary-item">
-              <div class="num" id="cmp-discarded-num" style="color:var(--warning);">0</div>
-              <div style="font-size:11px;color:var(--text2);">已舍弃</div>
+              <div class="num" id="cmp-deleted-num" style="color:var(--warning);">0</div>
+              <div style="font-size:11px;color:var(--text2);">已删除</div>
             </div>
           </div>
 
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-            <h4 style="margin:0;font-size:14px;">对比结果</h4>
-            <button class="btn btn-primary" id="btn-cmp-package" onclick="packageAsrCompareResults()" style="font-size:12px;padding:6px 16px;" disabled>打包结果</button>
+          <!-- Filter bar -->
+          <div id="cmp-filter-bar" style="display:flex;align-items:center;gap:10px;padding:8px 12px;margin-bottom:8px;border-radius:8px;background:var(--bg2);border:1px solid var(--border);flex-wrap:wrap;">
+            <label style="font-size:12px;color:var(--text2);white-space:nowrap;">
+              <input type="checkbox" id="cmp-filter-cb" onchange="renderCmpResults()" style="cursor:pointer;">
+              筛选
+            </label>
+            <select id="cmp-filter-dir" onchange="renderCmpResults()"
+              style="font-size:11px;padding:2px 4px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);">
+              <option value="below">低于</option>
+              <option value="above">高于</option>
+            </select>
+            <input id="cmp-filter-threshold" type="number" value="80" min="0" max="100" step="1"
+              onchange="renderCmpResults()" oninput="renderCmpResults()"
+              style="width:56px;padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;text-align:center;">
+            <span style="font-size:12px;color:var(--text2);">% 匹配率</span>
+            <span id="cmp-filter-count" style="font-size:11px;color:var(--accent);"></span>
+            <button class="btn btn-primary" id="btn-cmp-batch-keep" onclick="cmpBatchKeepSegments()"
+              style="font-size:11px;padding:4px 14px;margin-left:auto;display:none;">
+              保留筛选结果
+            </button>
+            <button class="btn" id="btn-cmp-batch-delete" onclick="cmpBatchDelete()"
+              style="font-size:11px;padding:4px 14px;background:var(--danger);color:#fff;display:none;">
+              删除筛选结果
+            </button>
+            <button class="btn btn-primary" id="btn-cmp-package" onclick="packageAsrCompareResults()"
+              style="font-size:11px;padding:4px 14px;" disabled>打包结果</button>
           </div>
 
           <div style="max-height:45vh;overflow-y:auto;border:1px solid var(--border);border-radius:8px;">
             <table class="cmp-result-table">
               <thead>
                 <tr>
-                  <th style="width:40%;">文件名</th>
-                  <th style="width:12%;">来源</th>
-                  <th style="width:10%;">差异</th>
-                  <th style="width:10%;">状态</th>
-                  <th style="width:28%;">操作</th>
+                  <th style="width:22%;">文件名</th>
+                  <th style="width:8%;">来源</th>
+                  <th style="width:8%;">匹配率</th>
+                  <th style="width:8%;">句子</th>
+                  <th style="width:8%;">状态</th>
+                  <th style="width:46%;">操作</th>
                 </tr>
               </thead>
               <tbody id="cmp-result-tbody">
-                <tr><td colspan="5" style="text-align:center;color:var(--text2);padding:20px;">等待处理完成...</td></tr>
+                <tr><td colspan="6" style="text-align:center;color:var(--text2);padding:20px;">等待处理完成...</td></tr>
               </tbody>
             </table>
           </div>
@@ -1716,10 +1749,14 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
         <button class="btn btn-secondary" style="font-size:10px;padding:3px 8px;" onclick="pvResetSteps()">恢复默认</button>
       </div>
       <div id="pv-step-list" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;"></div>
-      <div id="pv-duration-config" style="display:none;margin-top:8px;gap:8px;align-items:center;">
+      <div id="pv-duration-config" style="display:none;margin-top:8px;gap:8px;align-items:center;flex-wrap:wrap;">
         <label style="font-size:12px;color:var(--text2);white-space:nowrap;">每段时长（秒）:</label>
         <input id="pv-duration-sec" type="number" value="600" min="10" step="60" style="width:100px;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:13px;">
-        <span style="font-size:11px;color:var(--text2);">默认 600 秒 = 10 分钟</span>
+        <span style="font-size:11px;color:var(--text2);">默认 600 秒</span>
+        <label style="display:flex;align-items:center;gap:3px;cursor:pointer;margin-left:8px;">
+          <input type="checkbox" id="pv-keep-ends" style="cursor:pointer;">
+          <span style="font-size:11px;color:var(--text2);white-space:nowrap;">保留首尾分段</span>
+        </label>
       </div>
       <div id="pv-asr-config" style="display:none;margin-top:8px;gap:8px;align-items:center;flex-wrap:wrap;">
         <label style="font-size:12px;color:var(--text2);white-space:nowrap;">ASR:</label>
@@ -1836,7 +1873,14 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
 
   <!-- MFA 对齐 -->
   <div id="tab-mfa" class="tab">
-    <h3 style="margin:0 0 16px 0;">MFA 日语强制对齐</h3>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px;">
+      <h3 style="margin:0;">MFA <span id="mfa-lang-label">中文</span>强制对齐</h3>
+      <div style="display:flex;gap:4px;align-items:center;">
+        <span style="font-size:12px;color:var(--text2);">语言:</span>
+        <button id="mfa-lang-jp" class="btn btn-secondary" style="font-size:11px;padding:3px 12px;" onclick="mfaSwitchLanguage('jp')">日本語</button>
+        <button id="mfa-lang-zh" class="btn btn-primary" style="font-size:11px;padding:3px 12px;" onclick="mfaSwitchLanguage('zh')">中文</button>
+      </div>
+    </div>
 
     <!-- SRT Import Tool -->
     <details id="mfa-srt-tool" style="margin-bottom:12px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px 18px;">
@@ -1865,6 +1909,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
       </div>
       <div style="display:flex;gap:8px;margin-top:10px;align-items:center;">
         <button class="btn btn-success" onclick="mfaSrtImport()" id="btn-mfa-srt-import" disabled>导入到 JSONL</button>
+        <button class="btn btn-primary" onclick="mfaSrtToTxt()" id="btn-mfa-srt-totxt" disabled style="font-size:13px;">直接生成 TXT</button>
         <span id="mfa-srt-status" style="font-size:12px;color:var(--text2);"></span>
       </div>
       <div id="mfa-srt-preview" style="display:none;margin-top:10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px;">
@@ -1884,6 +1929,25 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
       <span style="align-self:center;color:var(--text2);">→</span>
       <div class="step-dot legend-dot" style="width:auto;padding:6px 14px;border-radius:8px;font-size:12px;">4. 后处理</div>
     </div>
+
+    <!-- Audio File Browser -->
+    <details id="mfa-audio-browser" style="margin-bottom:12px;background:var(--bg2);border:1px solid var(--accent);border-radius:8px;padding:14px 18px;">
+      <summary style="cursor:pointer;font-size:14px;font-weight:600;color:var(--accent);">🎵 选择音频 (统一入口)</summary>
+      <p style="font-size:12px;color:var(--text2);margin:8px 0;">选中音频文件后，自动填充下方所有步骤的路径。一键执行管线也将处理此音频。</p>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+        <button id="mfa-audio-back" class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaAudioNavigate('..')" disabled>⬆ 上级</button>
+        <div id="mfa-audio-breadcrumb" style="flex:1;font-size:11px;color:var(--text2);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;"></div>
+        <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaAudioBrowseOther()">浏览其他</button>
+      </div>
+      <div id="mfa-audio-file-list" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;background:var(--bg);margin-bottom:8px;">
+        <div class="empty-state" style="padding:20px;"><p>加载中...</p></div>
+      </div>
+      <div id="mfa-audio-selected" style="display:none;padding:8px 12px;background:rgba(233,69,96,0.1);border:1px solid var(--accent);border-radius:6px;font-size:12px;">
+        <span style="color:var(--accent);">▶ 已选中音频: </span><span id="mfa-audio-selected-name" style="color:var(--text);"></span>
+        <span id="mfa-audio-selected-info" style="color:var(--text2);margin-left:8px;"></span>
+      </div>
+      <button class="btn btn-primary" onclick="mfaAudioSyncToPipeline()" style="font-size:12px;padding:4px 14px;margin-top:4px;">应用到管线</button>
+    </details>
 
     <!-- Step 1: Trim Silence -->
     <details open id="mfa-section-1" style="margin-bottom:12px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px 18px;">
@@ -2018,8 +2082,9 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
     </details>
 
     <!-- Run-all button -->
-    <div style="display:flex;gap:10px;margin-bottom:16px;align-items:center;">
+    <div style="display:flex;gap:10px;margin-bottom:16px;align-items:center;flex-wrap:wrap;">
       <button class="btn btn-success" onclick="mfaRunAll()" id="btn-mfa-runall" style="padding:8px 24px;font-size:14px;">运行完整管线 (1→2→3→4)</button>
+      <button class="btn btn-secondary" onclick="mfaSyncPipeline()" style="font-size:12px;padding:6px 14px;" title="根据已填写的路径，自动填充后续步骤的输入输出目录">🔄 同步路径</button>
       <span style="font-size:12px;color:var(--text2);">自动按顺序执行全部 4 个步骤</span>
     </div>
 
@@ -2460,22 +2525,22 @@ function switchTab(name) {
   if (name === 'denoise') { loadDenoiseDirs(); loadUnreviewedDirs(); }
   if (name === 'denoise-review') { loadDreviewBaseDirs(); loadEmotionCounts('dreview-emotion-bar', '/api/denoise-review/emotion-counts'); }
   if (name === 'extract') { loadExtractFiles(); loadExtractedSubs(); }
-  if (name === 'asr') { loadAsrVideos(); loadAsrModels(); loadAsrResults(); restoreAsrInterruptedJobs(); loadHotwordConfigs(); }
+  if (name === 'asr') { loadAsrVideos(); loadAsrModels(); loadAsrResults(); restoreAsrInterruptedJobs(); loadHotwordConfigs(); loadFolderBrowser(_asrFolderPath || ''); }
   if (name === 'asr-compare') { if (!_cmpLoaded) { loadCmpFolderBrowser(_cmpFolderPath); loadAsrCompareModels(); _cmpLoaded = true; } restoreAsrCompareInterruptedJobs(); loadHotwordConfigs(); }
   if (name === 'stitch') loadStitchVideos();
   if (name === 'split') {
-    if (!window._splitLoaded) { loadSplitFolderBrowser(''); loadSplitClipDirs(); window._splitLoaded = true; }
+    if (!window._splitLoaded) { loadSplitFolderBrowser(_serverPaths.SPLIT_DIR || ''); loadSplitClipDirs(); window._splitLoaded = true; }
   }
   if (name === 'pipelinevideo') {
     pvRenderStepConfig();
-    pvRestoreJobs();
+    if (!_pvRestored) { pvRestoreJobs(); _pvRestored = true; }
     loadHotwordConfigs();
   }
   if (name === 'hotwords') { loadHotwordConfigs(); }
   if (name === 'denoise') {
     if (!_denoiseJobsRestored) { restoreDenoiseJobs(); _denoiseJobsRestored = true; }
   }
-  if (name === 'mfa') { loadMfaJobs(); if (!_mfaSrtDir) mfaSrtLoadDir(''); }
+  if (name === 'mfa') { loadMfaJobs(); if (!_mfaSrtDir) mfaSrtLoadDir(''); if (!_mfaAudioDir) mfaAudioLoadDir('/mnt/project/ComicCut/anime-pipeline/data/pipelinevideo/'); if (!window._mfaWired) { mfaApplySettingsDefaults(); mfaWireAutoSync(); window._mfaWired = true; } }
 }
 
 // ============================================================
@@ -7440,14 +7505,32 @@ function restoreUiState() {
       if (typeof s !== 'undefined') _denoiseSteps[i].enabled = s;
     }
   }
-  // Restore pipeline video step config
-  if (_uiState.pvSteps) {
-    for (var i = 0; i < _pvSteps.length; i++) {
-      var s = _uiState.pvSteps[_pvSteps[i].key];
-      if (typeof s !== 'undefined') _pvSteps[i].enabled = s;
+  // Restore pipeline video step overrides from localStorage.
+  // Only overrides (diff from defaults) are saved, so new defaults
+  // take effect automatically — no version bumps needed.
+  try {
+    var overrides = localStorage.getItem('pv_steps_overrides');
+    if (overrides) {
+      var map = JSON.parse(overrides);
+      for (var i = 0; i < _pvSteps.length; i++) {
+        var v = map[_pvSteps[i].key];
+        if (typeof v !== 'undefined') _pvSteps[i].enabled = v;
+        // If key is not in overrides, keep the current default
+      }
+    }
+    var savedOrder = localStorage.getItem('pv_steps_order');
+    if (savedOrder) {
+      var orderKeys = JSON.parse(savedOrder);
+      var reordered = [];
+      for (var o = 0; o < orderKeys.length; o++) {
+        for (var j = 0; j < _pvSteps.length; j++) {
+          if (_pvSteps[j].key === orderKeys[o]) { reordered.push(_pvSteps[j]); break; }
+        }
+      }
+      if (reordered.length === _pvSteps.length) _pvSteps = reordered;
     }
     pvRenderStepConfig();
-  }
+  } catch(e) {}
   // Restore review dir
   if (_uiState.reviewDir) {
     _reviewDir = _uiState.reviewDir;
@@ -7458,6 +7541,7 @@ function restoreUiState() {
 // ASR Comparison
 // ============================================================
 var _cmpLoaded = false;
+var _cmpMode = 'seg';         // 'seg' (VAD split) or 'file' (whole file)
 var _cmpFolderPath = '';     // current browsing path for compare
 var _cmpFolderFiles = [];    // audio files in current folder
 var _cmpFolderSelected = {}; // selected file names
@@ -7465,12 +7549,13 @@ var _cmpJobId = null;
 var _cmpPollTimer = null;
 var _cmpResults = {};
 var _cmpModels = [];
+var _cmpDefaultPath = '\\\\RS3621\\CompanyShare-Confidential\\Persons\\jiangyichen\\Enhanced\\529';
 
 async function loadCmpFolderBrowser(path) {
-  if (!path) path = '';
+  if (!path) path = _cmpDefaultPath || '';
   try {
     var resp = await fetch(API + '/api/asr-compare/dir-browse?path=' + encodeURIComponent(path));
-    if (!resp.ok) { console.error('cmp dir-browse failed:', resp.status); return; }
+    if (!resp.ok) { toast('目录访问失败: ' + resp.status + ' - 请检查路径是否存在', 'error'); return; }
     var data = await resp.json();
     _cmpFolderPath = data.current_path;
     _cmpFolderFiles = data.audio_files || [];
@@ -7479,8 +7564,9 @@ async function loadCmpFolderBrowser(path) {
       _cmpFolderSelected[_cmpFolderFiles[i].name] = true;
     }
 
-    // Breadcrumb
-    document.getElementById('cmp-folder-current-path').textContent = _cmpFolderPath || '/';
+    // Update path input and breadcrumb
+    var pathInput = document.getElementById('cmp-folder-path-input');
+    if (pathInput) pathInput.value = _cmpFolderPath || '';
     var upBtn = document.getElementById('btn-cmp-folder-up');
     upBtn.disabled = !data.parent_path;
 
@@ -7649,6 +7735,22 @@ function updateCmpLangs() {
   langSel.innerHTML = html;
 }
 
+function switchCmpMode(mode) {
+  _cmpMode = mode;
+  var isSeg = mode === 'seg';
+  document.getElementById('cmp-mode-file-btn').className = isSeg ? 'btn btn-secondary' : 'btn btn-primary';
+  document.getElementById('cmp-mode-seg-btn').className = isSeg ? 'btn btn-primary' : 'btn btn-secondary';
+  document.getElementById('cmp-seg-hint').style.display = isSeg ? '' : 'none';
+  // Update summary labels for segmented mode
+  document.getElementById('cmp-good-label').textContent = isSeg ? '匹配率≥阈值' : '匹配率≥阈值';
+  document.getElementById('cmp-low-label').textContent = isSeg ? '匹配率<阈值' : '匹配率<阈值';
+  // Re-render results if any
+  if (Object.keys(_cmpResults).length) {
+    renderCmpSummary();
+    renderCmpResults();
+  }
+}
+
 function runAsrCompareAll() {
   var folderPath = _cmpFolderPath;
   if (!folderPath) { toast('请选择音频文件夹', 'error'); return; }
@@ -7664,6 +7766,7 @@ function runAsrCompareAll() {
   var lang = document.getElementById('cmp-lang-select').value || 'ja';
   var device = document.getElementById('cmp-device-select').value || 'cuda';
   var hotwords = document.getElementById('cmp-hotwords').value.trim();
+  var isSeg = _cmpMode === 'seg';
 
   document.getElementById('cmp-progress').style.display = 'block';
   document.getElementById('cmp-progress-fill').style.width = '0%';
@@ -7675,7 +7778,8 @@ function runAsrCompareAll() {
   document.getElementById('btn-cmp-run').textContent = '处理中...';
   _cmpResults = {};
 
-  var url = API + '/api/asr-compare/run-all?model_a=' + encodeURIComponent(models.a) +
+  var endpoint = isSeg ? 'run-segmented' : 'run-all';
+  var url = API + '/api/asr-compare/' + endpoint + '?model_a=' + encodeURIComponent(models.a) +
     '&model_b=' + encodeURIComponent(models.b) +
     '&language=' + encodeURIComponent(lang) +
     '&device=' + encodeURIComponent(device) +
@@ -7773,24 +7877,249 @@ function stopAsrCompare() {
   }).catch(function(e) { toast('中止失败: ' + e.message, 'error'); });
 }
 
+function _cmpGetThreshold() {
+  var el = document.getElementById('cmp-filter-threshold');
+  return el ? parseFloat(el.value) || 80 : 80;
+}
+
+function _cmpGetMatchRate(r) {
+  if (r.match_rate != null) return r.match_rate;
+  if (r.diff_percent != null) return Math.round((100 - r.diff_percent) * 10) / 10;
+  return 0;
+}
+
 function renderCmpSummary() {
+  var threshold = _cmpGetThreshold();
   var paths = Object.keys(_cmpResults);
-  var total = paths.length;
-  var normal = 0, flagged = 0, discarded = 0;
-  for (var i = 0; i < paths.length; i++) {
-    var r = _cmpResults[paths[i]];
-    if (r.user_action === 'discarded') { discarded++; }
-    else if (r.flagged && r.user_action !== 'kept') { flagged++; }
-    else { normal++; }
+  var isSeg = _cmpMode === 'seg';
+
+  if (isSeg) {
+    // Segment mode: count segments across all files
+    var totalSeg = 0, goodSeg = 0, lowSeg = 0, deletedSeg = 0;
+    for (var i = 0; i < paths.length; i++) {
+      var result = _cmpResults[paths[i]];
+      var segs = result.segments || [];
+      for (var j = 0; j < segs.length; j++) {
+        var s = segs[j];
+        totalSeg++;
+        if (s.user_action === 'deleted') { deletedSeg++; }
+        else if (_cmpGetMatchRate(s) < threshold) { lowSeg++; }
+        else { goodSeg++; }
+      }
+    }
+    document.getElementById('cmp-total-num').textContent = totalSeg;
+    document.getElementById('cmp-good-num').textContent = goodSeg;
+    document.getElementById('cmp-low-num').textContent = lowSeg;
+    document.getElementById('cmp-deleted-num').textContent = deletedSeg;
+  } else {
+    var total = paths.length;
+    var good = 0, low = 0, deleted = 0;
+    for (var i = 0; i < paths.length; i++) {
+      var r = _cmpResults[paths[i]];
+      if (r.user_action === 'deleted' || r.user_action === 'discarded') { deleted++; }
+      else if (_cmpGetMatchRate(r) < threshold) { low++; }
+      else { good++; }
+    }
+    document.getElementById('cmp-total-num').textContent = total;
+    document.getElementById('cmp-good-num').textContent = good;
+    document.getElementById('cmp-low-num').textContent = low;
+    document.getElementById('cmp-deleted-num').textContent = deleted;
   }
-  document.getElementById('cmp-total-num').textContent = total;
-  document.getElementById('cmp-normal-num').textContent = normal;
-  document.getElementById('cmp-flagged-num').textContent = flagged;
-  document.getElementById('cmp-discarded-num').textContent = discarded;
   document.getElementById('cmp-summary').style.display = 'block';
 }
 
+function _fmtMs(ms) {
+  if (ms == null) return '--:--';
+  var s = Math.floor(ms / 1000);
+  var m = Math.floor(s / 60);
+  s = s % 60;
+  return m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+function _renderDiffChunks(chunks) {
+  if (!chunks || !chunks.length) return escapeHtml('(空)');
+  var html = '';
+  for (var c = 0; c < chunks.length; c++) {
+    var chunk = chunks[c];
+    var t = escapeHtml(chunk.text_a || chunk.text_b || '');
+    if (chunk.type === 'equal') {
+      html += t;
+    } else {
+      html += '<mark style="background:#ff6b6b33;color:var(--danger);border-radius:2px;padding:0 1px;">' + t + '</mark>';
+    }
+  }
+  return html;
+}
+
+function _renderDiffSide(chunks, side) {
+  // side: 'a' or 'b'
+  if (!chunks || !chunks.length) return escapeHtml('(空)');
+  var html = '';
+  for (var c = 0; c < chunks.length; c++) {
+    var chunk = chunks[c];
+    var t = escapeHtml(chunk['text_' + side] || '');
+    if (chunk.type === 'equal') {
+      html += t;
+    } else if (chunk['text_' + side]) {
+      html += '<mark style="background:#ff6b6b33;color:var(--danger);border-radius:2px;padding:0 1px;">' + t + '</mark>';
+    }
+  }
+  return html || escapeHtml('(空)');
+}
+
 function renderCmpResults() {
+  var isSeg = _cmpMode === 'seg';
+  if (isSeg) {
+    _renderSegmentedResults();
+  } else {
+    _renderFileResults();
+  }
+}
+
+function _renderSegmentedResults() {
+  // Flatten all segments from all files
+  var allSegs = [];
+  var paths = Object.keys(_cmpResults);
+  for (var i = 0; i < paths.length; i++) {
+    var result = _cmpResults[paths[i]];
+    var segs = result.segments || [];
+    for (var j = 0; j < segs.length; j++) {
+      var s = segs[j];
+      s._parent_audio_name = result.audio_name || '';
+      s._parent_source_dir = result.source_dir || '';
+      s._parent_audio_path = result.audio_path || '';
+      s._model_a = (result.model_a || {}).abbr || 'A';
+      s._model_b = (result.model_b || {}).abbr || 'B';
+      allSegs.push(s);
+    }
+  }
+
+  // Filter
+  var filterOn = document.getElementById('cmp-filter-cb').checked;
+  var threshold = _cmpGetThreshold();
+  var filterDir = document.getElementById('cmp-filter-dir').value || 'below';
+  var filtered = [];
+  for (var i = 0; i < allSegs.length; i++) {
+    if (filterOn) {
+      if (allSegs[i].user_action === 'deleted') continue;
+      var mr = _cmpGetMatchRate(allSegs[i]);
+      if (filterDir === 'below' ? mr >= threshold : mr < threshold) continue;
+    }
+    filtered.push(allSegs[i]);
+  }
+
+  var tbody = document.getElementById('cmp-result-tbody');
+  if (!allSegs.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:20px;">无分段结果</td></tr>';
+    document.getElementById('cmp-filter-count').textContent = '';
+    document.getElementById('btn-cmp-batch-delete').style.display = 'none';
+    document.getElementById('btn-cmp-batch-keep').style.display = 'none';
+    return;
+  }
+
+  // Count below/above threshold
+  var matchDesc = filterDir === 'below' ? '低于' : '高于';
+  var belowCount = 0, aboveCount = 0;
+  for (var i = 0; i < allSegs.length; i++) {
+    if (allSegs[i].user_action === 'deleted') continue;
+    if (_cmpGetMatchRate(allSegs[i]) < threshold) belowCount++; else aboveCount++;
+  }
+  document.getElementById('cmp-filter-count').textContent = filterOn
+    ? '显示 ' + filtered.length + '/' + allSegs.length + ' 段'
+    : (belowCount + '段<' + threshold + '%, ' + aboveCount + '段≥');
+  document.getElementById('btn-cmp-batch-delete').style.display = (filterOn && filtered.length > 0) ? '' : 'none';
+  document.getElementById('btn-cmp-batch-keep').style.display = (filterOn && filtered.length > 0) ? '' : 'none';
+
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:20px;">筛选结果为空</td></tr>';
+    return;
+  }
+
+  var html = '';
+  var lastAudio = '';
+  for (var i = 0; i < filtered.length; i++) {
+    var seg = filtered[i];
+    var matchRate = _cmpGetMatchRate(seg);
+    var matchStr = seg.match_rate != null ? matchRate + '%' : '—';
+    var rateClass = matchRate >= threshold ? 'normal' : 'flagged';
+    var segDur = seg.duration_s || 0;
+
+    // Audio group header
+    if (seg._parent_audio_name !== lastAudio) {
+      lastAudio = seg._parent_audio_name;
+      html += '<tr style="background:var(--bg2);"><td colspan="6" style="padding:6px 12px;font-size:12px;font-weight:600;color:var(--accent);">' +
+        '📁 ' + escapeHtml(seg._parent_audio_name) +
+        (seg._parent_source_dir ? ' <span style="color:var(--text2);font-weight:400;">(' + escapeHtml(seg._parent_source_dir) + ')</span>' : '') +
+        '</td></tr>';
+    }
+
+    var rowId = 'cmp-seg-' + i;
+    var statusHtml = '';
+    if (seg.user_action === 'deleted') {
+      statusHtml = '<span style="color:var(--warning);">已删除</span>';
+      rateClass = 'flagged';
+    } else if (seg.error_a || seg.error_b) {
+      statusHtml = '<span style="color:var(--danger);">错误</span>';
+      rateClass = 'flagged';
+    } else if (matchRate < threshold) {
+      statusHtml = '<span style="color:var(--danger);font-weight:600;">⚠ 低于阈值</span>';
+    } else {
+      statusHtml = '<span style="color:var(--success);">✓ 正常</span>';
+    }
+
+    var actionsHtml = seg.user_action === 'deleted'
+      ? '<span style="color:var(--text2);font-size:11px;">已删除</span>'
+      : '<div class="actions-cell">' +
+          '<button class="btn btn-primary" style="font-size:10px;padding:3px 10px;" onclick="cmpKeepSegment(\'' + safeAttr(seg.wav_path) + '\')">保留</button>' +
+          '<button class="btn" style="font-size:10px;padding:3px 10px;background:var(--danger);color:#fff;" onclick="cmpDeleteSegment(\'' + safeAttr(seg.wav_path) + '\',\'' + i + '\')">删除</button>' +
+        '</div>';
+
+    var expandBtn = (seg.text_a || seg.text_b)
+      ? '<button class="btn btn-secondary" style="font-size:10px;padding:2px 6px;" onclick="cmpToggleSentences(\'' + rowId + '\')" title="展开文本对比">▼</button>'
+      : '';
+
+    html += '<tr id="' + rowId + '" class="cmp-main-row">' +
+      '<td style="font-size:12px;white-space:nowrap;">' +
+        '<span style="color:var(--text2);">#' + (seg.seg_index || '—') + '</span> ' +
+        _fmtMs(seg.start_ms) + '–' + _fmtMs(seg.end_ms) +
+        ' <span style="color:var(--text2);font-size:10px;">(' + segDur + 's)</span>' +
+      '</td>' +
+      '<td style="color:var(--text2);font-size:11px;">' + escapeHtml(seg._parent_source_dir || '—').substring(0, 12) + '</td>' +
+      '<td><span class="cmp-diff-badge ' + rateClass + '">' + matchStr + '</span></td>' +
+      '<td style="font-size:10px;color:var(--text2);">' +
+        (seg.text_a ? seg.text_a.length : 0) + '/' + (seg.text_b ? seg.text_b.length : 0) + '字</td>' +
+      '<td>' + statusHtml + '</td>' +
+      '<td style="white-space:nowrap;">' + expandBtn + ' ' + actionsHtml + '</td>' +
+    '</tr>';
+
+    // Detail row with text comparison
+    if (seg.text_a || seg.text_b) {
+      var chunks = seg.diff_chunks || [];
+      html += '<tr id="' + rowId + '-sent" class="cmp-sent-row" style="display:none;">' +
+        '<td colspan="6" style="padding:0;">' +
+        '<div style="padding:8px 12px;background:var(--bg2);border-top:2px solid var(--accent);max-height:250px;overflow-y:auto;">' +
+        '<div style="font-size:11px;color:var(--text2);margin-bottom:6px;">' +
+        '红色高亮 = 不一致内容 | ' + seg._model_a + '=' + (seg.text_a && seg.text_a.length || 0) + '字, ' +
+        seg._model_b + '=' + (seg.text_b && seg.text_b.length || 0) + '字' +
+        '</div>' +
+        '<div style="display:flex;gap:8px;font-size:11px;word-break:break-all;">' +
+        '<div style="flex:1;min-width:0;padding:6px 8px;border-radius:4px;background:var(--bg);border:1px solid var(--border);">' +
+        '<span style="color:var(--accent);font-size:10px;font-weight:600;">' + seg._model_a + ':</span><br>' +
+        (seg.error_a ? '<span style="color:var(--danger);">错误: ' + escapeHtml(seg.error_a) + '</span>'
+                     : _renderDiffSide(chunks, 'a')) +
+        '</div>' +
+        '<div style="flex:1;min-width:0;padding:6px 8px;border-radius:4px;background:var(--bg);border:1px solid var(--border);">' +
+        '<span style="color:var(--warning);font-size:10px;font-weight:600;">' + seg._model_b + ':</span><br>' +
+        (seg.error_b ? '<span style="color:var(--danger);">错误: ' + escapeHtml(seg.error_b) + '</span>'
+                     : _renderDiffSide(chunks, 'b')) +
+        '</div>' +
+        '</div></div></td></tr>';
+    }
+  }
+  tbody.innerHTML = html;
+}
+
+function _renderFileResults() {
   var results = [];
   var paths = Object.keys(_cmpResults);
   for (var i = 0; i < paths.length; i++) {
@@ -7800,60 +8129,172 @@ function renderCmpResults() {
     return (a.source_dir || '').localeCompare(b.source_dir || '') || (a.audio_name || '').localeCompare(b.audio_name || '');
   });
 
+  // Filter
+  var filterOn = document.getElementById('cmp-filter-cb').checked;
+  var threshold = _cmpGetThreshold();
+  var filtered = [];
+  for (var i = 0; i < results.length; i++) {
+    if (filterOn) {
+      // Always show deleted items
+      if (results[i].user_action === 'deleted' || results[i].user_action === 'discarded') continue;
+      if (_cmpGetMatchRate(results[i]) >= threshold) continue;
+    }
+    filtered.push(results[i]);
+  }
+
   var tbody = document.getElementById('cmp-result-tbody');
   if (!results.length) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:20px;">无结果</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:20px;">无结果</td></tr>';
+    document.getElementById('cmp-filter-count').textContent = '';
+    document.getElementById('btn-cmp-batch-delete').style.display = 'none';
     return;
   }
 
-  var html = '';
+  // Update filter count and batch delete button
+  var belowCount = 0;
   for (var i = 0; i < results.length; i++) {
-    var r = results[i];
-    var diff = r.diff_percent;
-    var diffStr = (diff != null) ? diff + '%' : '—';
-    var diffClass = (diff != null && diff > 10) ? 'flagged' : 'normal';
+    if (results[i].user_action !== 'deleted' && results[i].user_action !== 'discarded'
+        && _cmpGetMatchRate(results[i]) < threshold) belowCount++;
+  }
+  document.getElementById('cmp-filter-count').textContent = filterOn
+    ? '显示 ' + filtered.length + '/' + results.length + ' 条'
+    : (belowCount + ' 条低于 ' + threshold + '%');
+  document.getElementById('btn-cmp-batch-delete').style.display = (filterOn && filtered.length > 0) ? '' : 'none';
+
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:20px;">筛选结果为空</td></tr>';
+    return;
+  }
+
+  var modelNames = {};
+  for (var i = 0; i < results.length; i++) {
+    var rr = results[i];
+    if (rr.results) {
+      var ks = Object.keys(rr.results);
+      for (var k = 0; k < ks.length; k++) {
+        var m = rr.results[ks[k]];
+        if (m.abbr) modelNames[ks[k]] = m.abbr;
+      }
+    }
+  }
+  var modelKeys = Object.keys(modelNames);
+
+  var html = '';
+  for (var i = 0; i < filtered.length; i++) {
+    var r = filtered[i];
+    var matchRate = _cmpGetMatchRate(r);
+    var matchStr = (r.match_rate != null || r.diff_percent != null) ? matchRate + '%' : '—';
+    var rateClass = matchRate >= threshold ? 'normal' : 'flagged';
     var emptyModels = r.empty_models || [];
     var hasEmpty = emptyModels.length > 0;
-    if (hasEmpty) diffClass = 'flagged';
-    var statusHtml, actionsHtml = '';
+    if (hasEmpty) { rateClass = 'flagged'; matchStr = '空'; }
 
+    // Sentence-level stats
+    var sentences = r.sentence_results || [];
+    var matched = r.matched_count || 0;
+    var unmatA = r.unmatched_a || 0;
+    var unmatB = r.unmatched_b || 0;
+    var flaggedSent = 0;
+    for (var s = 0; s < sentences.length; s++) {
+      if (sentences[s].flagged) flaggedSent++;
+    }
+    var sentInfo = sentences.length ? matched + '对/' + flaggedSent + '异' : '—';
+    var rowId = 'cmp-row-' + i;
+
+    var statusHtml, actionsHtml = '';
     if (r.error) {
       statusHtml = '<span style="color:var(--danger);">错误</span>';
       actionsHtml = '<span style="color:var(--text2);font-size:11px;">' + escapeHtml(r.error) + '</span>';
+    } else if (r.user_action === 'deleted') {
+      statusHtml = '<span style="color:var(--warning);">已删除</span>';
+      rateClass = 'flagged';
+      actionsHtml = '<span style="color:var(--text2);font-size:11px;">已从文件夹中删除</span>';
     } else if (r.user_action === 'discarded') {
       statusHtml = '<span style="color:var(--warning);">已舍弃</span>';
-      diffClass = 'flagged';
+      rateClass = 'flagged';
       actionsHtml = '<span style="color:var(--text2);font-size:11px;">已移至废弃目录</span>';
     } else if (hasEmpty) {
-      diffStr = '空结果';
+      matchStr = '空结果';
       statusHtml = '<span style="color:var(--danger);font-weight:600;">⚠ 空结果</span>';
       actionsHtml = '<div style="font-size:10px;color:var(--text2);margin-bottom:4px;">' + escapeHtml(emptyModels.join(', ')) + ' 无输出</div>' +
         '<div class="actions-cell">' +
         '<button class="btn btn-primary" style="font-size:10px;padding:3px 10px;" onclick="cmpKeepAudio(\'' + safeAttr(r.audio_path) + '\')">保留</button>' +
-        '<button class="btn" style="font-size:10px;padding:3px 10px;background:var(--danger);color:#fff;" onclick="cmpDiscardAudio(\'' + safeAttr(r.audio_path) + '\')">舍弃</button>' +
-        '<button class="btn btn-secondary" style="font-size:10px;padding:3px 8px;" onclick="cmpViewSrts(\'' + safeAttr(JSON.stringify(r.srt_paths || {})) + '\')">查看字幕</button>' +
-      '</div>';
-    } else if (r.flagged && r.user_action !== 'kept') {
-      statusHtml = '<span style="color:var(--danger);font-weight:600;">⚠ 异常</span>';
-      actionsHtml = '<div class="actions-cell">' +
-        '<button class="btn btn-primary" style="font-size:10px;padding:3px 10px;" onclick="cmpKeepAudio(\'' + safeAttr(r.audio_path) + '\')">保留</button>' +
-        '<button class="btn" style="font-size:10px;padding:3px 10px;background:var(--danger);color:#fff;" onclick="cmpDiscardAudio(\'' + safeAttr(r.audio_path) + '\')">舍弃</button>' +
+        '<button class="btn" style="font-size:10px;padding:3px 10px;background:var(--danger);color:#fff;" onclick="cmpDeleteAudio(\'' + safeAttr(r.audio_path) + '\')">删除</button>' +
         '<button class="btn btn-secondary" style="font-size:10px;padding:3px 8px;" onclick="cmpViewSrts(\'' + safeAttr(JSON.stringify(r.srt_paths || {})) + '\')">查看字幕</button>' +
       '</div>';
     } else {
-      statusHtml = '<span style="color:var(--success);">✓ 正常</span>';
-      actionsHtml = '<button class="btn btn-secondary" style="font-size:10px;padding:3px 8px;" onclick="cmpViewSrts(\'' + safeAttr(JSON.stringify(r.srt_paths || {})) + '\')">查看字幕</button>';
+      if (matchRate < threshold) {
+        statusHtml = '<span style="color:var(--danger);font-weight:600;">⚠ 低于阈值</span>';
+      } else if (r.flagged && r.user_action !== 'kept') {
+        statusHtml = '<span style="color:var(--danger);font-weight:600;">⚠ 异常</span>';
+      } else {
+        statusHtml = '<span style="color:var(--success);">✓ 正常</span>';
+      }
+      actionsHtml = '<div class="actions-cell">' +
+        '<button class="btn btn-primary" style="font-size:10px;padding:3px 10px;" onclick="cmpKeepAudio(\'' + safeAttr(r.audio_path) + '\')">保留</button>' +
+        '<button class="btn" style="font-size:10px;padding:3px 10px;background:var(--danger);color:#fff;" onclick="cmpDeleteAudio(\'' + safeAttr(r.audio_path) + '\')">删除</button>' +
+        '<button class="btn btn-secondary" style="font-size:10px;padding:3px 8px;" onclick="cmpViewSrts(\'' + safeAttr(JSON.stringify(r.srt_paths || {})) + '\')">查看字幕</button>' +
+      '</div>';
     }
 
-    html += '<tr>' +
-      '<td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px;" title="' + escapeHtml(r.audio_name || '') + '">' + escapeHtml(r.audio_name || '—') + '</td>' +
+    // Expand button for sentence details
+    var expandBtn = '';
+    if (sentences.length) {
+      expandBtn = '<button class="btn btn-secondary" style="font-size:10px;padding:2px 6px;" onclick="cmpToggleSentences(\'' + rowId + '\')" title="展开句子对比">▼</button>';
+    }
+
+    html += '<tr id="' + rowId + '" class="cmp-main-row">' +
+      '<td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px;" title="' + escapeHtml(r.audio_name || '') + '">' + escapeHtml(r.audio_name || '—') + '</td>' +
       '<td style="color:var(--text2);font-size:11px;">' + escapeHtml(r.source_dir || '—') + '</td>' +
-      '<td><span class="cmp-diff-badge ' + diffClass + '">' + diffStr + '</span></td>' +
+      '<td><span class="cmp-diff-badge ' + rateClass + '">' + matchStr + '</span></td>' +
+      '<td style="font-size:11px;">' + sentInfo + '</td>' +
       '<td>' + statusHtml + '</td>' +
-      '<td>' + actionsHtml + '</td>' +
+      '<td style="white-space:nowrap;">' + expandBtn + ' ' + actionsHtml + '</td>' +
     '</tr>';
+
+    // Sentence detail row (hidden by default)
+    if (sentences.length) {
+      html += '<tr id="' + rowId + '-sent" class="cmp-sent-row" style="display:none;">' +
+        '<td colspan="6" style="padding:0;">' +
+        '<div style="padding:8px 12px;background:var(--bg2);border-top:2px solid var(--accent);max-height:300px;overflow-y:auto;">' +
+        '<div style="font-size:11px;color:var(--text2);margin-bottom:6px;">' +
+        '句子对比: ' + matched + ' 对齐, ' + flaggedSent + ' 异常' +
+        (unmatA ? ', A独有' + unmatA : '') + (unmatB ? ', B独有' + unmatB : '') +
+        ' | <span style="color:var(--danger);">红色高亮</span> = 不一致内容' +
+        '</div>';
+      for (var s = 0; s < sentences.length; s++) {
+        var sent = sentences[s];
+        var sDiff = sent.diff_percent;
+        var sMatch = sent.match_rate || Math.round((100 - sDiff) * 10) / 10;
+        var sDiffClass = sDiff > 10 ? 'flagged' : 'normal';
+        var sFlag = sent.flagged ? ' ⚠' : '';
+        var chunks = sent.diff_chunks || [];
+        html += '<div style="margin-bottom:6px;padding:6px 8px;border-radius:4px;background:' + (sent.flagged ? 'rgba(255,107,107,0.08)' : 'var(--bg)') + ';border:1px solid var(--border);">' +
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">' +
+          '<span style="font-size:10px;color:var(--text2);white-space:nowrap;">' + _fmtMs(sent.start_ms) + '–' + _fmtMs(sent.end_ms) + '</span>' +
+          '<span style="font-size:10px;color:var(--text2);">#' + (sent.idx_a || '—') + ' / #' + (sent.idx_b || '—') + '</span>' +
+          '<span class="cmp-diff-badge ' + sDiffClass + '" style="font-size:10px;padding:1px 5px;">' + sMatch + '%' + sFlag + '</span>' +
+          '</div>' +
+          '<div style="display:flex;gap:8px;font-size:11px;">' +
+          '<div style="flex:1;min-width:0;"><span style="color:var(--accent);font-size:10px;">' + (modelKeys[0] || 'A') + ':</span> ' + _renderDiffSide(chunks, 'a') + '</div>' +
+          '<div style="flex:1;min-width:0;"><span style="color:var(--warning);font-size:10px;">' + (modelKeys[1] || 'B') + ':</span> ' + _renderDiffSide(chunks, 'b') + '</div>' +
+          '</div>' +
+        '</div>';
+      }
+      html += '</div></td></tr>';
+    }
   }
   tbody.innerHTML = html;
+}
+
+function cmpToggleSentences(rowId) {
+  var row = document.getElementById(rowId + '-sent');
+  if (!row) return;
+  if (row.style.display === 'none') {
+    row.style.display = '';
+  } else {
+    row.style.display = 'none';
+  }
 }
 
 function cmpKeepAudio(path) {
@@ -7872,21 +8313,133 @@ function cmpKeepAudio(path) {
   }).catch(function(e) { toast('操作失败: ' + e.message, 'error'); });
 }
 
-function cmpDiscardAudio(path) {
-  if (!confirm('确认舍弃此音频？音频将移至废弃目录，关联的字幕文件也会被移动。')) return;
-  fetch(API + '/api/asr-compare/discard', {
+function cmpDeleteAudio(path) {
+  if (!confirm('确认删除此音频？\n\n音频文件和关联的字幕文件将被永久删除，无法恢复。')) return;
+  fetch(API + '/api/asr-compare/delete', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path: path })
   }).then(function(resp) { return resp.json(); }).then(function(data) {
     if (data.status === 'ok') {
-      if (_cmpResults[path]) { _cmpResults[path].user_action = 'discarded'; _cmpResults[path].flagged = false; }
+      if (_cmpResults[path]) { _cmpResults[path].user_action = 'deleted'; _cmpResults[path].flagged = false; }
       renderCmpSummary();
       renderCmpResults();
       loadCmpFolderBrowser(_cmpFolderPath);
-      toast('已舍弃', 'success');
+      toast('已删除 ' + (data.files || []).length + ' 个文件', 'success');
     }
-  }).catch(function(e) { toast('操作失败: ' + e.message, 'error'); });
+  }).catch(function(e) { toast('删除失败: ' + e.message, 'error'); });
+}
+
+function cmpBatchDelete() {
+  var threshold = _cmpGetThreshold();
+  var paths = [];
+  var allPaths = Object.keys(_cmpResults);
+  for (var i = 0; i < allPaths.length; i++) {
+    var r = _cmpResults[allPaths[i]];
+    if (r.user_action === 'deleted' || r.user_action === 'discarded') continue;
+    if (_cmpGetMatchRate(r) < threshold) paths.push(allPaths[i]);
+  }
+  if (!paths.length) { toast('没有需要删除的音频', 'info'); return; }
+  if (!confirm('确认一键删除 ' + paths.length + ' 个音频？\n\n所有匹配率低于 ' + threshold + '% 的音频及关联字幕将被永久删除，无法恢复。')) return;
+
+  fetch(API + '/api/asr-compare/batch-delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths: paths })
+  }).then(function(resp) { return resp.json(); }).then(function(data) {
+    if (data.status === 'ok') {
+      var deleted = 0;
+      for (var j = 0; j < (data.results || []).length; j++) {
+        var dr = data.results[j];
+        if (dr.status === 'deleted') {
+          if (_cmpResults[dr.path]) { _cmpResults[dr.path].user_action = 'deleted'; _cmpResults[dr.path].flagged = false; }
+          deleted++;
+        }
+      }
+      renderCmpSummary();
+      renderCmpResults();
+      loadCmpFolderBrowser(_cmpFolderPath);
+      toast('已删除 ' + deleted + ' 个音频', 'success');
+    }
+  }).catch(function(e) { toast('批量删除失败: ' + e.message, 'error'); });
+}
+
+// --- Segment-level actions ---
+
+function _cmpFindSegmentByPath(wavPath) {
+  var paths = Object.keys(_cmpResults);
+  for (var i = 0; i < paths.length; i++) {
+    var segs = _cmpResults[paths[i]].segments || [];
+    for (var j = 0; j < segs.length; j++) {
+      if (segs[j].wav_path === wavPath) return segs[j];
+    }
+  }
+  return null;
+}
+
+function cmpKeepSegment(wavPath) {
+  fetch(API + '/api/asr-compare/keep-segments', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths: [wavPath] })
+  }).then(function(resp) { return resp.json(); }).then(function(data) {
+    if (data.status === 'ok') {
+      var seg = _cmpFindSegmentByPath(wavPath);
+      if (seg) seg.user_action = 'kept';
+      renderCmpSummary();
+      renderCmpResults();
+      toast('已保留到 ' + data.dest_dir, 'success');
+    }
+  }).catch(function(e) { toast('保留失败: ' + e.message, 'error'); });
+}
+
+function cmpDeleteSegment(wavPath, idx) {
+  if (!confirm('确认删除此分段音频？\n\n该音频将被永久删除，无法恢复。')) return;
+  fetch(API + '/api/asr-compare/delete-segments', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths: [wavPath] })
+  }).then(function(resp) { return resp.json(); }).then(function(data) {
+    if (data.status === 'ok') {
+      var seg = _cmpFindSegmentByPath(wavPath);
+      if (seg) seg.user_action = 'deleted';
+      renderCmpSummary();
+      renderCmpResults();
+      toast('已删除分段', 'success');
+    }
+  }).catch(function(e) { toast('删除失败: ' + e.message, 'error'); });
+}
+
+function cmpBatchKeepSegments() {
+  var threshold = _cmpGetThreshold();
+  var toKeep = [];
+  var paths = Object.keys(_cmpResults);
+  for (var i = 0; i < paths.length; i++) {
+    var segs = _cmpResults[paths[i]].segments || [];
+    for (var j = 0; j < segs.length; j++) {
+      if (segs[j].user_action !== 'deleted' && _cmpGetMatchRate(segs[j]) >= threshold) {
+        toKeep.push(segs[j].wav_path);
+      }
+    }
+  }
+  if (!toKeep.length) { toast('没有需要保留的分段', 'info'); return; }
+  if (!confirm('确认保留 ' + toKeep.length + ' 个匹配率≥' + threshold + '% 的分段？\n\n将复制到 kept 文件夹。')) return;
+
+  fetch(API + '/api/asr-compare/keep-segments', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths: toKeep })
+  }).then(function(resp) { return resp.json(); }).then(function(data) {
+    if (data.status === 'ok') {
+      for (var j = 0; j < toKeep.length; j++) {
+        var seg = _cmpFindSegmentByPath(toKeep[j]);
+        if (seg) seg.user_action = 'kept';
+      }
+      renderCmpSummary();
+      renderCmpResults();
+      toast('已保留 ' + data.kept + ' 个文件到 kept 目录', 'success');
+    }
+  }).catch(function(e) { toast('批量保留失败: ' + e.message, 'error'); });
 }
 
 function cmpViewSrts(pathsJson) {
@@ -7906,7 +8459,7 @@ function packageAsrCompareResults() {
   var paths = Object.keys(_cmpResults);
   for (var i = 0; i < paths.length; i++) {
     var r = _cmpResults[paths[i]];
-    if (r.user_action !== 'discarded' && !r.error) {
+    if (r.user_action !== 'discarded' && r.user_action !== 'deleted' && !r.error) {
       toPackage.push(r);
     }
   }
@@ -8409,22 +8962,26 @@ function splitFolderSelectFile(name, path, ext) {
 
   // Update output dir
   var baseName = name.replace(/\.[^.]+$/, '');
-  document.getElementById('split-output-dir').textContent = 'data/clips/' + baseName + '/';
-
-  // WAV mode adaptation: hide subtitle mode, output format, hw accel
-  var isAudio = (ext === '.wav');
-  document.getElementById('split-mode-subtitle-btn').style.display = isAudio ? 'none' : '';
-  document.getElementById('split-output-format-section').style.display = isAudio ? 'none' : '';
-  document.getElementById('split-hw-accel-section').style.display = isAudio ? 'none' : '';
-  if (isAudio && _splitMode === 'subtitle') {
-    switchSplitMode('duration');
+  if (isAudio && _splitFolderPath) {
+    // Audio: output to sibling 'clips' folder next to enhanced/subtitles
+    var parentDir = _splitFolderPath.replace(/\\/g, '/').replace(/\/$/, '');
+    parentDir = parentDir.substring(0, parentDir.lastIndexOf('/'));
+    document.getElementById('split-output-dir').textContent = parentDir + '/clips/' + baseName + '/';
+  } else {
+    document.getElementById('split-output-dir').textContent = 'data/clips/' + baseName + '/';
   }
 
-  // Load subtitles (video only)
-  if (!isAudio) {
-    loadSplitSubs();
+  // WAV mode adaptation: hide output format and hw accel (subtitle mode still available)
+  var isAudio = (ext === '.wav');
+  document.getElementById('split-output-format-section').style.display = isAudio ? 'none' : '';
+  document.getElementById('split-hw-accel-section').style.display = isAudio ? 'none' : '';
+  // Subtitle mode button always visible for both video and audio
+
+  // Load subtitles — for audio files, auto-detect from sibling subtitles folder
+  if (isAudio) {
+    loadSplitSubsForAudio(name);
   } else {
-    document.getElementById('split-sub-select').innerHTML = '<option value="">-- 音频文件不支持字幕模式 --</option>';
+    loadSplitSubs();
   }
   // Load existing clips for this file
   loadSplitClips();
@@ -8543,6 +9100,11 @@ function processNextSplitInQueue() {
     payload.padding = parseFloat(document.getElementById('split-padding').value) || 0.1;
     payload.group_count = parseInt(document.getElementById('split-group-count').value) || 1;
     payload.deduplicate = document.getElementById('split-deduplicate').checked;
+    if (isAudio && _splitFolderPath) {
+      var qParentDir = _splitFolderPath.replace(/\\/g, '/').replace(/\/$/, '');
+      qParentDir = qParentDir.substring(0, qParentDir.lastIndexOf('/'));
+      payload.output_dir = qParentDir + '/clips/' + item.name.replace(/\.[^.]+$/, '');
+    }
   } else if (_splitMode === 'duration') {
     var segDur = parseTimeInput(document.getElementById('split-seg-duration').value);
     if (!segDur || segDur <= 0) {
@@ -8615,8 +9177,6 @@ function processNextSplitInQueue() {
 }
 
 async function loadSplitSubs() {
-  // WAV audio files don't support subtitle mode
-  if (_splitFileExt === '.wav') return;
   var select = document.getElementById('split-sub-select');
   var preview = document.getElementById('split-sub-preview');
   select.innerHTML = '<option value="">-- 加载中 --</option>';
@@ -8675,6 +9235,67 @@ async function loadSplitSubs() {
     }
   } catch(e) {
     select.innerHTML = '<option value="">-- 加载失败 --</option>';
+  }
+}
+
+async function loadSplitSubsForAudio(audioName) {
+  // Look for subtitles in sibling 'subtitles' folder: ../subtitles/
+  var select = document.getElementById('split-sub-select');
+  select.innerHTML = '<option value="">-- 检测字幕中 --</option>';
+  _splitSubFiles = [];
+
+  if (!_splitFolderPath) {
+    select.innerHTML = '<option value="">-- 未选择文件夹 --</option>';
+    return;
+  }
+
+  // Compute sibling subtitles folder path
+  var parentPath = _splitFolderPath.replace(/\\/g, '/').replace(/\/$/, '');
+  var subtitlesFolder = parentPath.substring(0, parentPath.lastIndexOf('/')) + '/subtitles';
+
+  try {
+    var resp = await fetch(API + '/api/split/dir-browse?path=' + encodeURIComponent(subtitlesFolder) + '&scan_files=1');
+    if (!resp.ok) {
+      select.innerHTML = '<option value="">-- 未找到 subtitles 文件夹，可手动选择 --</option>';
+      return;
+    }
+    var data = await resp.json();
+    var subs = data.subtitle_files || [];
+    if (!subs.length) {
+      select.innerHTML = '<option value="">-- subtitles 文件夹为空，可手动选择 --</option>';
+      return;
+    }
+
+    // Build subtitle file list
+    _splitSubFiles = [];
+    for (var i = 0; i < subs.length; i++) {
+      _splitSubFiles.push({ name: subs[i].name, path: subs[i].full_path, size_kb: subs[i].size_kb || 0 });
+    }
+
+    // Match by base name
+    var audioBase = audioName.replace(/\.[^.]+$/, '').toLowerCase();
+    var html = '<option value="">-- 选择字幕文件 --</option>';
+    var matchedIdx = -1;
+    for (var i = 0; i < _splitSubFiles.length; i++) {
+      var subBase = _splitSubFiles[i].name.replace(/\.[^.]+$/, '').toLowerCase();
+      var sel = '';
+      if (subBase === audioBase) { sel = ' selected'; matchedIdx = i; }
+      html += '<option value="' + i + '"' + sel + '>' + escapeHtml(_splitSubFiles[i].name) + ' (' + (_splitSubFiles[i].size_kb || 0) + ' KB)</option>';
+    }
+    select.innerHTML = html;
+
+    // Show match result
+    var preview = document.getElementById('split-sub-preview');
+    if (matchedIdx >= 0) {
+      preview.textContent = '已自动匹配: ' + _splitSubFiles[matchedIdx].name;
+      preview.style.display = 'block';
+    } else {
+      preview.textContent = '未匹配到同名字幕，请手动选择';
+      preview.style.display = 'block';
+    }
+  } catch(e) {
+    console.error('loadSplitSubsForAudio:', e);
+    select.innerHTML = '<option value="">-- 加载失败，可手动选择 --</option>';
   }
 }
 
@@ -8770,11 +9391,6 @@ function onSplitSubSelect() {
 }
 
 function switchSplitMode(mode) {
-  // Block subtitle mode for WAV audio files
-  if (_splitFileExt === '.wav' && mode === 'subtitle') {
-    toast('WAV 音频文件不支持字幕分割模式', 'info');
-    return;
-  }
   _splitMode = mode;
   var buttons = document.querySelectorAll('.split-mode-tabs button');
   for (var i = 0; i < buttons.length; i++) {
@@ -8833,6 +9449,12 @@ async function runSplit() {
     payload.padding = parseFloat(document.getElementById('split-padding').value) || 0.1;
     payload.group_count = parseInt(document.getElementById('split-group-count').value) || 1;
     payload.deduplicate = document.getElementById('split-deduplicate').checked;
+    // Pass output_dir for audio: sibling clips folder
+    if (isAudio && _splitFolderPath) {
+      var parentDir = _splitFolderPath.replace(/\\/g, '/').replace(/\/$/, '');
+      parentDir = parentDir.substring(0, parentDir.lastIndexOf('/'));
+      payload.output_dir = parentDir + '/clips/' + _splitVideoName.replace(/\.[^.]+$/, '');
+    }
   } else if (_splitMode === 'duration') {
     var segDur = parseTimeInput(document.getElementById('split-seg-duration').value);
     if (!segDur || segDur <= 0) {
@@ -9052,8 +9674,14 @@ async function loadSplitClips() {
 // ============================================================
 var _settingsData = null;
 
+var _serverPaths = {};
+
 function loadSavedSettings() {
   fetch(API + '/api/settings').then(function(r) { return r.json(); }).then(function(data) {
+    // Store all paths for real-time sync across tabs
+    if (data.paths) {
+      for (var pk in data.paths) { _serverPaths[pk] = data.paths[pk]; }
+    }
     if (data.denoise_default_steps && data.denoise_default_steps.length) {
       for (var k = 0; k < STEP_DEFAULTS.length; k++) {
         STEP_DEFAULTS[k].enabled = data.denoise_default_steps.indexOf(STEP_DEFAULTS[k].key) >= 0;
@@ -9109,7 +9737,10 @@ var SETTINGS_CATEGORIES = [
   {title:'降噪 — 未审核音频',keys:['CLEANED_UNREVIEWED_DIR','DENOISED_APPROVED_DIR']},
   {title:'ASR 语音识别',keys:['ASR_DIR','ASR_AUDIO_DIR','ASR_SUBTITLE_DIR','HOTWORDS_DIR']},
   {title:'ASR 对比',keys:['ASR_COMPARE_DIR','ASR_COMPARE_SUBTITLE_DIR','ASR_COMPARE_AUDIO_DIR','ASR_COMPARE_OUTPUT_DIR','ASR_COMPARE_DISCARD_DIR']},
-  {title:'情绪分类',keys:['EMOTION_DIR','EMOTION_DENOISE_DIR']}
+  {title:'情绪分类',keys:['EMOTION_DIR','EMOTION_DENOISE_DIR']},
+  {title:'视频切割',keys:['SPLIT_DIR','CLIPS_DIR']},
+  {title:'MFA — 输入输出',keys:['MFA_RAW_WAV_DIR','MFA_WAV_DIR','MFA_TXT_DIR','MFA_ALIGNED_DIR','MFA_JSONL_DIR','MFA_POST_DIR','MFA_FILTERED_DIR','MFA_VALIDATE_DIR']},
+  {title:'MFA — 模型与字典',keys:['MFA_MODELS_DIR','MFA_TEMP_DIR','MFA_DICT_PATH']}
 ];
 
 var SETTINGS_PATH_LABELS = {
@@ -9122,7 +9753,14 @@ var SETTINGS_PATH_LABELS = {
   'ASR_COMPARE_DIR':'ASR 对比根目录','ASR_COMPARE_SUBTITLE_DIR':'ASR 对比字幕目录',
   'ASR_COMPARE_AUDIO_DIR':'ASR 对比音频目录','ASR_COMPARE_OUTPUT_DIR':'ASR 对比输出目录',
   'ASR_COMPARE_DISCARD_DIR':'ASR 对比丢弃目录',
-  'HOTWORDS_DIR':'热词配置目录'
+  'HOTWORDS_DIR':'热词配置目录',
+  'SPLIT_DIR':'切割输出目录',
+  'MFA_RAW_WAV_DIR':'MFA 原始WAV目录','MFA_WAV_DIR':'MFA 裁剪后WAV目录',
+  'MFA_TXT_DIR':'MFA TXT转写目录','MFA_ALIGNED_DIR':'MFA 对齐输出目录',
+  'MFA_JSONL_DIR':'MFA JSONL目录','MFA_POST_DIR':'MFA 后处理输出目录',
+  'MFA_FILTERED_DIR':'MFA 过滤输出目录','MFA_VALIDATE_DIR':'MFA 校验输出目录',
+  'MFA_MODELS_DIR':'MFA 模型目录','MFA_TEMP_DIR':'MFA 临时目录',
+  'MFA_DICT_PATH':'MFA 字典文件路径'
 };
 
 function openSettings() {
@@ -9299,6 +9937,53 @@ function populateSettingsAsrModels(asrModel, cmpModelA, cmpModelB) {
   }).catch(function() {});
 }
 
+// Mapping from MFA form field IDs to settings path keys
+var _MFA_FIELD_PATH_MAP = {
+  'mfa-trim-input': 'MFA_RAW_WAV_DIR',
+  'mfa-trim-output': 'MFA_WAV_DIR',
+  'mfa-gen-output': 'MFA_TXT_DIR',
+  'mfa-align-wav-dir': 'MFA_WAV_DIR',
+  'mfa-align-txt-dir': 'MFA_TXT_DIR',
+  'mfa-align-output': 'MFA_ALIGNED_DIR',
+  'mfa-align-temp': 'MFA_TEMP_DIR',
+  'mfa-val-txt-dir': 'MFA_TXT_DIR',
+  'mfa-val-wav-dir': 'MFA_WAV_DIR',
+  'mfa-val-output': 'MFA_VALIDATE_DIR',
+  'mfa-val-temp': 'MFA_TEMP_DIR',
+  'mfa-post-textgrid-dir': 'MFA_ALIGNED_DIR',
+  'mfa-post-output': 'MFA_POST_DIR',
+  'mfa-post-filtered': 'MFA_FILTERED_DIR',
+  'mfa-post-wav-dir': 'MFA_WAV_DIR',
+  'mfa-post-txt-dir': 'MFA_TXT_DIR',
+  'mfa-gen-dict': 'MFA_DICT_PATH'
+};
+
+function syncPathsToTabs() {
+  // Push settings paths to MFA form fields if the MFA tab has been loaded
+  for (var fieldId in _MFA_FIELD_PATH_MAP) {
+    var key = _MFA_FIELD_PATH_MAP[fieldId];
+    var val = _serverPaths[key];
+    if (val) {
+      var el = document.getElementById(fieldId);
+      if (el && !el.value) {
+        el.value = val;
+        el.placeholder = val;
+      }
+    }
+  }
+  // If MFA is already wired, re-sync the pipeline auto-fill
+  if (window._mfaWired) {
+    try { mfaSyncPipeline(); } catch(e) {}
+  }
+  // If split tab has been loaded, reset initial path to SPLIT_DIR
+  if (window._splitLoaded) {
+    if (_serverPaths.SPLIT_DIR) {
+      _splitFolderPath = _serverPaths.SPLIT_DIR;
+      try { loadSplitFolderBrowser(_splitFolderPath, true); loadSplitClipDirs(); } catch(e) {}
+    }
+  }
+}
+
 function saveSettings() {
   var paths = {};
   var inputs = document.querySelectorAll('[data-settings-key]');
@@ -9330,8 +10015,12 @@ function saveSettings() {
     body: JSON.stringify({paths: paths, denoise_default_steps: steps, pv_default_steps: pvSteps, config: configVals})
   }).then(function(r) { return r.json(); }).then(function(data) {
     if (data.status === 'ok') {
-      toast('设置已保存，刷新页面后生效', 'success');
+      toast('设置已保存，路径已实时同步', 'success');
       closeSettings();
+      // Update global path store for real-time sync
+      for (var pk in paths) { _serverPaths[pk] = paths[pk]; }
+      // Push paths to active tabs immediately
+      syncPathsToTabs();
       for (var k = 0; k < STEP_DEFAULTS.length; k++) {
         STEP_DEFAULTS[k].enabled = steps.indexOf(STEP_DEFAULTS[k].key) >= 0;
       }
@@ -9340,6 +10029,9 @@ function saveSettings() {
         PV_STEP_DEFAULTS[k].enabled = pvSteps.indexOf(PV_STEP_DEFAULTS[k].key) >= 0;
       }
       _pvSteps = JSON.parse(JSON.stringify(PV_STEP_DEFAULTS));
+      // Clear lazy-load flags so tabs pick up new paths on next visit
+      window._splitLoaded = false;
+      window._mfaWired = false;
     } else {
       toast('保存失败', 'error');
     }
@@ -9501,6 +10193,7 @@ function deleteHotwordConfig(name) {
 // Pipeline Video (视频管线)
 // ============================================================
 var _pvQueue = [];        // [{job_id, folder_name, files, stepsConfig, outputDir, status, progress, created_at, expanded}]
+var _pvRestored = false;  // only restore from backend once per page load
 var _pvPollTimer = null;
 var _pvFiles = [];
 var _pvSelected = {};
@@ -9512,7 +10205,7 @@ var PV_STEP_DEFAULTS = [
   {key: 'duration_split',   label: '时长切分',    enabled: true, config: {segment_duration: 600}},
   {key: 'convert',          label: 'WAV转换',     enabled: true},
   {key: 'music_separate',   label: 'BGM分离',     enabled: true},
-  {key: 'enhance',          label: '语音增强',    enabled: true},
+  {key: 'enhance',          label: '语音增强',    enabled: false},
   {key: 'super_resolve',    label: '超分辨率',    enabled: false},
   {key: 'asr',              label: 'ASR字幕识别', enabled: false},
   {key: 'cut',              label: '字幕切割',    enabled: false},
@@ -9707,11 +10400,19 @@ function pvBrowseOutputDir() {
 
 function _savePvSteps() {
   try {
-    var map = {};
+    // Only save steps that differ from defaults — avoids stale overrides
+    // when defaults change (e.g. enhance disabled by default now)
+    var overrides = {};
     for (var i = 0; i < _pvSteps.length; i++) {
-      map[_pvSteps[i].key] = _pvSteps[i].enabled;
+      var def = null;
+      for (var d = 0; d < PV_STEP_DEFAULTS.length; d++) {
+        if (PV_STEP_DEFAULTS[d].key === _pvSteps[i].key) { def = PV_STEP_DEFAULTS[d]; break; }
+      }
+      if (def && _pvSteps[i].enabled !== def.enabled) {
+        overrides[_pvSteps[i].key] = _pvSteps[i].enabled;
+      }
     }
-    localStorage.setItem('pv_steps_enabled', JSON.stringify(map));
+    localStorage.setItem('pv_steps_overrides', JSON.stringify(overrides));
     localStorage.setItem('pv_steps_order', JSON.stringify(_pvSteps.map(function(s) { return s.key; })));
   } catch(e) {}
 }
@@ -9739,6 +10440,7 @@ function pvStartPipeline() {
     if (_pvSteps[d].key === 'duration_split' && _pvSteps[d].enabled) {
       _pvSteps[d].config = _pvSteps[d].config || {};
       _pvSteps[d].config.segment_duration = parseInt(document.getElementById('pv-duration-sec').value) || 600;
+      _pvSteps[d].config.keep_ends = document.getElementById('pv-keep-ends').checked;
     }
     if (_pvSteps[d].key === 'asr' && _pvSteps[d].enabled) {
       _pvSteps[d].config = _pvSteps[d].config || {};
@@ -9792,13 +10494,17 @@ function pvStartQueuedBackend(idx) {
   if (idx >= _pvQueue.length) return;
   var item = _pvQueue[idx];
 
+  // Always use current step config (not saved) so user's latest settings apply
+  var currentSteps = pvGetEnabledSteps();
+  item.stepsConfig = currentSteps;
+
   fetch(API + '/api/pipeline-video/start', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
       folder_path: item.folder_name,
       file_paths: item.files.map(function(f) { return f.input_path; }),
-      steps: item.stepsConfig,
+      steps: currentSteps,
       output_dir: item.outputDir
     }),
   })
@@ -9964,12 +10670,7 @@ function pvRenderQueue() {
     if (isRunning) {
       html += '<button class="btn btn-secondary" onclick="pvCancelQueuedJob(' + i + ')" style="font-size:10px;padding:2px 8px;background:var(--danger);color:#fff;">中止</button>';
     }
-    if (isPending) {
-      html += '<button class="btn btn-secondary" onclick="pvDeleteQueuedJob(' + i + ')" style="font-size:10px;padding:2px 8px;color:var(--danger);">删除</button>';
-    }
-    if (isCompleted || isCancelled) {
-      html += '<button class="btn btn-secondary" onclick="pvRemoveFromQueue(' + i + ');pvRenderQueue();" style="font-size:10px;padding:2px 8px;">移除</button>';
-    }
+    html += '<button class="btn btn-secondary" onclick="pvDeleteQueuedJob(' + i + ')" style="font-size:10px;padding:2px 8px;color:var(--danger);">删除</button>';
     html += '</div></div>';
 
     if (item.expanded) {
@@ -10142,7 +10843,10 @@ function pvCancelQueuedJob(idx) {
 function pvDeleteQueuedJob(idx) {
   if (idx >= _pvQueue.length) return;
   var item = _pvQueue[idx];
-  if (!confirm('确定删除队列中的任务 #' + (idx + 1) + ' (' + item.folder_name + ') 吗？')) return;
+  var isRunning = item.status === 'running';
+  var msg = isRunning ? '确定删除正在执行的任务 #' + (idx + 1) + ' (' + item.folder_name + ') 吗？\n将先中止进程再删除。'
+            : '确定删除任务 #' + (idx + 1) + ' (' + item.folder_name + ') 吗？';
+  if (!confirm(msg)) return;
 
   var jobId = item.job_id;
   var isRealJob = jobId && !jobId.startsWith('pending_');
@@ -10155,15 +10859,25 @@ function pvDeleteQueuedJob(idx) {
     toast('任务已删除', 'info');
   };
 
-  if (isRealJob) {
-    fetch(API + '/api/pipeline-video/job/' + jobId, { method: 'DELETE' })
+  var deleteAndRemove = function() {
+    if (isRealJob) {
+      fetch(API + '/api/pipeline-video/job/' + jobId, { method: 'DELETE' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) { doRemove(); })
+        .catch(function() { doRemove(); });
+    } else {
+      doRemove();
+    }
+  };
+
+  if (isRunning && isRealJob) {
+    // Cancel first, then delete
+    fetch(API + '/api/pipeline-video/job/' + jobId + '/cancel', { method: 'POST' })
       .then(function(r) { return r.json(); })
-      .then(function(data) {
-        if (data.status === 'ok') doRemove();
-        else toast('删除失败', 'error');
-      }).catch(function() { doRemove(); });
+      .then(function() { deleteAndRemove(); })
+      .catch(function() { deleteAndRemove(); });
   } else {
-    doRemove();
+    deleteAndRemove();
   }
 }
 
@@ -10310,6 +11024,7 @@ function _loadPvQueueFromStorage() {
 
 function _clearPvQueueStorage() {
   try { localStorage.removeItem('pv_queue'); } catch(e) {}
+  _pvRestored = false;
 }
 
 function pvRestoreJobs() {
@@ -10360,9 +11075,23 @@ function pvRestoreJobs() {
         pvRenderQueue();
         startPvPolling();
       } else if (interrupted) {
+        // Restore pending items from localStorage too
+        if (stored) {
+          _pvQueue = [];
+          for (var s = 0; s < stored.length; s++) {
+            var si = stored[s];
+            if (si.status === 'completed' || si.status === 'cancelled') continue;
+            if (si.status === 'running') si.status = 'pending';
+            _pvQueue.push(si);
+          }
+          if (_pvQueue.length) {
+            _pvQueueHash = '';
+            document.getElementById('pv-queue-section').style.display = 'block';
+            pvRenderQueue();
+          }
+        }
         document.getElementById('pv-interrupted-section').style.display = 'block';
         pvRenderInterrupted(interrupted);
-        _clearPvQueueStorage();
       } else if (lastCompleted) {
         document.getElementById('pv-results-section').style.display = 'block';
         document.getElementById('pv-interrupted-section').style.display = 'none';
@@ -10387,8 +11116,8 @@ function pvRestoreJobs() {
         } else {
           _clearPvQueueStorage();
         }
-      } else {
-        // No backend jobs, but maybe there are pending items from localStorage
+      } else if (!backendJobs.length) {
+        // Genuinely no backend jobs — restore pending from localStorage
         if (stored && stored.length > 0) {
           _pvQueue = [];
           for (var s3 = 0; s3 < stored.length; s3++) {
@@ -10451,6 +11180,11 @@ async function pvDiscardInterrupted(jobId) {
     if (resp.ok) {
       toast('已丢弃', 'info');
       document.getElementById('pv-interrupted-section').style.display = 'none';
+      // Remove discarded job from queue if present, keep other pending items
+      _pvQueue = _pvQueue.filter(function(q) { return q.job_id !== jobId; });
+      _savePvQueue();
+      if (_pvQueue.length) pvRenderQueue();
+      else document.getElementById('pv-queue-section').style.display = 'none';
     } else { toast('丢弃失败: ' + (data.detail || ''), 'error'); }
   } catch(e) { toast('Error: ' + e.message, 'error'); }
 }
@@ -10741,6 +11475,227 @@ function pvPreviewFile(event, path) {
 // ============================================================
 var _mfaJobId = null;
 var _mfaPollTimer = null;
+var _mfaLang = 'zh';
+
+// -- Language Switch ---
+var MFA_LANG_CONFIG = {
+  jp: {
+    label: '日语', acoustic: 'japanese_mfa', dictionary: 'japanese_mfa',
+    dict_path: 'data/mfa/models/pretrained_models/dictionary/japanese_mfa.dict',
+    step2_mode: 'A'
+  },
+  zh: {
+    label: '中文', acoustic: 'corp4EPL_sat2', dictionary: 'fullpinyin_enword',
+    dict_path: 'data/mfa/models/pretrained_models/dictionary/fullpinyin_enword.dict',
+    step2_mode: 'B'
+  }
+};
+
+function mfaSwitchLanguage(lang) {
+  _mfaLang = lang;
+  var cfg = MFA_LANG_CONFIG[lang];
+  document.getElementById('mfa-lang-label').textContent = cfg.label;
+  document.getElementById('mfa-lang-jp').className = lang === 'jp' ? 'btn btn-primary' : 'btn btn-secondary';
+  document.getElementById('mfa-lang-zh').className = lang === 'zh' ? 'btn btn-primary' : 'btn btn-secondary';
+  document.getElementById('mfa-gen-dict').value = cfg.dict_path;
+  document.getElementById('mfa-gen-mode').value = cfg.step2_mode;
+  document.getElementById('mfa-align-acoustic').value = cfg.acoustic;
+  document.getElementById('mfa-align-dict').value = cfg.dictionary;
+  document.getElementById('mfa-val-acoustic').value = cfg.acoustic;
+  document.getElementById('mfa-val-dict').value = cfg.dictionary;
+  toast('已切换为 ' + cfg.label + ' 模式', 'info');
+}
+
+// -- Pipeline auto-sync ---
+var _mfaSyncing = false;
+function mfaApplySettingsDefaults() {
+  // Pre-fill MFA form fields from settings paths (only if empty)
+  var defaults = {
+    'mfa-trim-input': _serverPaths.MFA_RAW_WAV_DIR,
+    'mfa-trim-output': _serverPaths.MFA_WAV_DIR,
+    'mfa-gen-output': _serverPaths.MFA_TXT_DIR,
+    'mfa-align-wav-dir': _serverPaths.MFA_WAV_DIR,
+    'mfa-align-txt-dir': _serverPaths.MFA_TXT_DIR,
+    'mfa-align-output': _serverPaths.MFA_ALIGNED_DIR,
+    'mfa-align-temp': _serverPaths.MFA_TEMP_DIR,
+    'mfa-val-txt-dir': _serverPaths.MFA_TXT_DIR,
+    'mfa-val-wav-dir': _serverPaths.MFA_WAV_DIR,
+    'mfa-val-output': _serverPaths.MFA_VALIDATE_DIR,
+    'mfa-val-temp': _serverPaths.MFA_TEMP_DIR,
+    'mfa-post-textgrid-dir': _serverPaths.MFA_ALIGNED_DIR,
+    'mfa-post-output': _serverPaths.MFA_POST_DIR,
+    'mfa-post-filtered': _serverPaths.MFA_FILTERED_DIR,
+    'mfa-post-wav-dir': _serverPaths.MFA_WAV_DIR,
+    'mfa-post-txt-dir': _serverPaths.MFA_TXT_DIR,
+    'mfa-gen-dict': _serverPaths.MFA_DICT_PATH
+  };
+  for (var fid in defaults) {
+    var el = document.getElementById(fid);
+    var val = defaults[fid];
+    if (el && val && !el.value.trim()) {
+      el.value = val;
+      el.placeholder = val;
+    }
+  }
+  // Apply default language (zh) — overwrites dict path, acoustic model, etc.
+  mfaSwitchLanguage('zh');
+}
+
+function mfaSyncPipeline() {
+  if (_mfaSyncing) return;
+  _mfaSyncing = true;
+  var $ = function(id) { return document.getElementById(id); };
+  var gv = function(id, fallback) { var v = $(id).value.trim(); return v || (fallback || ''); };
+
+  // Step 1 output → Step 3 wav_dir, Step 4 wav_dir
+  var s1out = gv('mfa-trim-output');
+  if (s1out) {
+    if (!gv('mfa-align-wav-dir')) $('mfa-align-wav-dir').value = s1out;
+    if (!gv('mfa-post-wav-dir')) $('mfa-post-wav-dir').value = s1out;
+  }
+
+  // JSONL: SRT import → Step 2 → Step 4
+  if (_mfaSrtSelected && _mfaSrtSelectedName) {
+    var srtStem = _mfaSrtSelectedName.replace(/\.srt$/i, '');
+    var srtJsonl = 'data/mfa/jsonl/' + srtStem + '.jsonl';
+    if (!gv('mfa-gen-jsonl')) $('mfa-gen-jsonl').value = srtJsonl;
+  }
+  var jsonl = gv('mfa-gen-jsonl');
+  if (jsonl && !gv('mfa-post-jsonl')) $('mfa-post-jsonl').value = jsonl;
+
+  // Step 2 output → Step 3 txt_dir, validate txt_dir, Step 4 txt_dir
+  var s2out = gv('mfa-gen-output');
+  if (s2out) {
+    if (!gv('mfa-align-txt-dir')) $('mfa-align-txt-dir').value = s2out;
+    if (!gv('mfa-val-txt-dir')) $('mfa-val-txt-dir').value = s2out;
+    if (!gv('mfa-post-txt-dir')) $('mfa-post-txt-dir').value = s2out;
+  }
+
+  // Step 3 align output → Step 4 textgrid_dir, post output, filtered
+  var s3out = gv('mfa-align-output');
+  if (s3out) {
+    if (!gv('mfa-post-textgrid-dir')) $('mfa-post-textgrid-dir').value = s3out;
+    if (!gv('mfa-post-output')) $('mfa-post-output').value = s3out + '_post';
+    if (!gv('mfa-post-filtered')) $('mfa-post-filtered').value = s3out + '_filtered';
+  }
+
+  // Step 1 input → suggest Step 1 output
+  var s1in = gv('mfa-trim-input');
+  if (s1in && !gv('mfa-trim-output')) {
+    $('mfa-trim-output').value = s1in.replace(/raw_wav$/, 'wav');
+  }
+
+  _mfaSyncing = false;
+}
+
+// Wire oninput auto-sync to key fields
+function mfaWireAutoSync() {
+  var keys = ['mfa-trim-input', 'mfa-trim-output', 'mfa-gen-jsonl', 'mfa-gen-output',
+              'mfa-align-output', 'mfa-align-txt-dir'];
+  for (var i = 0; i < keys.length; i++) {
+    var el = document.getElementById(keys[i]);
+    if (el) { el.addEventListener('input', mfaSyncPipeline); el.addEventListener('change', mfaSyncPipeline); }
+  }
+}
+
+// -- Audio File Browser ---
+var _mfaAudioDir = '';
+var _mfaAudioSelected = '';
+var _mfaAudioSelectedName = '';
+
+async function mfaAudioLoadDir(path) {
+  var container = document.getElementById('mfa-audio-file-list');
+  container.innerHTML = '<div class="empty-state" style="padding:20px;"><p>加载中...</p></div>';
+  try {
+    var resp = await fetch(API + '/api/mfa/browse-dir?ext=.wav,.mp3,.flac,.m4a&path=' + encodeURIComponent(path || ''));
+    var data = await resp.json();
+    _mfaAudioDir = data.path;
+
+    var bread = document.getElementById('mfa-audio-breadcrumb');
+    var parts = data.path.split('/').filter(function(p){return p;});
+    var bc = '', cum = '';
+    for (var i = 0; i < parts.length; i++) {
+      cum += '/' + parts[i];
+      if (i > 0) bc += ' / ';
+      bc += '<span style="cursor:pointer;color:var(--accent);" onclick="mfaAudioNavigate(\'' + cum.replace(/'/g, "\\'") + '\')">' + escapeHtml(parts[i]) + '</span>';
+    }
+    bread.innerHTML = bc || '/';
+    document.getElementById('mfa-audio-back').disabled = !data.parent;
+
+    var html = '';
+    var folders = data.folders || [];
+    for (var j = 0; j < folders.length; j++) {
+      var f = folders[j];
+      html += '<div class="mfa-browser-item dir" onclick="mfaAudioNavigate(\'' + f.path.replace(/'/g, "\\'") + '\')">' +
+        '<span class="mfa-folder-icon">📁</span><span class="mfa-item-name">' + escapeHtml(f.name) + '</span></div>';
+    }
+    var files = data.files || [];
+    for (var k = 0; k < files.length; k++) {
+      var af = files[k];
+      var sel = (_mfaAudioSelected === af.path) ? ' selected' : '';
+      var icon = af.type === 'wav' ? '🔊' : (af.type === 'mp3' ? '🎵' : '🎧');
+      html += '<div class="mfa-browser-item file' + sel + '" onclick="mfaAudioSelectFile(\'' + af.path.replace(/'/g, "\\'") + '\', \'' + escapeHtml(af.name).replace(/'/g, "\\'") + '\', \'' + (af.size_kb || 0) + '\')">' +
+        '<span class="mfa-file-icon">' + icon + '</span>' +
+        '<span class="mfa-item-name">' + escapeHtml(af.name) + '</span>' +
+        '<span class="mfa-item-size">' + (af.size_kb || '') + ' KB</span></div>';
+    }
+    if (!html) html = '<div class="empty-state" style="padding:20px;"><p>此目录下没有音频文件 (.wav/.mp3/.flac)</p></div>';
+    container.innerHTML = html;
+  } catch(e) {
+    container.innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
+  }
+}
+
+function mfaAudioNavigate(path) {
+  if (path === '..') { mfaAudioLoadDir(''); return; }
+  mfaAudioLoadDir(path);
+}
+
+async function mfaAudioBrowseOther() {
+  var current = _mfaAudioDir || '/mnt/project/ComicCut/anime-pipeline/data/pipelinevideo/';
+  var path = await openFolderPicker('选择音频目录', current);
+  if (path) mfaAudioLoadDir(path);
+}
+
+function mfaAudioSelectFile(path, name, sizeKb) {
+  _mfaAudioSelected = path;
+  _mfaAudioSelectedName = name;
+  document.getElementById('mfa-audio-selected').style.display = 'block';
+  document.getElementById('mfa-audio-selected-name').textContent = name;
+  document.getElementById('mfa-audio-selected-info').textContent = sizeKb ? (sizeKb + ' KB') : '';
+  mfaAudioLoadDir(_mfaAudioDir);
+  // Apply to pipeline immediately
+  mfaAudioSyncToPipeline();
+}
+
+function mfaAudioSyncToPipeline() {
+  if (!_mfaAudioSelected) return;
+  var path = _mfaAudioSelected;
+  var dir = path.substring(0, path.lastIndexOf('/'));
+  var stem = _mfaAudioSelectedName.replace(/\.(wav|mp3|flac|m4a)$/i, '');
+  var wavName = stem + '.wav';
+
+  // Always overwrite — user explicitly selected this audio
+  document.getElementById('mfa-trim-input').value = dir || '';
+  document.getElementById('mfa-trim-output').value = 'data/mfa/wav';
+  document.getElementById('mfa-srt-wav-file').value = wavName;
+  document.getElementById('mfa-gen-jsonl').value = 'data/mfa/jsonl/' + stem + '.jsonl';
+  document.getElementById('mfa-gen-output').value = 'data/mfa/txt';
+  document.getElementById('mfa-align-txt-dir').value = 'data/mfa/txt';
+  document.getElementById('mfa-align-wav-dir').value = 'data/mfa/wav';
+  document.getElementById('mfa-align-output').value = 'data/mfa/aligned';
+  document.getElementById('mfa-val-txt-dir').value = 'data/mfa/txt';
+  document.getElementById('mfa-val-wav-dir').value = 'data/mfa/wav';
+  document.getElementById('mfa-val-output').value = 'data/mfa/validate';
+  document.getElementById('mfa-post-jsonl').value = 'data/mfa/jsonl/' + stem + '.jsonl';
+  document.getElementById('mfa-post-txt-dir').value = 'data/mfa/txt';
+  document.getElementById('mfa-post-textgrid-dir').value = 'data/mfa/aligned';
+  document.getElementById('mfa-post-output').value = 'data/mfa/post';
+  document.getElementById('mfa-post-filtered').value = 'data/mfa/filtered';
+  document.getElementById('mfa-post-wav-dir').value = 'data/mfa/wav';
+
+  toast('管线路径已同步: ' + stem, 'success');
+}
 
 // -- SRT Import (directory browser) ---
 var _mfaSrtDir = '';
@@ -10751,7 +11706,7 @@ async function mfaSrtLoadDir(path) {
   var container = document.getElementById('mfa-srt-file-list');
   container.innerHTML = '<div class="empty-state" style="padding:30px;"><p>加载中...</p></div>';
   try {
-    var resp = await fetch(API + '/api/mfa/browse-dir?path=' + encodeURIComponent(path || ''));
+    var resp = await fetch(API + '/api/mfa/browse-dir?ext=.srt&path=' + encodeURIComponent(path || ''));
     var data = await resp.json();
     _mfaSrtDir = data.path;
 
@@ -10833,15 +11788,61 @@ function mfaSrtUpdateSelectionUI() {
   var selDiv = document.getElementById('mfa-srt-selected');
   var selName = document.getElementById('mfa-srt-selected-name');
   var importBtn = document.getElementById('btn-mfa-srt-import');
+  var txtBtn = document.getElementById('btn-mfa-srt-totxt');
   if (_mfaSrtSelected) {
     selDiv.style.display = 'block';
     selName.textContent = _mfaSrtSelectedName || _mfaSrtSelected;
-    importBtn.disabled = false;
-    importBtn.style.opacity = '1';
+    importBtn.disabled = false; importBtn.style.opacity = '1';
+    txtBtn.disabled = false; txtBtn.style.opacity = '1';
   } else {
     selDiv.style.display = 'none';
-    importBtn.disabled = true;
-    importBtn.style.opacity = '0.5';
+    importBtn.disabled = true; importBtn.style.opacity = '0.5';
+    txtBtn.disabled = true; txtBtn.style.opacity = '0.5';
+  }
+}
+
+async function mfaSrtToTxt() {
+  if (!_mfaSrtSelected) { toast('请先选择一个 SRT 文件', 'info'); return; }
+  var wavFile = document.getElementById('mfa-srt-wav-file').value.trim();
+  if (!wavFile) { toast('请输入 WAV 文件名', 'info'); return; }
+
+  var url = API + '/api/mfa/srt-to-txt?' +
+    'srt_path=' + encodeURIComponent(_mfaSrtSelected) +
+    '&wav_file=' + encodeURIComponent(wavFile) +
+    '&language=' + encodeURIComponent(_mfaLang || 'zh');
+
+  var btn = document.getElementById('btn-mfa-srt-totxt');
+  btn.disabled = true; btn.textContent = '生成中...';
+  document.getElementById('mfa-srt-status').textContent = '';
+
+  try {
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    if (!resp.ok) { toast('生成失败: ' + (data.detail || resp.status), 'error'); return; }
+
+    document.getElementById('mfa-srt-preview').style.display = 'block';
+    document.getElementById('mfa-srt-preview-text').textContent = data.txt_content_preview || '';
+    document.getElementById('mfa-srt-jsonl-out').textContent = data.txt_path || '';
+    document.getElementById('mfa-srt-jsonl-count').textContent = data.language || '';
+    document.getElementById('mfa-srt-status').textContent = 'TXT 已生成: ' + data.txt_path;
+
+    // Auto-fill Step 2 txt output dir and Step 3 txt dir
+    var txtPath = data.txt_path || '';
+    var txtDir = txtPath.substring(0, txtPath.lastIndexOf('/'));
+    if (txtDir) {
+      var genOut = document.getElementById('mfa-gen-output');
+      if (!genOut.value) genOut.value = txtDir;
+      var alignTxt = document.getElementById('mfa-align-txt-dir');
+      if (!alignTxt.value) alignTxt.value = txtDir;
+      var postTxt = document.getElementById('mfa-post-txt-dir');
+      if (!postTxt.value) postTxt.value = txtDir;
+    }
+
+    toast('TXT 转写已生成', 'success');
+  } catch(e) {
+    toast('生成失败: ' + e.message, 'error');
+  } finally {
+    mfaSrtUpdateSelectionUI(); btn.textContent = '直接生成 TXT';
   }
 }
 
@@ -10887,6 +11888,7 @@ async function mfaSrtImport() {
     if (!genJsonl.value && data.jsonl_path) genJsonl.value = data.jsonl_path;
 
     toast('SRT 导入成功，JSONL 已有 ' + data.jsonl_total_entries + ' 条记录', 'success');
+    mfaSyncPipeline();
   } catch(e) {
     toast('导入失败: ' + e.message, 'error');
   } finally {
@@ -10947,6 +11949,7 @@ async function mfaRunStep(step) {
     params.set('max_merge_tokens', document.getElementById('mfa-gen-max-merge').value || '5');
     if (document.getElementById('mfa-gen-dict').value) params.set('dict_path', document.getElementById('mfa-gen-dict').value);
     if (document.getElementById('mfa-gen-oov').value) params.set('oov_report', document.getElementById('mfa-gen-oov').value);
+    params.set('language', _mfaLang || 'zh');
     label = '步骤 2: 生成TXT';
   } else if (step === 'align') {
     url = API + '/api/mfa/align';
@@ -11057,6 +12060,7 @@ async function mfaRunAll() {
     post_fix_short_multi_unit: document.getElementById('mfa-post-fix-short').checked,
     post_filter_suspicious_alignment: document.getElementById('mfa-post-filter-suspicious').checked,
     post_copy_errors: document.getElementById('mfa-post-copy-errors').checked,
+    language: _mfaLang || 'zh',
   };
 
   try {
@@ -11187,7 +12191,7 @@ async function mfaViewerLoadDir(path) {
   var container = document.getElementById('mfa-viewer-file-list');
   container.innerHTML = '<div class="empty-state" style="padding:20px;"><p>加载中...</p></div>';
   try {
-    var resp = await fetch(API + '/api/mfa/browse-dir?path=' + encodeURIComponent(path || ''));
+    var resp = await fetch(API + '/api/mfa/browse-dir?ext=.TextGrid&path=' + encodeURIComponent(path || ''));
     var data = await resp.json();
     _mfaViewerDir = data.path;
 

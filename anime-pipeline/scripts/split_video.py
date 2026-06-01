@@ -377,30 +377,35 @@ def _split_video_by_subtitle_impl(
 
     print(f"Parsed {len(sub.entries)} subtitle entries from {os.path.basename(subtitle_path)}")
 
+    is_audio = video_path.lower().endswith('.wav')
+
     # Setup output
     if not output_dir:
         base_name = os.path.splitext(os.path.basename(video_path))[0]
-        output_dir = os.path.join(CLIPS_DIR, base_name)
+        if is_audio:
+            # For audio, default to sibling 'clips' folder
+            parent_dir = os.path.dirname(os.path.dirname(video_path))
+            output_dir = os.path.join(parent_dir, "clips", base_name)
+        else:
+            output_dir = os.path.join(CLIPS_DIR, base_name)
     os.makedirs(output_dir, exist_ok=True)
 
-    # Get HW acceleration config
-    hw_config = get_hw_accel_params(hw_accel)
-    hw_type = detect_hw_accel() if hw_accel == "auto" else hw_accel
+    # Get HW acceleration config (video only)
+    hw_config = get_hw_accel_params(hw_accel) if not is_audio else {}
+    hw_type = detect_hw_accel() if hw_accel == "auto" and not is_audio else hw_accel
 
-    # Verify video duration
+    # Verify duration
     video_duration = get_video_duration(video_path)
     if video_duration <= 0:
-        print(f"Warning: Could not determine video duration for {video_path}")
+        print(f"Warning: Could not determine duration for {video_path}")
 
-    # Build ffmpeg base command parts
-    # We cut with -ss before -i for fast seeking when possible
     base_name = os.path.splitext(os.path.basename(video_path))[0]
+    output_ext = ".wav" if is_audio else ".mp4"
 
     clips = []
     total = len(sub.entries)
 
     for i, entry in enumerate(sub.entries):
-        # Check for cancellation
         if cancel_event and cancel_event.is_set():
             print(f"[split] Cancelled after {len(clips)} clips")
             break
@@ -409,79 +414,108 @@ def _split_video_by_subtitle_impl(
         end = min(video_duration or 999999, entry.end + padding)
         duration = end - start
 
-        # Skip very short segments
         if duration < min_duration:
             continue
 
-        # Sanitize text for filename (limit to 20 chars)
         safe_text = re.sub(r'[\\/*?:"<>|]', '', entry.text)[:20].strip()
-        output_name = f"{base_name}_S{i+1:03d}_{safe_text}.mp4"
+        index_str = f"_S{i+1:03d}"
+        output_name = f"{base_name}{index_str}_{safe_text}{output_ext}"
         output_path = os.path.join(output_dir, output_name)
 
-        # ffmpeg command: fast seek before input, then encode segment
-        cmd = [FFMPEG, "-y"]
-
-        # Hardware decode input
-        cmd.extend(hw_config["hwaccel_in"])
-
-        # Fast seek (before input for speed)
-        cmd.extend(["-ss", str(start)])
-
-        # Input
-        cmd.extend(["-i", video_path])
-
-        # Duration to copy
-        cmd.extend(["-t", str(duration)])
-
-        # Map video and audio only (skip subtitles, fonts, etc.)
-        cmd.extend(["-map", "0:v", "-map", "0:a?"])
-
-        # Copy audio (much faster), encode video with HW
-        cmd.extend(["-c:a", "copy"])
-
-        # Video encoder with HW acceleration
-        cmd.extend(["-c:v", hw_config["video_encoder"]])
-        cmd.extend(hw_config["extra_flags"])
-
-        # Avoid sync issues
-        cmd.extend(["-avoid_negative_ts", "make_zero"])
-
-        cmd.append(output_path)
+        # Build ffmpeg command
+        if is_audio:
+            cmd = [FFMPEG, "-y",
+                "-ss", str(start),
+                "-i", video_path,
+                "-t", str(duration),
+                "-map", "0:a",
+                "-c:a", "pcm_s16le",
+                output_path,
+            ]
+        else:
+            cmd = [FFMPEG, "-y"]
+            cmd.extend(hw_config["hwaccel_in"])
+            cmd.extend(["-ss", str(start)])
+            cmd.extend(["-i", video_path])
+            cmd.extend(["-t", str(duration)])
+            cmd.extend(["-map", "0:v", "-map", "0:a?"])
+            cmd.extend(["-c:a", "copy"])
+            cmd.extend(["-c:v", hw_config["video_encoder"]])
+            cmd.extend(hw_config["extra_flags"])
+            cmd.extend(["-avoid_negative_ts", "make_zero"])
+            cmd.append(output_path)
 
         try:
             result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                encoding='utf-8', errors='replace',
-                timeout=300,  # 5 min per clip
+                cmd, capture_output=True, text=True,
+                encoding='utf-8', errors='replace', timeout=300,
             )
             if result.returncode == 0 and os.path.exists(output_path):
                 clips.append(output_path)
+                # Write individual SRT file for this segment
+                srt_name = f"{base_name}{index_str}_{safe_text}.srt"
+                srt_path = os.path.join(output_dir, srt_name)
+                _write_single_srt(srt_path, i + 1, entry, start, end)
                 if on_progress:
                     on_progress(i + 1, total, entry.text[:30])
             else:
-                # Try without hardware acceleration as fallback
-                fallback_cmd = [FFMPEG, "-y",
-                    "-ss", str(start),
-                    "-i", video_path,
-                    "-t", str(duration),
-                    "-map", "0:v", "-map", "0:a?",
-                    "-c:a", "copy",
-                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
-                    "-avoid_negative_ts", "make_zero",
-                    output_path,
-                ]
-                subprocess.run(fallback_cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300)
+                # Fallback
+                if is_audio:
+                    fb_cmd = [FFMPEG, "-y",
+                        "-ss", str(start),
+                        "-i", video_path,
+                        "-t", str(duration),
+                        "-map", "0:a",
+                        "-c:a", "pcm_s16le",
+                        output_path,
+                    ]
+                else:
+                    fb_cmd = [FFMPEG, "-y",
+                        "-ss", str(start),
+                        "-i", video_path,
+                        "-t", str(duration),
+                        "-map", "0:v", "-map", "0:a?",
+                        "-c:a", "copy",
+                        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+                        "-avoid_negative_ts", "make_zero",
+                        output_path,
+                    ]
+                subprocess.run(fb_cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300)
                 if os.path.exists(output_path):
                     clips.append(output_path)
+                    srt_name = f"{base_name}{index_str}_{safe_text}.srt"
+                    srt_path = os.path.join(output_dir, srt_name)
+                    _write_single_srt(srt_path, i + 1, entry, start, end)
         except subprocess.TimeoutExpired:
             print(f"  Timeout on segment {i+1}: {entry.text[:30]}")
         except Exception as e:
             print(f"  Error on segment {i+1}: {e}")
 
-    print(f"Created {len(clips)} video clips in {output_dir}")
+    print(f"Created {len(clips)} clips in {output_dir}")
     return clips
+
+
+def _format_srt_time(seconds: float) -> str:
+    """Format seconds to SRT timestamp: HH:MM:SS,mmm"""
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = seconds % 60
+    return f"{h:02d}:{m:02d}:{s:06.3f}".replace(".", ",")
+
+
+def _write_single_srt(output_path: str, index: int, entry, clip_start: float, clip_end: float):
+    """Write a single-segment SRT file for one clip."""
+    relative_start = entry.start - clip_start
+    relative_end = entry.end - clip_start
+    if relative_start < 0:
+        relative_start = 0.0
+    try:
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(f"{index}\n")
+            f.write(f"{_format_srt_time(relative_start)} --> {_format_srt_time(relative_end)}\n")
+            f.write(f"{entry.text}\n\n")
+    except Exception as e:
+        print(f"  Warning: failed to write SRT {output_path}: {e}")
 
 
 def split_video_single_range(

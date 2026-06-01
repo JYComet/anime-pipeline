@@ -8,28 +8,37 @@ import numpy as np
 import soundfile as sf
 import torch
 import threading
+import queue
 
-# Singleton model
-_model = None
-_model_lock = threading.Lock()
+# Model pool (2 instances for ~3 GB VRAM total on 24 GB GPU)
+_POOL_SIZE = 2
+_model_pool = queue.Queue(maxsize=_POOL_SIZE)
+_pool_lock = threading.Lock()
+_pool_loaded = False
 
 # htDemucs outputs 4 sources
 SOURCES = ["drums", "bass", "other", "vocals"]
 
 
 def _get_model(device="cuda"):
-    """Lazy-load the Demucs HT model (singleton)."""
-    global _model
-    with _model_lock:
-        if _model is not None:
-            return _model
-        from demucs import pretrained
-        model = pretrained.get_model("htdemucs_ft")
-        if device != "cpu" and torch.cuda.is_available():
-            model = model.cuda()
-        model.eval()
-        _model = model
-        return _model
+    """Get a Demucs model from the pool (blocks until one is free)."""
+    global _pool_loaded
+    with _pool_lock:
+        if not _pool_loaded:
+            from demucs import pretrained
+            for _ in range(_POOL_SIZE):
+                model = pretrained.get_model("htdemucs_ft")
+                if device != "cpu" and torch.cuda.is_available():
+                    model = model.cuda()
+                model.eval()
+                _model_pool.put(model)
+            _pool_loaded = True
+    return _model_pool.get()
+
+
+def _return_model(model):
+    """Return a model instance to the pool."""
+    _model_pool.put(model)
 
 
 def separate_vocals(input_path: str, output_dir: str, device="cuda") -> str:
@@ -56,6 +65,7 @@ def separate_vocals(input_path: str, output_dir: str, device="cuda") -> str:
     if os.path.exists(vocals_path) and os.path.getsize(vocals_path) > 0:
         return vocals_path
 
+    model = None
     try:
         import demucs.apply
         model = _get_model(device=device)
@@ -113,3 +123,6 @@ def separate_vocals(input_path: str, output_dir: str, device="cuda") -> str:
         import traceback
         traceback.print_exc()
         return ""
+    finally:
+        if model is not None:
+            _return_model(model)

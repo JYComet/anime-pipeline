@@ -1,0 +1,9457 @@
+
+var API = '';
+
+// ============================================================
+// Folder Picker — browser-based, cross-platform
+// ============================================================
+var _fpResolve = null;
+var _fpCurrentPath = '';
+
+var PATH_MAP_FROM = '/mnt/project';
+var PATH_MAP_TO = 'E:';
+try { var s = localStorage.getItem('path_map_from'); if (s) PATH_MAP_FROM = s; } catch(e) {}
+try { var s = localStorage.getItem('path_map_to'); if (s) PATH_MAP_TO = s; } catch(e) {}
+
+function serverPathToClient(sp) {
+  if (!sp) return sp;
+  sp = sp.replace(/\//g, '\\');
+  var fromWin = PATH_MAP_FROM.replace(/\//g, '\\');
+  if (sp.toLowerCase().startsWith(fromWin.toLowerCase())) {
+    sp = PATH_MAP_TO.replace(/\//g, '\\') + sp.substring(fromWin.length);
+  }
+  return sp;
+}
+
+function openFolderPath(serverPath) {
+  var cp = serverPathToClient(serverPath);
+  var html = '<div style="padding:16px">';
+  html += '<div style="margin-bottom:8px;font-weight:bold">文件夹路径</div>';
+  html += '<div style="background:var(--bg1);padding:12px;border-radius:6px;font-family:monospace;font-size:13px;word-break:break-all;margin-bottom:8px" id="openFolderDisplayPath">' + cp + '</div>';
+  html += '<div style="font-size:11px;color:var(--text2);margin-bottom:12px">服务器路径: ' + serverPath + '</div>';
+  html += '<input id="openFolderMappingFrom" value="' + PATH_MAP_FROM.replace(/"/g, '&quot;') + '" placeholder="服务端前缀" style="width:45%;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg1);color:var(--text);font-size:12px">';
+  html += '<span style="margin:0 4px;color:var(--text2)">→</span>';
+  html += '<input id="openFolderMappingTo" value="' + PATH_MAP_TO.replace(/"/g, '&quot;') + '" placeholder="客户端前缀" style="width:45%;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg1);color:var(--text);font-size:12px">';
+  html += '<div style="font-size:11px;color:var(--text2);margin-top:4px">映射: 服务端路径前缀 → 客户端路径前缀（如 E:\\ 或 \\\\server\\share）</div>';
+  html += '<div style="margin-top:12px;display:flex;gap:8px">';
+  html += '<button class="btn btn-primary" onclick="copyFolderPath(\'' + cp.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">复制路径</button>';
+  html += '<button class="btn btn-secondary" onclick="tryOpenFolder(\'' + cp.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">尝试打开</button>';
+  html += '<button class="btn btn-sm" onclick="document.getElementById(\'fpOverlay\').classList.remove(\'active\')" style="margin-left:auto">关闭</button>';
+  html += '</div></div>';
+  document.getElementById('fpList').innerHTML = html;
+  document.getElementById('fpBreadcrumb').innerHTML = '';
+  document.getElementById('fpDrives').style.display = 'none';
+  document.getElementById('fpTitle').textContent = '打开文件夹';
+  document.getElementById('fpOverlay').classList.add('active');
+  // Update path mapping live
+  document.getElementById('openFolderMappingFrom').oninput = function() {
+    PATH_MAP_FROM = this.value; try { localStorage.setItem('path_map_from', PATH_MAP_FROM); } catch(e) {}
+    document.getElementById('openFolderDisplayPath').textContent = serverPathToClient(serverPath);
+  };
+  document.getElementById('openFolderMappingTo').oninput = function() {
+    PATH_MAP_TO = this.value; try { localStorage.setItem('path_map_to', PATH_MAP_TO); } catch(e) {}
+    document.getElementById('openFolderDisplayPath').textContent = serverPathToClient(serverPath);
+  };
+}
+
+function copyFolderPath(cp) {
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(cp).then(function() { toast('已复制: ' + cp, 'success'); });
+  }
+}
+
+function tryOpenFolder(cp) {
+  copyFolderPath(cp);
+  var fileUrl = 'file:///' + cp.replace(/\\/g, '/').replace(/ /g, '%20');
+  var w = window.open(fileUrl, '_blank');
+  if (!w) { toast('浏览器阻止了打开，路径已复制到剪贴板', 'info'); }
+}
+
+async function openFolderPicker(title, initialPath) {
+  return new Promise(function(resolve) {
+    _fpResolve = resolve;
+    document.getElementById('fpTitle').textContent = title || '选择文件夹';
+    document.getElementById('fpOverlay').classList.add('active');
+    navigateFolderPicker(initialPath || '/');
+  });
+}
+
+function closeFolderPicker() {
+  document.getElementById('fpOverlay').classList.remove('active');
+  if (_fpResolve) { _fpResolve(''); _fpResolve = null; }
+}
+
+function confirmFolderPicker() {
+  document.getElementById('fpOverlay').classList.remove('active');
+  if (_fpResolve) { _fpResolve(_fpCurrentPath); _fpResolve = null; }
+}
+
+async function navigateFolderPicker(path) {
+  _fpCurrentPath = path;
+  try {
+    var resp = await fetch(API + '/api/list-dirs?path=' + encodeURIComponent(path));
+    if (!resp.ok) { toast('无法访问: ' + path, 'error'); return; }
+    var data = await resp.json();
+    _fpCurrentPath = data.path;
+    renderBreadcrumb(data.path);
+    renderDrives(data.roots);
+    renderEntries(data.entries, data.parent);
+  } catch(e) {
+    toast('加载目录失败: ' + e.message, 'error');
+  }
+}
+
+function renderBreadcrumb(path) {
+  var bc = document.getElementById('fpBreadcrumb');
+  var parts = [];
+  var sep = path.indexOf('\\') >= 0 ? '\\' : '/';
+  var segs = path.split(sep).filter(Boolean);
+  if (sep === '\\' && path.length >= 2) segs.unshift(path.substring(0, 1) + ':');
+  if (sep === '/' && path === '/') segs = [''];
+  var cum = sep === '\\' ? '' : '';
+  var html = '';
+  for (var i = 0; i < segs.length; i++) {
+    cum = i === 0 && sep === '\\' ? segs[0] + '\\' : (i === 0 && sep === '/' ? '/' : cum + segs[i] + sep);
+    html += '<span onclick="navigateFolderPicker(\'' + cum.replace(/'/g, "\\'") + '\')">' + (segs[i] || '/') + '</span>';
+    if (i < segs.length - 1) html += ' <span style="color:var(--text2)">' + sep + '</span> ';
+  }
+  html += '<input class="fp-path-input" id="fpPathInput" value="' + path.replace(/"/g, '&quot;') + '" onkeydown="if(event.key===\'Enter\')navigateFolderPicker(this.value)">';
+  bc.innerHTML = html;
+}
+
+function renderDrives(roots) {
+  var d = document.getElementById('fpDrives');
+  if (!roots || roots.length <= 1) { d.style.display = 'none'; return; }
+  d.style.display = 'flex';
+  d.innerHTML = roots.map(function(r) {
+    return '<div class="fp-drive" onclick="navigateFolderPicker(\'' + r.path.replace(/'/g, "\\'") + '\')">' + r.name + '</div>';
+  }).join('');
+}
+
+function renderEntries(entries, parent) {
+  var list = document.getElementById('fpList');
+  var html = '';
+  if (parent) {
+    html += '<div class="fp-item" onclick="navigateFolderPicker(\'' + parent.replace(/'/g, "\\'") + '\')">' +
+      '<span class="fp-icon">&#x1F4C1;</span><span class="fp-name" style="color:var(--accent)">..</span></div>';
+  }
+  if (!entries || entries.length === 0) {
+    html += '<div style="padding:20px;text-align:center;color:var(--text2)">此文件夹为空</div>';
+  } else {
+    entries.forEach(function(e) {
+      html += '<div class="fp-item" onclick="navigateFolderPicker(\'' + e.path.replace(/'/g, "\\'") + '\')">' +
+        '<span class="fp-icon">&#x1F4C1;</span><span class="fp-name">' + e.name + '</span></div>';
+    });
+  }
+  list.innerHTML = html;
+}
+// ============================================================
+
+var currentPage = 1;
+var jobPollInterval = null;
+
+window._searchResults = [];
+window._localVideos = [];
+var _localSelectMode = false;
+var _localSelected = {};
+window._reviewClips = [];
+window._reviewDir = '';
+window._reviewIndex = 0;
+
+// ============================================================
+// UI state persistence — survive page refreshes
+// ============================================================
+var _uiState = {};
+try { var s = localStorage.getItem('anime_pipeline_ui'); if (s) _uiState = JSON.parse(s); } catch(e) {}
+function _saveUiState() {
+  try { localStorage.setItem('anime_pipeline_ui', JSON.stringify(_uiState)); } catch(e) {}
+}
+
+// ============================================================
+// Event delegation
+// ============================================================
+document.addEventListener('click', function(e) {
+  // Handle data-play clicks (audio playback in results)
+  var playEl = e.target.closest('[data-play]');
+  if (playEl) {
+    var pp = playEl.getAttribute('data-play');
+    var pn = playEl.getAttribute('data-playname') || '';
+    if (pp) playResultAudio(pp, pn);
+    return;
+  }
+
+  // Handle local-files breadcrumb clicks
+  var bcEl = e.target.closest('[data-lf-breadcrumb]');
+  if (bcEl) {
+    navigateLfBreadcrumb(bcEl.getAttribute('data-lf-breadcrumb'));
+    return;
+  }
+
+  // Handle local-files checkbox toggle
+  var chkEl = e.target.closest('[data-lf-check]');
+  if (chkEl) {
+    lfToggleItem(chkEl.getAttribute('data-lf-check'));
+    return;
+  }
+
+  // Handle local-files play button
+  var lfPlayEl = e.target.closest('[data-lf-play]');
+  if (lfPlayEl) {
+    e.stopPropagation();
+    playLfAudio(lfPlayEl.getAttribute('data-lf-play'), lfPlayEl.getAttribute('data-lf-playname'));
+    return;
+  }
+
+  // Handle local-files folder click (enter folder) or file click (toggle selection)
+  var lfItem = e.target.closest('.lf-item');
+  if (lfItem) {
+    if (e.target.type === 'checkbox') return; // handled above
+    var lfType = lfItem.getAttribute('data-lf-type');
+    var lfPath = lfItem.getAttribute('data-lf-path');
+    if (lfType === 'folder') {
+      enterLfFolder(lfPath);
+    } else {
+      lfToggleItem(lfPath);
+    }
+    return;
+  }
+
+  var btn = e.target.closest('button');
+  if (!btn) return;
+
+  if (btn.hasAttribute('data-tab')) { switchTab(btn.getAttribute('data-tab')); return; }
+  if (btn.id === 'btn-search') { doSearch(); return; }
+  if (btn.id === 'btn-filter') { doSearch(); return; }
+  if (btn.id === 'btn-load-review') { loadReviewClips(); return; }
+  if (btn.id === 'btn-review-prev') { reviewPrev(); return; }
+  if (btn.id === 'btn-review-next') { reviewNext(); return; }
+  if (btn.id === 'btn-jump-pending') { jumpToFirstPending(); return; }
+  if (btn.id === 'btn-clear-short') { clearShortClips(); return; }
+  if (btn.id === 'btn-detect-bgm') { detectBgmClips(); return; }
+  if (btn.id === 'btn-detect-male') { detectMaleClips(); return; }
+  if (btn.id === 'btn-detect-multi-voice') { detectMultiVoiceClips(); return; }
+  if (btn.id === 'btn-detect-low-volume') { detectLowVolumeClips(); return; }
+  if (btn.id === 'btn-approve') { reviewAction('approve'); return; }
+  if (btn.id === 'btn-skip') { reviewAction('skip'); return; }
+  if (btn.id === 'btn-approve-all') { approveAllReview(); return; }
+
+  if (btn.id === 'lf-btn-select-all') { lfSelectAll(); return; }
+  if (btn.id === 'lf-btn-deselect-all') { lfDeselectAll(); return; }
+  if (btn.id === 'lf-btn-delete') { lfDeleteSelected(); return; }
+  if (btn.id === 'lf-btn-refresh') { loadLocalFilesBrowser(_lfCurrentDir); return; }
+
+  if (btn.id === 'btn-dreview-load') { loadDreviewClips(); return; }
+  if (btn.id === 'btn-dreview-prev') { dreviewPrev(); return; }
+  if (btn.id === 'btn-dreview-next') { dreviewNext(); return; }
+  if (btn.id === 'btn-dreview-jump-pending') { dreviewJumpToPending(); return; }
+  if (btn.id === 'btn-dreview-clear-short') { dreviewClearShort(); return; }
+  if (btn.id === 'btn-dreview-remove-reverb') { dreviewRemoveReverb(); return; }
+  if (btn.id === 'btn-dreview-remove-male') { dreviewRemoveMale(); return; }
+  if (btn.id === 'btn-dreview-remove-multi-voice') { dreviewRemoveMultiVoice(); return; }
+  if (btn.id === 'btn-dreview-remove-low-volume') { dreviewRemoveLowVolume(); return; }
+  if (btn.id === 'btn-dreview-approve') { dreviewAction('approve'); return; }
+  if (btn.id === 'btn-dreview-skip') { dreviewAction('skip'); return; }
+  if (btn.id === 'btn-dreview-approve-all') { approveAllDreview(); return; }
+
+  if (btn.classList.contains('btn-download')) {
+    var idx = parseInt(btn.getAttribute('data-idx'));
+    var r = window._searchResults[idx];
+    var method = btn.getAttribute('data-method') || 'aria2c';
+    if (r) downloadAndProcess(r.magnet, r.title, method);
+    return;
+  }
+  if (btn.classList.contains('btn-download-bitcomet')) {
+    var idx = parseInt(btn.getAttribute('data-idx'));
+    var r = window._searchResults[idx];
+    if (r) downloadAndProcess(r.magnet, r.title, 'bitcomet');
+    return;
+  }
+  if (btn.classList.contains('btn-copymagnet')) {
+    var idx = parseInt(btn.getAttribute('data-idx'));
+    var r = window._searchResults[idx];
+    if (r) copyMagnet(r.magnet);
+    return;
+  }
+  if (btn.classList.contains('btn-detail')) {
+    var idx = parseInt(btn.getAttribute('data-idx'));
+    var r = window._searchResults[idx];
+    if (r) showMagnetDetail(r);
+    return;
+  }
+  if (btn.classList.contains('btn-process-local')) {
+    processLocal(parseInt(btn.getAttribute('data-idx')));
+    return;
+  }
+  if (btn.classList.contains('btn-cancel-job')) {
+    cancelJob(btn.getAttribute('data-jobid'));
+    return;
+  }
+  if (btn.classList.contains('btn-filter-clips')) {
+    var jobId = btn.getAttribute('data-jobid');
+    var durInput = document.getElementById('min-dur-' + jobId);
+    filterClips(jobId, durInput ? parseFloat(durInput.value) || 2.0 : 2.0);
+    return;
+  }
+  if (btn.classList.contains('btn-review-jump')) {
+    var idx = parseInt(btn.getAttribute('data-idx'));
+    playReviewClip(idx);
+    return;
+  }
+  if (btn.classList.contains('btn-delete-job')) {
+    deleteJob(btn.getAttribute('data-jobid'));
+    return;
+  }
+  if (btn.classList.contains('btn-resume-job')) {
+    resumePipelineJob(btn.getAttribute('data-jobid'));
+    return;
+  }
+  if (btn.classList.contains('btn-discard-job')) {
+    discardPipelineJob(btn.getAttribute('data-jobid'));
+    return;
+  }
+});
+
+// ============================================================
+// Tab switching
+// ============================================================
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+  document.querySelectorAll('nav button').forEach(function(b) { b.classList.remove('active'); });
+  document.getElementById('tab-' + name).classList.add('active');
+  var navBtn = document.querySelector('nav button[data-tab="' + name + '"]');
+  if (navBtn) navBtn.classList.add('active');
+  _uiState.activeTab = name; _saveUiState();
+  if (name === 'local') loadLocalFiles();
+  if (name === 'local-files') loadLocalFilesBrowser();
+  if (name === 'jobs') { loadJobs(); startJobPolling(); } else stopJobPolling();
+  if (name === 'results') loadResults();
+  if (name === 'review') { loadReviewDirs(); loadEmotionCounts('review-emotion-bar', '/api/review/emotion-counts'); }
+  if (name === 'denoise') { loadDenoiseDirs(); loadUnreviewedDirs(); }
+  if (name === 'denoise-review') { loadDreviewBaseDirs(); loadEmotionCounts('dreview-emotion-bar', '/api/denoise-review/emotion-counts'); }
+  if (name === 'extract') { loadExtractFiles(); loadExtractedSubs(); }
+  if (name === 'asr') { loadAsrVideos(); loadAsrModels(); loadAsrResults(); restoreAsrInterruptedJobs(); loadHotwordConfigs(); loadFolderBrowser(_asrFolderPath || ''); }
+  if (name === 'asr-compare') { if (!_cmpLoaded) { loadCmpFolderBrowser(_cmpFolderPath); loadAsrCompareModels(); _cmpLoaded = true; } restoreAsrCompareInterruptedJobs(); loadHotwordConfigs(); }
+  if (name === 'stitch') loadStitchVideos();
+  if (name === 'split') {
+    if (!window._splitLoaded) { loadSplitFolderBrowser(''); loadSplitClipDirs(); window._splitLoaded = true; }
+  }
+  if (name === 'pipelinevideo') {
+    pvRenderStepConfig();
+    if (!_pvRestored) { pvRestoreJobs(); _pvRestored = true; }
+    loadHotwordConfigs();
+  }
+  if (name === 'hotwords') { loadHotwordConfigs(); }
+  if (name === 'denoise') {
+    if (!_denoiseJobsRestored) { restoreDenoiseJobs(); _denoiseJobsRestored = true; }
+  }
+  if (name === 'mfa') { loadMfaJobs(); if (!_mfaSrtDir) mfaSrtLoadDir(''); if (!window._mfaWired) { mfaWireAutoSync(); window._mfaWired = true; } }
+}
+
+// ============================================================
+// Toast
+// ============================================================
+function toast(msg, type) {
+  type = type || 'info';
+  var c = document.getElementById('toasts');
+  var el = document.createElement('div');
+  el.className = 'toast toast-' + type;
+  el.textContent = msg;
+  c.appendChild(el);
+  setTimeout(function() { el.remove(); }, 4000);
+}
+
+// ============================================================
+// Helpers
+// ============================================================
+function escapeHtml(str) {
+  var div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function safeAttr(str) {
+  return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function statusText(s) {
+  var map = { pending: '等待中', running: '运行中', completed: '已完成', failed: '失败', skipped: '已跳过', cancelled: '已取消', queued: '排队中', download_submitted: '下载中', interrupted: '已中断' };
+  return map[s] || s;
+}
+
+function stepName(s) {
+  var map = { download: '下载', extract_subtitles: '提取字幕', split_video: '分割视频', filter_clips: '时长筛选', filter_silence: '静音筛选', queued: '排队等待中', subtitle_split: '按字幕分割', duration_split: '按时长分割', size_split: '按大小分割', trim_video: '裁剪视频', music_separate: 'BGM分离', convert: 'WAV转换', enhance: '语音增强', super_resolve: '超分辨率', asr: 'ASR识别', cut: '字幕切割', done: '已完成', error: '出错' };
+  return map[s] || s;
+}
+
+// ============================================================
+// Search (with page cache)
+// ============================================================
+var _searchCache = {};       // { cacheKey: { pages: { pageNum: data }, maxPage: 0 } }
+var _searchCacheKey = '';    // current active cache key
+
+function _buildSearchParams(page) {
+  var p = new URLSearchParams({
+    query: document.getElementById('search-input').value,
+    page: page,
+    page_size: 20
+  });
+  var pv = document.getElementById('filter-provider').value;
+  var fv = document.getElementById('filter-fansub').value;
+  var tv = document.getElementById('filter-type').value;
+  if (pv) p.set('provider', pv);
+  if (fv) p.set('fansub', fv);
+  if (tv) p.set('resource_type', tv);
+  return p;
+}
+
+function _searchCacheKeyFromParams(params) {
+  // Build a cache key that ignores the page number
+  var p = new URLSearchParams(params.toString());
+  p.delete('page');
+  return p.toString();
+}
+
+async function doSearch(page) {
+  page = page || 1;
+  var params = _buildSearchParams(page);
+  var cacheKey = _searchCacheKeyFromParams(params);
+  var container = document.getElementById('search-results');
+
+  // Clear cache when search query changes
+  if (cacheKey !== _searchCacheKey) {
+    _searchCache = {};
+    _searchCacheKey = cacheKey;
+  }
+
+  // Init cache entry
+  if (!_searchCache[cacheKey]) {
+    _searchCache[cacheKey] = { pages: {}, maxPage: 0 };
+  }
+  var cache = _searchCache[cacheKey];
+
+  // Check cache
+  var data;
+  if (cache.pages[page]) {
+    data = cache.pages[page];
+  } else {
+    container.innerHTML = '<div class="empty-state"><p>搜索中...</p></div>';
+    try {
+      var resp = await fetch(API + '/api/search?' + params.toString());
+      if (!resp.ok) throw new Error(await resp.text());
+      data = await resp.json();
+      cache.pages[page] = data;
+      // Track max known page
+      if (data.complete && page > cache.maxPage) {
+        cache.maxPage = page;
+      }
+    } catch (err) {
+      container.innerHTML = '<div class="empty-state"><p>搜索失败: ' + escapeHtml(err.message) + '</p></div>';
+      return;
+    }
+  }
+
+  currentPage = page;
+  window._searchResults = data.resources;
+
+  if (!data.resources.length) {
+    container.innerHTML = '<div class="empty-state"><p>未找到相关资源</p></div>';
+    renderPagination(data, page);
+    return;
+  }
+
+  var html = '';
+  for (var i = 0; i < data.resources.length; i++) {
+    var r = data.resources[i];
+    html += '<div class="result-card">' +
+      '<div class="result-info">' +
+        '<div class="result-title">' + escapeHtml(r.title) + '</div>' +
+        '<div class="result-meta">' +
+          '<span>' + r.size_mb + ' MB</span>' +
+          '<span>' + escapeHtml(r.type || '?') + '</span>' +
+          '<span>' + escapeHtml(r.publisher || '') + '</span>' +
+          '<span>' + escapeHtml(r.fansub || '') + '</span>' +
+          '<span>' + (r.created_at || '').slice(0, 10) + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="result-actions">' +
+        '<button class="btn btn-primary btn-download" data-idx="' + i + '" data-method="aria2c">下载(aria2)</button>' +
+        '<button class="btn btn-primary btn-download-bitcomet" data-idx="' + i + '" style="background:#5b8def;">下载(BitComet)</button>' +
+        '<button class="btn btn-secondary btn-copymagnet" data-idx="' + i + '">复制磁力</button>' +
+        '<button class="btn btn-secondary btn-detail" data-idx="' + i + '" style="font-size:11px;">详情</button>' +
+      '</div>' +
+    '</div>';
+  }
+  container.innerHTML = html;
+  renderPagination(data, page);
+}
+
+function renderPagination(data, page) {
+  var pagDiv = document.getElementById('search-pagination');
+  pagDiv.innerHTML = '';
+  pagDiv.style.cssText = 'display:flex;gap:6px;margin-top:16px;justify-content:center;align-items:center;flex-wrap:wrap;';
+
+  var isFirst = page <= 1;
+  var isLast = data.complete;
+  var totalPages = data.complete ? page : '?';
+
+  // First page
+  var firstBtn = document.createElement('button');
+  firstBtn.className = 'btn btn-secondary';
+  firstBtn.textContent = '首页';
+  firstBtn.disabled = isFirst;
+  firstBtn.onclick = function() { doSearch(1); };
+  pagDiv.appendChild(firstBtn);
+
+  // Previous page
+  var prevBtn = document.createElement('button');
+  prevBtn.className = 'btn btn-secondary';
+  prevBtn.textContent = '← 上一页';
+  prevBtn.disabled = isFirst;
+  prevBtn.onclick = function() { doSearch(page - 1); };
+  pagDiv.appendChild(prevBtn);
+
+  // Page indicator: "第 X / Y 页" or "第 X 页" when total unknown
+  var pageLabel = document.createElement('span');
+  pageLabel.style.cssText = 'font-size:13px;color:var(--text2);margin:0 4px;';
+  pageLabel.textContent = '第';
+  pagDiv.appendChild(pageLabel);
+
+  var pageInput = document.createElement('input');
+  pageInput.type = 'number';
+  pageInput.min = '1';
+  pageInput.value = page;
+  pageInput.style.cssText = 'width:50px;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:13px;text-align:center;';
+  pageInput.onkeydown = function(e) {
+    if (e.key === 'Enter') {
+      var p1 = parseInt(pageInput.value);
+      if (p1 >= 1) doSearch(p1);
+    }
+  };
+  pagDiv.appendChild(pageInput);
+
+  var pageInfo = document.createElement('span');
+  pageInfo.style.cssText = 'font-size:13px;color:var(--text2);margin:0 4px;';
+  pageInfo.textContent = isLast ? ('/ ' + totalPages + ' 页') : '页';
+  pagDiv.appendChild(pageInfo);
+
+  // Go button
+  var goBtn = document.createElement('button');
+  goBtn.className = 'btn btn-primary';
+  goBtn.textContent = '跳转';
+  goBtn.style.cssText = 'padding:4px 10px;font-size:12px;';
+  goBtn.onclick = function() {
+    var p2 = parseInt(pageInput.value);
+    if (p2 >= 1) doSearch(p2);
+  };
+  pagDiv.appendChild(goBtn);
+
+  // Next page
+  var nextBtn = document.createElement('button');
+  nextBtn.className = 'btn btn-secondary';
+  nextBtn.textContent = '下一页 →';
+  nextBtn.disabled = isLast;
+  nextBtn.onclick = function() { doSearch(page + 1); };
+  pagDiv.appendChild(nextBtn);
+
+  // If total is known, show "共 X 页" hint
+  if (isLast) {
+    var totalHint = document.createElement('span');
+    totalHint.style.cssText = 'font-size:12px;color:var(--text2);margin-left:6px;';
+    totalHint.textContent = '共 ' + totalPages + ' 页';
+    pagDiv.appendChild(totalHint);
+  }
+}
+
+function copyMagnet(magnet) {
+  navigator.clipboard.writeText(magnet).then(
+    function() { toast('磁力链接已复制', 'success'); },
+    function() { toast('复制失败', 'error'); }
+  );
+}
+
+async function showMagnetDetail(r) {
+  var modal = document.getElementById('detail-modal');
+  var cont = document.getElementById('detail-content');
+  modal.style.display = 'block';
+  var info = '<div style="margin-bottom:12px;"><strong>标题:</strong> ' + escapeHtml(r.title) + '</div>';
+  info += '<div style="margin-bottom:12px;"><strong>大小:</strong> ' + r.size_mb + ' MB | <strong>类型:</strong> ' + escapeHtml(r.type || '?') + '</div>';
+  info += '<div style="margin-bottom:12px;"><strong>字幕组:</strong> ' + escapeHtml(r.fansub || '?') + ' | <strong>发布者:</strong> ' + escapeHtml(r.publisher || '?') + '</div>';
+  info += '<div style="margin-bottom:12px;"><strong>时间:</strong> ' + (r.created_at || '').slice(0, 10) + '</div>';
+  info += '<div style="margin-bottom:12px;word-break:break-all;"><strong>磁力链接:</strong><br><code style="font-size:11px;color:var(--text2);">' + escapeHtml(r.magnet) + '</code></div>';
+  info += '<div style="margin-top:16px;"><button class="btn btn-secondary btn-fetch-detail-files" style="font-size:12px;">获取文件列表</button></div>';
+  info += '<div id="detail-files"></div>';
+  cont.innerHTML = info;
+  // Store magnet for the fetch button
+  document.querySelector('.btn-fetch-detail-files').onclick = function() {
+    fetchDetailFiles(r.magnet);
+  };
+}
+
+async function fetchDetailFiles(magnet) {
+  var btn = document.querySelector('.btn-fetch-detail-files');
+  var div = document.getElementById('detail-files');
+  if (!btn || !div) return;
+  btn.disabled = true; btn.textContent = '获取中...';
+  div.innerHTML = '<p style="font-size:12px;color:var(--text2);">正在通过 DHT 网络获取种子文件列表...</p>';
+  try {
+    var resp = await fetch(API + '/api/magnet/files?magnet=' + encodeURIComponent(magnet));
+    var data = await resp.json();
+    if (data.files && data.files.length > 0) {
+      var html = '<div style="margin-top:12px;"><strong>文件列表 (' + data.files.length + '):</strong></div><div class="file-list" style="max-height:300px;margin-top:8px;">';
+      for (var i = 0; i < data.files.length; i++) {
+        var f = data.files[i];
+        html += '<div class="file-item"><span>' + escapeHtml(f.name) + '</span><span class="file-size">' + f.size_mb + ' MB</span></div>';
+      }
+      html += '</div>'; div.innerHTML = html;
+    } else { div.innerHTML = '<p style="font-size:12px;color:var(--warning);">未找到文件信息（种子可能无活跃节点）</p>'; }
+  } catch(e) { div.innerHTML = '<p style="font-size:12px;color:var(--danger);">获取失败: ' + escapeHtml(e.message) + '</p>'; }
+  finally { btn.textContent = '重新获取'; btn.disabled = false; }
+}
+
+function closeDetailModal() { document.getElementById('detail-modal').style.display = 'none'; }
+document.addEventListener('click', function(e) { if (e.target.id === 'detail-modal') closeDetailModal(); });
+
+async function downloadAndProcess(magnet, title, method) {
+  method = method || 'aria2c';
+  try {
+    // Copy magnet to clipboard
+    try {
+      await navigator.clipboard.writeText(magnet);
+      toast('磁力链接已复制到剪贴板', 'success');
+    } catch(e) { console.error(e); }
+
+    // Start download job
+    var url = API + '/api/jobs/process-download?magnet=' + encodeURIComponent(magnet) +
+              '&title=' + encodeURIComponent(title) + '&hw_accel=auto' +
+              '&method=' + method;
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    var labels = {aria2c: 'aria2c', qbittorrent: 'qBittorrent', bitcomet: 'BitComet'};
+    var label = labels[method] || method;
+    toast('已提交到 ' + label + ' 下载，完成后自动处理', 'success');
+    switchTab('jobs');
+  } catch (e) {
+    toast('操作失败: ' + e.message, 'error');
+  }
+}
+
+// ============================================================
+// Local files
+// ============================================================
+async function loadLocalFiles() {
+  var container = document.getElementById('local-files');
+  try {
+    var vResp = await fetch(API + '/api/local/videos');
+    var sResp = await fetch(API + '/api/local/subtitles');
+    var vData = await vResp.json();
+    var sData = await sResp.json();
+    window._localVideos = vData.videos;
+
+    if (!vData.videos.length) {
+      container.innerHTML = '<div class="empty-state"><p>video 文件夹中没有找到视频文件</p><p style="font-size:12px;color:var(--text2)">请将 MKV/MP4 文件放入 video/ 目录</p></div>';
+      return;
+    }
+
+    var subOptions = '';
+    for (var si = 0; si < sData.subtitles.length; si++) {
+      var s = sData.subtitles[si];
+      subOptions += '<option value="' + safeAttr(s.path) + '">' + escapeHtml(s.name) + ' (' + s.size_kb + ' KB)</option>';
+    }
+
+    var html = '';
+    for (var i = 0; i < vData.videos.length; i++) {
+      var v = vData.videos[i];
+      var checked = _localSelected[v.path] ? ' checked' : '';
+      var cbDisplay = _localSelectMode ? '' : ' style="display:none;"';
+      html += '<div class="file-item" style="flex-wrap:wrap;" data-local-path="' + safeAttr(v.path) + '">' +
+        '<input type="checkbox" class="local-video-check"' + checked + cbDisplay + ' data-local-check="' + safeAttr(v.path) + '">' +
+        '<span style="font-size:18px;">🎬</span>' +
+        '<span class="file-name">' + escapeHtml(v.name) + ' <small style="color:var(--text2)">(' + v.source + ')</small></span>' +
+        '<span class="file-size">' + v.size_mb + ' MB</span>' +
+        '<span style="font-size:11px;color:var(--text2);min-width:100px;">' + (v.time_str || '') + '</span>' +
+        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+          '<select id="sub-select-' + i + '" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;">' +
+            '<option value="">自动提取字幕 (仅MKV)</option>' +
+            subOptions +
+          '</select>' +
+          '<button class="btn btn-primary btn-process-local" data-idx="' + i + '">提取字幕并分割</button>' +
+        '</div>' +
+      '</div>';
+    }
+    container.innerHTML = html;
+    updateLocalSelectUI();
+  } catch (e) {
+    container.innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
+  }
+}
+
+function toggleLocalSelect() {
+  _localSelectMode = !_localSelectMode;
+  if (!_localSelectMode) _localSelected = {};
+  loadLocalFiles();
+}
+
+function updateLocalSelectUI() {
+  document.getElementById('btn-local-select').textContent = _localSelectMode ? '退出选择' : '选择';
+  document.getElementById('btn-local-select-all').style.display = _localSelectMode ? 'inline-block' : 'none';
+  var selCount = Object.keys(_localSelected).length;
+  document.getElementById('btn-local-delete').style.display = (_localSelectMode && selCount > 0) ? 'inline-block' : 'none';
+}
+
+function selectAllLocal() {
+  var allSelected = Object.keys(_localSelected).length === window._localVideos.length;
+  if (allSelected) {
+    _localSelected = {};
+  } else {
+    for (var i = 0; i < window._localVideos.length; i++) {
+      _localSelected[window._localVideos[i].path] = true;
+    }
+  }
+  loadLocalFiles();
+}
+
+function onLocalVideoCheck(cb, path) {
+  if (cb.checked) { _localSelected[path] = true; }
+  else { delete _localSelected[path]; }
+  updateLocalSelectUI();
+}
+
+async function deleteSelectedLocal() {
+  var paths = Object.keys(_localSelected);
+  if (!paths.length) { toast('请先选择要删除的视频', 'info'); return; }
+  if (!confirm('确定要删除选中的 ' + paths.length + ' 个视频文件？\n\n此操作不可撤销！')) return;
+  try {
+    var resp = await fetch(API + '/api/local-files/delete-batch', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({paths: paths})
+    });
+    var data = await resp.json();
+    toast('已删除 ' + data.deleted + ' 个文件', 'success');
+    _localSelectMode = false;
+    _localSelected = {};
+    loadLocalFiles();
+  } catch(e) { toast('删除失败: ' + e.message, 'error'); }
+}
+
+// Delegate checkbox clicks in local tab
+document.getElementById('local-files').addEventListener('change', function(e) {
+  if (e.target.classList.contains('local-video-check')) {
+    onLocalVideoCheck(e.target, e.target.getAttribute('data-local-check'));
+  }
+});
+
+// ============================================================
+// Local files browser
+// ============================================================
+var _lfCurrentDir = '';
+var _lfData = null;           // current browse result
+var _lfSelected = {};         // { path: true }
+var _lfPlayingEl = null;
+var _lfPlayingPath = null;
+
+function _lfIsAudio(ext) {
+  var audioExts = { '.wav': 1, '.mp3': 1, '.flac': 1, '.ogg': 1, '.aac': 1, '.m4a': 1, '.wma': 1, '.opus': 1 };
+  return !!audioExts[ext.toLowerCase()];
+}
+
+async function loadLocalFilesBrowser(dir) {
+  dir = dir || '';
+  _lfCurrentDir = dir;
+  _lfSelected = {};
+  updateLfToolbar();
+  var container = document.getElementById('lf-list');
+  container.innerHTML = '<div class="empty-state"><p>加载中...</p></div>';
+  try {
+    var resp = await fetch(API + '/api/local-files/browse?dir=' + encodeURIComponent(dir));
+    if (!resp.ok) throw new Error(await resp.text());
+    _lfData = await resp.json();
+
+    // Breadcrumb
+    var bc = _lfData.breadcrumbs || [];
+    var bcHtml = '';
+    for (var i = 0; i < bc.length; i++) {
+      if (i > 0) bcHtml += ' <span>/</span> ';
+      if (i === bc.length - 1) {
+        bcHtml += '<span class="current">' + escapeHtml(bc[i].name) + '</span>';
+      } else {
+        bcHtml += '<a data-lf-breadcrumb="' + safeAttr(bc[i].dir) + '">' + escapeHtml(bc[i].name) + '</a>';
+      }
+    }
+    document.getElementById('lf-breadcrumb').innerHTML = bcHtml;
+
+    // Render items
+    var folders = _lfData.folders || [];
+    var files = _lfData.files || [];
+    if (!folders.length && !files.length) {
+      container.innerHTML = '<div class="empty-state"><p>此目录为空</p></div>';
+      return;
+    }
+
+    var html = '';
+    // Folders first
+    for (var fi = 0; fi < folders.length; fi++) {
+      var f = folders[fi];
+      html += _renderLfItem(f, 'folder', fi);
+    }
+    // Then files
+    for (var fli = 0; fli < files.length; fli++) {
+      var fl = files[fli];
+      html += _renderLfItem(fl, fl.type, folders.length + fli);
+    }
+    container.innerHTML = html;
+  } catch(e) {
+    container.innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
+  }
+}
+
+function _renderLfItem(item, type, idx) {
+  var isDir = type === 'folder';
+  var path = safeAttr(item.path);
+  var checked = _lfSelected[item.path] ? ' checked' : '';
+  var icon = '📄';
+  var typeLabel = '';
+  if (isDir) { icon = '📁'; typeLabel = '<span class="lf-item-type lf-type-folder">文件夹</span>'; }
+  else if (type === 'audio') { icon = '🎵'; typeLabel = '<span class="lf-item-type lf-type-audio">音频</span>'; }
+  else if (type === 'video') { icon = '🎬'; typeLabel = '<span class="lf-item-type lf-type-video">视频</span>'; }
+  else if (type === 'image') { icon = '🖼️'; typeLabel = '<span class="lf-item-type lf-type-image">图片</span>'; }
+  else if (type === 'subtitle') { icon = '📝'; typeLabel = '<span class="lf-item-type lf-type-subtitle">字幕</span>'; }
+
+  var cls = 'lf-item';
+  if (_lfSelected[item.path]) cls += ' selected';
+  if (_lfPlayingPath === item.path) cls += ' audio-playing';
+
+  var row = '<div class="' + cls + '" data-lf-path="' + path + '" data-lf-type="' + type + '" data-lf-idx="' + idx + '">';
+  row += '<input type="checkbox" class="lf-checkbox" data-lf-check="' + path + '"' + checked + '>';
+  row += '<span style="font-size:18px;flex-shrink:0;">' + icon + '</span>';
+  row += '<span class="lf-item-name">' + escapeHtml(item.name) + '</span>';
+  if (!isDir && item.size_str) {
+    row += '<span class="lf-item-size">' + item.size_str + '</span>';
+  }
+  if (!isDir && item.time_str) {
+    row += '<span class="lf-item-time">' + item.time_str + '</span>';
+  }
+  row += typeLabel;
+  if (!isDir && _lfIsAudio(item.ext || '')) {
+    row += '<span class="lf-actions-cell">';
+    row += '<button class="btn btn-secondary lf-btn-play" data-lf-play="' + path + '" data-lf-playname="' + safeAttr(item.name) + '" style="font-size:10px;padding:3px 8px;">▶ 播放</button>';
+    row += '</span>';
+  }
+  row += '</div>';
+  return row;
+}
+
+function updateLfToolbar() {
+  var count = Object.keys(_lfSelected).length;
+  document.getElementById('lf-select-count').style.display = count > 0 ? 'inline' : 'none';
+  document.getElementById('lf-select-count').textContent = count > 0 ? '已选 ' + count + ' 项' : '未选中';
+  document.getElementById('lf-btn-deselect-all').style.display = count > 0 ? 'inline-block' : 'none';
+  document.getElementById('lf-btn-delete').style.display = count > 0 ? 'inline-block' : 'none';
+}
+
+function lfSelectAll() {
+  if (!_lfData) return;
+  var folders = _lfData.folders || [];
+  var files = _lfData.files || [];
+  for (var i = 0; i < folders.length; i++) { _lfSelected[folders[i].path] = true; }
+  for (var i = 0; i < files.length; i++) { _lfSelected[files[i].path] = true; }
+  refreshLfList();
+}
+
+function lfDeselectAll() {
+  _lfSelected = {};
+  refreshLfList();
+}
+
+function lfToggleItem(path) {
+  if (_lfSelected[path]) {
+    delete _lfSelected[path];
+  } else {
+    _lfSelected[path] = true;
+  }
+  refreshLfList();
+}
+
+function refreshLfList() {
+  updateLfToolbar();
+  var container = document.getElementById('lf-list');
+  if (!_lfData) return;
+  var folders = _lfData.folders || [];
+  var files = _lfData.files || [];
+  var html = '';
+  for (var i = 0; i < folders.length; i++) {
+    html += _renderLfItem(folders[i], 'folder', i);
+  }
+  for (var i = 0; i < files.length; i++) {
+    html += _renderLfItem(files[i], files[i].type, folders.length + i);
+  }
+  container.innerHTML = html;
+}
+
+async function lfDeleteSelected() {
+  var paths = Object.keys(_lfSelected);
+  if (!paths.length) { toast('未选中任何文件', 'info'); return; }
+  if (!confirm('确定要删除 ' + paths.length + ' 个文件/文件夹？\n\n此操作不可撤销！')) return;
+  try {
+    var resp = await fetch(API + '/api/local-files/delete-batch', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: paths })
+    });
+    var data = await resp.json();
+    toast('已删除 ' + (data.deleted || 0) + ' 项' + (data.errors && data.errors.length ? '，' + data.errors.length + ' 项失败' : ''), 'success');
+    _lfSelected = {};
+    loadLocalFilesBrowser(_lfCurrentDir);
+  } catch(e) { toast('删除失败: ' + e.message, 'error'); }
+}
+
+function enterLfFolder(folderPath) {
+  // Compute relative dir from folder path
+  var base = _lfData ? _lfData.full_path : '';
+  // The folderPath is an absolute path, we need to compute dir relative to DATA_DIR
+  // Simple approach: use _lfCurrentDir + '/' + folder name
+  // The item.path is absolute, so get just the name
+  var name = folderPath.replace(/\\/g, '/').split('/').pop();
+  var newDir = _lfCurrentDir ? _lfCurrentDir + '/' + name : name;
+  loadLocalFilesBrowser(newDir);
+}
+
+function navigateLfBreadcrumb(dir) {
+  loadLocalFilesBrowser(dir);
+}
+
+function playLfAudio(path, name) {
+  var player = document.getElementById('lf-audio-player');
+  player.src = API + '/api/local-files/stream?path=' + encodeURIComponent(path);
+  player.load();
+  player.play().catch(function(){});
+  document.getElementById('lf-playing-name').textContent = name || path;
+  document.getElementById('lf-player-bar').style.display = 'block';
+
+  if (_lfPlayingEl) _lfPlayingEl.classList.remove('audio-playing');
+  _lfPlayingEl = null;
+  _lfPlayingPath = path;
+  // Highlight the playing item
+  var items = document.querySelectorAll('#lf-list .lf-item');
+  for (var i = 0; i < items.length; i++) {
+    if (items[i].getAttribute('data-lf-path') === path) {
+      items[i].classList.add('audio-playing');
+      _lfPlayingEl = items[i];
+      break;
+    }
+  }
+}
+
+function closeLfPlayer() {
+  var player = document.getElementById('lf-audio-player');
+  player.pause();
+  player.src = '';
+  document.getElementById('lf-player-bar').style.display = 'none';
+  document.getElementById('lf-playing-name').textContent = '';
+  if (_lfPlayingEl) { _lfPlayingEl.classList.remove('audio-playing'); _lfPlayingEl = null; }
+  _lfPlayingPath = null;
+}
+
+async function uploadLocalFiles() {
+  var input = document.getElementById('local-upload-input');
+  var files = input.files;
+  if (!files.length) return;
+
+  var progress = document.getElementById('local-upload-progress');
+  progress.style.display = 'inline';
+
+  for (var i = 0; i < files.length; i++) {
+    var formData = new FormData();
+    formData.append('file', files[i]);
+
+    progress.textContent = '上传中... ' + (i + 1) + '/' + files.length;
+    try {
+      var resp = await fetch(API + '/api/local/upload', {
+        method: 'POST',
+        body: formData
+      });
+      var data = await resp.json();
+      if (data.status === 'ok') {
+        toast(files[i].name + ' 上传完成', 'success');
+      } else {
+        toast(files[i].name + ' 上传失败: ' + (data.detail || ''), 'error');
+      }
+    } catch(e) {
+      toast(files[i].name + ' 上传失败: ' + e.message, 'error');
+    }
+  }
+  progress.style.display = 'none';
+  input.value = '';
+  loadLocalFiles();
+}
+
+async function processLocal(idx) {
+  try {
+    var v = window._localVideos[idx];
+    var url = API + '/api/jobs/process-local?video_path=' + encodeURIComponent(v.path);
+    var select = document.getElementById('sub-select-' + idx);
+    if (select && select.value) {
+      url += '&subtitle_path=' + encodeURIComponent(select.value);
+    }
+    url += '&hw_accel=auto';
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    toast('任务已创建: ' + data.job_id, 'success');
+    switchTab('jobs');
+  } catch (e) {
+    toast('创建任务失败: ' + e.message, 'error');
+  }
+}
+
+// ============================================================
+// Filter clips
+// ============================================================
+async function filterClips(jobId, minDuration) {
+  try {
+    var url = API + '/api/jobs/' + jobId + '/filter?min_duration=' + minDuration;
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    if (data.deleted > 0) {
+      toast('已删除 ' + data.deleted + ' 个片段 (释放 ' + data.freed_mb + ' MB), 剩余 ' + data.remaining + ' 个', 'success');
+    } else {
+      toast(data.message || '没有需要删除的片段', 'info');
+    }
+    loadJobs();
+    loadResults();
+  } catch (e) {
+    toast('筛选失败: ' + e.message, 'error');
+  }
+}
+
+// ============================================================
+// Jobs
+// ============================================================
+var _jobsFilter = _uiState.jobsFilter || 'running';
+
+function switchJobsSubtab(filter) {
+  _jobsFilter = filter;
+  _uiState.jobsFilter = filter; _saveUiState();
+  document.getElementById('jobs-subtab-running').className = 'btn ' + (filter === 'running' ? 'btn-primary' : 'btn-secondary');
+  document.getElementById('jobs-subtab-completed').className = 'btn ' + (filter === 'completed' ? 'btn-primary' : 'btn-secondary');
+  document.getElementById('jobs-subtab-failed').className = 'btn ' + (filter === 'failed' ? 'btn-primary' : 'btn-secondary');
+  document.getElementById('btn-clear-cancelled').style.display = filter === 'running' ? 'inline-block' : 'none';
+  document.getElementById('btn-clear-completed').style.display = filter === 'completed' ? 'inline-block' : 'none';
+  document.getElementById('btn-clear-failed').style.display = filter === 'failed' ? 'inline-block' : 'none';
+  loadJobs();
+}
+
+async function clearJobsByStatus(status) {
+  if (!confirm('确定清除所有' + (status === 'completed' ? '已完成' : '失败') + '的任务记录？此操作不可恢复。')) return;
+  try {
+    var resp = await fetch(API + '/api/jobs/clear?status=' + status, { method: 'DELETE' });
+    var data = await resp.json();
+    toast('已清除 ' + data.deleted + ' 条记录', 'success');
+    loadJobs();
+  } catch(e) { toast('清除失败: ' + e.message, 'error'); }
+}
+
+async function loadJobs() {
+  var container = document.getElementById('jobs-list');
+  try {
+    var resp = await fetch(API + '/api/jobs');
+    var data = await resp.json();
+    if (!data.jobs.length) {
+      container.innerHTML = '<div class="empty-state"><p>暂无任务</p></div>';
+      return;
+    }
+    var jobs = data.jobs.slice().reverse();
+
+    // Filter by status
+    if (_jobsFilter === 'running') {
+      jobs = jobs.filter(function(j) { return j.status === 'running' || j.status === 'pending' || j.status === 'cancelled' || j.status === 'download_submitted' || j.status === 'queued' || j.status === 'interrupted'; });
+    } else if (_jobsFilter === 'completed') {
+      jobs = jobs.filter(function(j) { return j.status === 'completed'; });
+    } else if (_jobsFilter === 'failed') {
+      jobs = jobs.filter(function(j) { return j.status === 'failed'; });
+    }
+
+    if (!jobs.length) {
+      var labels = { running: '没有执行中的任务', completed: '没有已完成的任务', failed: '没有失败的任务' };
+      container.innerHTML = '<div class="empty-state"><p>' + (labels[_jobsFilter] || '暂无任务') + '</p></div>';
+      return;
+    }
+
+    var html = '';
+    for (var ji = 0; ji < jobs.length; ji++) {
+      var j = jobs[ji];
+      var progress = j.progress || 0;
+      var isRunning = j.status === 'running' || j.status === 'pending';
+      html += '<div class="job-card">' +
+        '<div class="job-header">' +
+          '<span class="job-title">' + escapeHtml(j.title || j.job_id) + '</span>' +
+          '<div style="display:flex;gap:8px;align-items:center;">' +
+            '<span class="job-status status-' + j.status + '">' + statusText(j.status) + '</span>' +
+            (j.status === 'completed' || j.status === 'failed' ? '<button class="btn btn-secondary btn-delete-job" data-jobid="' + j.job_id + '" style="font-size:10px;padding:2px 6px;background:var(--danger);color:#fff;margin-left:6px;">X</button>' : '') +
+            (j.status === 'running' || j.status === 'download_submitted' || j.status === 'queued' ? '<button class="btn btn-secondary btn-cancel-job" data-jobid="' + j.job_id + '" style="font-size:10px;padding:2px 8px;background:var(--warning);color:#000;margin-left:6px;">取消</button>' : '') +
+            (j.status === 'interrupted' ? '<button class="btn btn-success btn-resume-job" data-jobid="' + j.job_id + '" style="font-size:10px;padding:2px 8px;background:var(--success);color:#000;margin-left:6px;">继续执行</button><button class="btn btn-secondary btn-discard-job" data-jobid="' + j.job_id + '" style="font-size:10px;padding:2px 8px;background:var(--danger);color:#fff;margin-left:4px;">丢弃</button>' : '') +
+          '</div>' +
+        '</div>' +
+        '<div class="progress-bar"><div class="progress-fill" style="width:' + progress + '%"></div></div>' +
+        '<div style="font-size:12px;color:var(--text2);">' + progress.toFixed(0) + '% - ' + escapeHtml(stepName(j.current_step) || '等待中...') + '</div>' +
+        (j.status === 'download_submitted' && j.download_speed > 0
+          ? '<div style="font-size:12px;color:var(--accent);">速度: ' + (j.download_speed / 1024).toFixed(1) + ' MB/s' +
+            (j.downloaded_mb ? ' | 已下载: ' + j.downloaded_mb.toFixed(0) + ' / ' + j.total_mb.toFixed(0) + ' MB' : '') +
+            ' | 种子: ' + (j.seeders || 0) + '</div>'
+          : (j.status === 'download_submitted'
+            ? '<div style="font-size:12px;color:var(--warning);">' + escapeHtml(j.current_step || '等待节点中...') + (j.total_mb > 0 ? ' | 大小: ' + j.total_mb.toFixed(0) + ' MB' : '') + '</div>'
+            : ''));
+      if (j.steps && j.steps.length) {
+        html += '<div class="step-list">';
+        for (var si = 0; si < j.steps.length; si++) {
+          var s = j.steps[si];
+          html += '<span class="step-item ' + s.status + '">' + stepName(s.step) + ': ' + statusText(s.status) + (s.duration ? ' (' + s.duration.toFixed(1) + 's)' : '') + '</span>';
+        }
+        html += '</div>';
+      }
+      if (j.clip_count && j.status === 'completed') {
+        html += '<div style="margin-top:8px;font-size:13px;">已生成 ' + j.clip_count + ' 个片段</div>';
+        html += '<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+          '<label style="font-size:12px;color:var(--text2);">最小时长:</label>' +
+          '<input id="min-dur-' + j.job_id + '" type="number" value="1.0" step="0.1" min="0" style="width:60px;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:12px;">' +
+          '<span style="font-size:12px;color:var(--text2);">秒</span>' +
+          '<button class="btn btn-secondary btn-filter-clips" data-jobid="' + j.job_id + '">删除过短片段</button>' +
+        '</div>';
+      } else if (j.clip_count && j.status !== 'completed') {
+        html += '<div style="margin-top:8px;font-size:13px;">已生成 ' + j.clip_count + ' 个片段</div>';
+      }
+      html += '</div>';
+    }
+    container.innerHTML = html;
+  } catch (e) {
+    container.innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
+  }
+}
+
+async function cancelJob(jobId) {
+  if (!confirm('确定取消此任务？正在处理的视频将停止。')) return;
+  try {
+    var resp = await fetch(API + '/api/jobs/' + jobId + '/cancel', { method: 'POST' });
+    if (resp.ok) { toast('已取消', 'info'); loadJobs(); }
+    else { toast('取消失败', 'error'); }
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteJob(jobId) {
+  if (!confirm('Delete this job?')) return;
+  try {
+    var resp = await fetch(API + '/api/jobs/' + jobId, { method: 'DELETE' });
+    if (resp.ok) { toast('Deleted', 'success'); loadJobs(); }
+    else { toast('Delete failed', 'error'); }
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function resumePipelineJob(jobId) {
+  if (!confirm('确定恢复此中断的任务？将跳过已完成的步骤继续执行。')) return;
+  try {
+    var resp = await fetch(API + '/api/jobs/' + jobId + '/resume', { method: 'POST' });
+    var data = await resp.json();
+    if (resp.ok) { toast(data.message || '任务已恢复', 'success'); loadJobs(); }
+    else { toast('恢复失败: ' + (data.detail || ''), 'error'); }
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function discardPipelineJob(jobId) {
+  if (!confirm('确定丢弃此中断的任务？任务记录将标记为已取消。')) return;
+  try {
+    var resp = await fetch(API + '/api/jobs/' + jobId + '/discard', { method: 'POST' });
+    var data = await resp.json();
+    if (resp.ok) { toast(data.message || '已丢弃', 'info'); loadJobs(); }
+    else { toast('丢弃失败: ' + (data.detail || ''), 'error'); }
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+}
+
+function startJobPolling() { stopJobPolling(); jobPollInterval = setInterval(loadJobs, 3000); }
+function stopJobPolling() { if (jobPollInterval) { clearInterval(jobPollInterval); jobPollInterval = null; } }
+
+// ============================================================
+// Review
+// ============================================================
+async function loadReviewDirs() {
+  try {
+    var resp = await fetch(API + '/api/review/dirs');
+    var data = await resp.json();
+    var select = document.getElementById('review-dir-select');
+    var curVal = select.value;
+    var html = '<option value="">选择视频...</option>';
+    for (var i = 0; i < data.dirs.length; i++) {
+      var d = data.dirs[i];
+      html += '<option value="' + safeAttr(d.path) + '">' + escapeHtml(d.name) + '</option>';
+    }
+    select.innerHTML = html;
+    // Restore previous selection if it still exists
+    if (curVal) {
+      select.value = curVal;
+      // verify it was actually set (option might have been removed)
+      if (select.value === curVal) {
+        loadReviewClips();
+        return;
+      }
+    }
+    // Auto-select newest on first load
+    if (data.dirs.length > 0) {
+      select.value = data.dirs[data.dirs.length - 1].path;
+      loadReviewClips();
+    }
+  } catch(e) { console.error(e); }
+}
+
+async function loadReviewClips() {
+  var dir = document.getElementById('review-dir-select').value;
+  if (!dir) return;
+  try {
+    var resp = await fetch(API + '/api/review/clips?clip_dir=' + encodeURIComponent(dir));
+    var data = await resp.json();
+    window._reviewClips = data.clips;
+    window._reviewDir = data.clip_dir;
+    _uiState.reviewDir = window._reviewDir; _saveUiState();
+    window._reviewIndex = data.pending_index >= 0 ? data.pending_index : 0;
+
+    updateReviewStats();
+    buildReviewList();
+    playReviewClip(window._reviewIndex, false);  // no auto-play on initial load
+  } catch(e) { toast('加载审核列表失败: ' + e.message, 'error'); }
+}
+
+function updateReviewStats() {
+  var clips = window._reviewClips || [];
+  var approved = 0, skipped = 0;
+  for (var i = 0; i < clips.length; i++) {
+    if (clips[i].status === 'approved') approved++;
+    else if (clips[i].status === 'skipped') skipped++;
+  }
+  document.getElementById('review-stats').textContent =
+    '共 ' + clips.length + ' 个 | 已保留 ' + approved + ' | 已跳过 ' + skipped + ' | 待审核 ' + (clips.length - approved - skipped);
+}
+
+function buildReviewList() {
+  var clips = window._reviewClips || [];
+  var html = '';
+  for (var i = 0; i < clips.length; i++) {
+    var c = clips[i];
+    var icon = c.status === 'approved' ? '✅' : (c.status === 'skipped' ? '⏭️' : '🎞️');
+    var activeClass = (i === window._reviewIndex) ? ' style="background:var(--bg3);"' : '';
+    html += '<div class="file-item"' + activeClass + ' data-review-idx="' + i + '">' +
+      '<span>' + icon + '</span>' +
+      '<span class="file-name" style="font-size:12px;">' + escapeHtml(c.name) + '</span>' +
+      '<span class="file-size">' + c.size_mb + ' MB</span>' +
+    '</div>';
+  }
+  document.getElementById('review-list').innerHTML = html;
+}
+
+function refreshReviewListHighlight() {
+  var items = document.querySelectorAll('#review-list .file-item[data-review-idx]');
+  for (var i = 0; i < items.length; i++) {
+    var idx = parseInt(items[i].getAttribute('data-review-idx'));
+    items[i].style.background = (idx === window._reviewIndex) ? 'var(--bg3)' : '';
+    var spans = items[i].querySelectorAll('span');
+    var clips = window._reviewClips;
+    if (clips && idx >= 0 && idx < clips.length && spans.length > 0) {
+      var c = clips[idx];
+      var icon = c.status === 'approved' ? '✅' : (c.status === 'skipped' ? '⏭️' : '🎞️');
+      spans[0].textContent = icon;
+    }
+  }
+}
+
+function playReviewClip(idx, autoPlay) {
+  if (autoPlay === undefined) autoPlay = true;
+  if (!window._reviewClips || window._reviewClips.length === 0) return;
+  if (idx < 0 || idx >= window._reviewClips.length) idx = 0;
+  window._reviewIndex = idx;
+  var c = window._reviewClips[idx];
+
+  // Only update video src — do NOT rebuild DOM
+  var player = document.getElementById('review-player');
+  var newSrc = API + '/api/review/stream?path=' + encodeURIComponent(c.path);
+  if (player.src !== newSrc) {
+    player.src = newSrc;
+    player.load();
+  }
+  if (autoPlay) { player.play().catch(function() {}); }
+  document.getElementById('review-clip-name').textContent = c.name;
+
+  // Lightweight highlight refresh — no innerHTML rebuild
+  refreshReviewListHighlight();
+  refreshEmotionLabels('review-emotion-bar', c.name, window._reviewDir, '/api/review/clip-emotions');
+}
+
+// Delegate clicks on the review list (avoids inline onclick rebuilds)
+document.getElementById('review-list').addEventListener('click', function(e) {
+  var item = e.target.closest('.file-item[data-review-idx]');
+  if (!item) return;
+  var idx = parseInt(item.getAttribute('data-review-idx'));
+  if (!isNaN(idx)) playReviewClip(idx);
+});
+
+async function reviewAction(action) {
+  if (!window._reviewDir || !window._reviewClips || window._reviewIndex < 0 || window._reviewIndex >= window._reviewClips.length) return;
+  var c = window._reviewClips[window._reviewIndex];
+  try {
+    var url = API + '/api/review/' + action + '?clip_dir=' + encodeURIComponent(window._reviewDir) + '&clip_name=' + encodeURIComponent(c.name);
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+
+    // Update clip status in-place — NO DOM rebuild
+    if (data.status === 'ok') {
+      c.status = action === 'approve' ? 'approved' : 'skipped';
+    }
+
+    updateReviewStats();
+    refreshReviewListHighlight();
+
+    // Move to next clip in list (not just pending ones)
+    var nextIdx = window._reviewIndex + 1;
+    if (nextIdx >= window._reviewClips.length) nextIdx = 0;
+    playReviewClip(nextIdx);
+  } catch(e) { toast('操作失败: ' + e.message, 'error'); }
+}
+
+async function loadEmotionCounts(barId, apiPath) {
+  try {
+    var resp = await fetch(API + apiPath);
+    var data = await resp.json();
+    var counts = data.counts || {};
+    var bar = document.getElementById(barId);
+    if (!bar) return;
+    var btns = bar.querySelectorAll('.btn-emotion');
+    for (var i = 0; i < btns.length; i++) {
+      var emo = btns[i].getAttribute('data-emotion');
+      var cntSpan = btns[i].querySelector('.emo-count');
+      if (cntSpan) { cntSpan.textContent = counts[emo] || 0; }
+    }
+  } catch(e) { /* ignore */ }
+}
+
+async function refreshEmotionLabels(barId, clipName, clipDir, apiPath) {
+  if (!clipName || !clipDir) return;
+  try {
+    var url = API + apiPath + '?clip_dir=' + encodeURIComponent(clipDir) + '&clip_name=' + encodeURIComponent(clipName);
+    var resp = await fetch(url);
+    var data = await resp.json();
+    var emotions = data.emotions || [];
+    var bar = document.getElementById(barId);
+    if (!bar) return;
+    var btns = bar.querySelectorAll('.btn-emotion');
+    for (var i = 0; i < btns.length; i++) {
+      var emo = btns[i].getAttribute('data-emotion');
+      if (emotions.indexOf(emo) >= 0) {
+        btns[i].classList.add('classified');
+      } else {
+        btns[i].classList.remove('classified');
+      }
+    }
+  } catch(e) { /* silently ignore */ }
+}
+
+async function classifyEmotion(emotion) {
+  if (!window._reviewDir || !window._reviewClips || window._reviewIndex < 0 || window._reviewIndex >= window._reviewClips.length) {
+    toast('请先加载并选择要分类的视频片段', 'info');
+    return;
+  }
+  var c = window._reviewClips[window._reviewIndex];
+  try {
+    var url = API + '/api/review/classify-emotion?clip_dir=' + encodeURIComponent(window._reviewDir) + '&clip_name=' + encodeURIComponent(c.name) + '&emotion=' + encodeURIComponent(emotion);
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    if (data.status === 'ok') {
+      toast('已分类到「' + emotion + '」', 'success');
+      refreshEmotionLabels('review-emotion-bar', c.name, window._reviewDir, '/api/review/clip-emotions');
+      loadEmotionCounts('review-emotion-bar', '/api/review/emotion-counts');
+    } else {
+      toast('分类失败', 'error');
+    }
+  } catch(e) { toast('分类失败: ' + e.message, 'error'); }
+}
+
+function reviewPrev() {
+  if (!window._reviewClips || window._reviewClips.length === 0) return;
+  var prev = window._reviewIndex - 1;
+  if (prev < 0) prev = window._reviewClips.length - 1;
+  playReviewClip(prev);
+}
+
+function reviewNext() {
+  if (!window._reviewClips || window._reviewClips.length === 0) return;
+  var next = window._reviewIndex + 1;
+  if (next >= window._reviewClips.length) next = 0;
+  playReviewClip(next);
+}
+
+function jumpToFirstPending() {
+  if (!window._reviewClips || window._reviewClips.length === 0) return;
+  for (var i = 0; i < window._reviewClips.length; i++) {
+    if (window._reviewClips[i].status === 'pending') { playReviewClip(i); scrollReviewListToCurrent(); return; }
+  }
+  toast('所有音频已审核完毕', 'info');
+}
+
+function scrollReviewListToCurrent() {
+  var list = document.getElementById('review-list');
+  var item = list.querySelector('.file-item[data-review-idx="' + window._reviewIndex + '"]');
+  if (item) item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function approveAllReview() {
+  if (!window._reviewDir || !window._reviewClips || !window._reviewClips.length) return;
+  var pending = [];
+  for (var i = 0; i < window._reviewClips.length; i++) {
+    if (window._reviewClips[i].status === 'pending') pending.push(window._reviewClips[i]);
+  }
+  if (!pending.length) { toast('没有待审核的片段', 'info'); return; }
+  if (!confirm('确定要全部保留 ' + pending.length + ' 个待审核片段吗？')) return;
+  var btn = document.getElementById('btn-approve-all');
+  btn.disabled = true;
+  btn.textContent = '保留中...';
+  var count = 0;
+  for (var i = 0; i < pending.length; i++) {
+    try {
+      var url = API + '/api/review/approve?clip_dir=' + encodeURIComponent(window._reviewDir) + '&clip_name=' + encodeURIComponent(pending[i].name);
+      var resp = await fetch(url, { method: 'POST' });
+      var data = await resp.json();
+      if (data.status === 'ok') { pending[i].status = 'approved'; count++; }
+    } catch(e) { console.error(e); }
+  }
+  toast('已保留 ' + count + '/' + pending.length + ' 个片段', 'success');
+  btn.disabled = false;
+  btn.textContent = '全部保留';
+  updateReviewStats();
+  refreshReviewListHighlight();
+}
+
+async function approveAllDreview() {
+  if (!window._dreviewDir || !window._dreviewClips || !window._dreviewClips.length) return;
+  var pending = [];
+  for (var i = 0; i < window._dreviewClips.length; i++) {
+    if (window._dreviewClips[i].status === 'pending') pending.push(window._dreviewClips[i]);
+  }
+  if (!pending.length) { toast('没有待审核的音频', 'info'); return; }
+  if (!confirm('确定要全部保留 ' + pending.length + ' 个待审核音频吗？')) return;
+  var btn = document.getElementById('btn-dreview-approve-all');
+  btn.disabled = true;
+  btn.textContent = '保留中...';
+  var count = 0;
+  for (var i = 0; i < pending.length; i++) {
+    try {
+      var url = API + '/api/denoise-review/approve?clip_dir=' + encodeURIComponent(window._dreviewDir) + '&clip_name=' + encodeURIComponent(pending[i].name);
+      var resp = await fetch(url, { method: 'POST' });
+      var data = await resp.json();
+      if (data.status === 'ok') { pending[i].status = 'approved'; count++; }
+    } catch(e) { console.error(e); }
+  }
+  toast('已保留 ' + count + '/' + pending.length + ' 个音频', 'success');
+  btn.disabled = false;
+  btn.textContent = '全部保留';
+  updateDreviewStats();
+  refreshDreviewListHighlight();
+}
+
+async function openApprovedFolder(type) {
+  var clipDir = type === 'denoised-approved' ? window._dreviewDir : window._reviewDir;
+  if (!clipDir) { toast('请先加载审核目录', 'info'); return; }
+  // Use client-side folder path display
+  var path = type === 'denoised-approved' ? window._denoisedApprovedDir || '' : window._approvedDir || '';
+  if (path) openFolderPath(path);
+}
+
+async function clearShortClips() {
+  if (!window._reviewDir) { toast('请先加载审核目录', 'error'); return; }
+  var minDur = parseFloat(document.getElementById('review-clear-dur').value) || 2.0;
+  if (!confirm('确定要删除所有时长 <= ' + minDur + ' 秒的视频片段吗？\n此操作不可撤销。')) return;
+  try {
+    var url = API + '/api/review/clear-short?clip_dir=' + encodeURIComponent(window._reviewDir) + '&min_duration=' + minDur;
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    if (data.status === 'started') {
+      toast('正在扫描并删除短片段...', 'info');
+      // Poll for completion
+      var pollTimer = setInterval(async function() {
+        try {
+          var r2 = await fetch(API + '/api/jobs/' + data.job_id);
+          var job = await r2.json();
+          if (job.status === 'completed') {
+            clearInterval(pollTimer);
+            var msg = (job.steps && job.steps.length) ? job.steps[job.steps.length - 1].message : '完成';
+            toast(msg, 'success');
+            var stepData = (job.steps && job.steps.length) ? job.steps[job.steps.length - 1].data : null;
+            if (stepData && stepData.deleted && stepData.deleted.length > 0) {
+              var now = new Date().toLocaleTimeString();
+              for (var d = 0; d < stepData.deleted.length; d++) {
+                _reviewClearDeleted.push({name: stepData.deleted[d], time: now});
+              }
+              renderReviewClearDeleted();
+            }
+            loadReviewClips();
+          } else if (job.status === 'failed') {
+            clearInterval(pollTimer);
+            toast('删除失败', 'error');
+            loadReviewClips();
+          }
+        } catch(e) { clearInterval(pollTimer); }
+      }, 1000);
+    } else {
+      toast('操作失败', 'error');
+    }
+  } catch(e) { toast('操作失败: ' + e.message, 'error'); }
+}
+
+var _reviewClearDeleted = [];  // [{name, time}] — tracks clear-short deleted files
+function renderReviewClearDeleted() {
+  var panel = document.getElementById('review-clear-deleted-panel');
+  var list = document.getElementById('review-clear-deleted-list');
+  var countEl = document.getElementById('review-clear-deleted-count');
+  if (!panel || !list) return;
+  if (!_reviewClearDeleted.length) {
+    panel.style.display = 'none';
+    return;
+  }
+  panel.style.display = 'block';
+  countEl.textContent = '(' + _reviewClearDeleted.length + ' 个)';
+  var html = '';
+  for (var i = 0; i < _reviewClearDeleted.length; i++) {
+    var d = _reviewClearDeleted[i];
+    html += '<div class="file-item" style="opacity:0.55;text-decoration:line-through;">' +
+      '<span style="background:var(--danger);color:#fff;font-size:10px;padding:1px 5px;border-radius:3px;">已删除</span>' +
+      '<span class="file-name" style="font-size:12px;margin-left:6px;">' + escapeHtml(d.name) + '</span>' +
+      '<span style="font-size:10px;color:var(--text2);">' + d.time + '</span>' +
+      '</div>';
+  }
+  list.innerHTML = html;
+}
+
+var _bgmResults = [];       // [{name, path, size_mb, has_bgm, has_reverb, bgm_score, silence_ratio, details}]
+var _bgmSelected = {};      // {name: true}
+var _bgmDeleted = {};       // {name: true} — tracks auto-deleted items to keep them visible
+
+async function detectBgmClips() {
+  if (!window._reviewDir) { toast('请先加载审核目录', 'error'); return; }
+  var btn = document.getElementById('btn-detect-bgm');
+  btn.disabled = true;
+  btn.textContent = '检测中...';
+  toast('正在分析音频特征，请稍候...', 'info');
+
+  try {
+    var url = API + '/api/review/detect-bgm?clip_dir=' + encodeURIComponent(window._reviewDir);
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    if (data.status !== 'started') { throw new Error('启动失败'); }
+
+    // Poll for completion
+    var pollTimer = setInterval(async function() {
+      try {
+        var r2 = await fetch(API + '/api/jobs/' + data.job_id);
+        var job = await r2.json();
+        if (job.status === 'completed') {
+          clearInterval(pollTimer);
+          // Extract results
+          var results = [];
+          if (job.steps && job.steps.length) {
+            var stepData = job.steps[job.steps.length - 1].data;
+            if (stepData && stepData.results) results = stepData.results;
+          }
+          _bgmResults = results;
+          _bgmSelected = {};
+          renderBgmResults();
+          if (results.length === 0) {
+            toast('未检测到BGM/混响片段', 'success');
+          } else {
+            // Auto-delete all detected BGM/reverb clips
+            var toDelete = [];
+            for (var i = 0; i < results.length; i++) { toDelete.push(results[i].path); }
+            try {
+              var dr = await fetch(API + '/api/results/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paths: toDelete }),
+              });
+              var dd = await dr.json();
+              toast('已自动删除 ' + dd.deleted + ' 个BGM/混响片段', 'success');
+              for (var j = 0; j < _bgmResults.length; j++) { _bgmDeleted[_bgmResults[j].name] = true; }
+              renderBgmResults();
+              loadReviewClips();
+            } catch(e2) { toast('自动删除失败: ' + e2.message, 'error'); }
+          }
+          btn.disabled = false;
+          btn.textContent = '检测BGM/混响';
+        } else if (job.status === 'failed') {
+          clearInterval(pollTimer);
+          btn.disabled = false;
+          btn.textContent = '检测BGM/混响';
+          toast('检测失败', 'error');
+        }
+      } catch(e) { clearInterval(pollTimer); btn.disabled = false; btn.textContent = '检测BGM/混响'; }
+    }, 1500);
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = '检测BGM/混响';
+    toast('启动失败: ' + e.message, 'error');
+  }
+}
+
+function renderBgmResults() {
+  var panel = document.getElementById('bgm-results-panel');
+  var list = document.getElementById('bgm-results-list');
+  var countEl = document.getElementById('bgm-count');
+  var deleteBtn = document.getElementById('btn-bgm-delete-all');
+
+  if (!_bgmResults.length) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  panel.style.display = 'block';
+  var deletedCount = Object.keys(_bgmDeleted).length;
+  var aliveCount = _bgmResults.length - deletedCount;
+  countEl.textContent = '(' + _bgmResults.length + ' 个' + (deletedCount > 0 ? ', 已删除 ' + deletedCount + ' 个' : '') + ')';
+
+  // Hide delete button if all are already deleted
+  if (deleteBtn) deleteBtn.style.display = deletedCount >= _bgmResults.length ? 'none' : '';
+
+  var html = '';
+  for (var i = 0; i < _bgmResults.length; i++) {
+    var r = _bgmResults[i];
+    var isDeleted = !!_bgmDeleted[r.name];
+    var checked = (!isDeleted && _bgmSelected[r.name]) ? ' checked' : '';
+    var badge = '';
+    if (r.has_bgm && r.has_reverb) badge = '<span style="background:var(--danger);color:#fff;font-size:10px;padding:1px 5px;border-radius:3px;">BGM+混响</span>';
+    else if (r.has_bgm) badge = '<span style="background:var(--warning);color:#000;font-size:10px;padding:1px 5px;border-radius:3px;">BGM</span>';
+    else if (r.has_reverb) badge = '<span style="background:#f0a500;color:#000;font-size:10px;padding:1px 5px;border-radius:3px;">混响</span>';
+    if (isDeleted) badge += '<span style="background:var(--danger);color:#fff;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;">已删除</span>';
+
+    var escapedName = escapeHtml(r.name).replace(/'/g, "\\'");
+    var safePath = r.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    var safeName = escapeHtml(r.name);
+    var rowStyle = isDeleted ? 'opacity:0.55;text-decoration:line-through;' : '';
+
+    html += '<div class="file-item" style="cursor:pointer;' + rowStyle + '" ' +
+      'onclick="' + (isDeleted ? '' : 'playBgmClip(\'' + safePath + '\',\'' + safeName + '\')') + '">' +
+      (isDeleted ? '<span style="width:14px;flex-shrink:0;"></span>' :
+        '<input type="checkbox"' + checked + ' style="pointer-events:auto;" ' +
+        'onclick="event.stopPropagation();toggleBgmCheckbox(\'' + escapedName + '\', this.checked)">') +
+      badge +
+      '<span class="file-name" style="font-size:12px;margin-left:6px;" title="' + escapeHtml(r.details) + '">' +
+        safeName + '</span>' +
+      '<span class="file-size">' + r.size_mb + ' MB</span>' +
+      '<span style="font-size:10px;color:var(--text2);">静音' + Math.round(r.silence_ratio * 100) + '% 评分' + r.bgm_score + '</span>' +
+      (isDeleted ? '' :
+        '<a href="' + API + '/api/review/stream?path=' + encodeURIComponent(r.path) + '" target="_blank" ' +
+        'style="font-size:10px;color:var(--text2);text-decoration:none;margin-left:6px;" ' +
+        'onclick="event.stopPropagation();" title="新窗口打开">↗</a>') +
+      '</div>';
+  }
+  list.innerHTML = html;
+}
+
+function playBgmClip(path, name) {
+  var player = document.getElementById('review-player');
+  var newSrc = API + '/api/review/stream?path=' + encodeURIComponent(path);
+  player.src = newSrc;
+  player.load();
+  player.play().catch(function() {});
+  document.getElementById('review-clip-name').textContent = '[BGM检测] ' + name;
+}
+
+function toggleBgmCheckbox(escapedName, checked) {
+  // Find the actual name from _bgmResults
+  for (var i = 0; i < _bgmResults.length; i++) {
+    if (escapeHtml(_bgmResults[i].name) === escapedName) {
+      if (checked) {
+        _bgmSelected[_bgmResults[i].name] = true;
+      } else {
+        delete _bgmSelected[_bgmResults[i].name];
+      }
+      return;
+    }
+  }
+}
+
+function toggleBgmSelectAll() {
+  var allSelected = Object.keys(_bgmSelected).length === _bgmResults.length;
+  var checkboxes = document.querySelectorAll('#bgm-results-list input[type=checkbox]');
+  if (allSelected) {
+    _bgmSelected = {};
+    for (var i = 0; i < checkboxes.length; i++) { checkboxes[i].checked = false; }
+  } else {
+    for (var i = 0; i < _bgmResults.length; i++) {
+      _bgmSelected[_bgmResults[i].name] = true;
+    }
+    for (var i = 0; i < checkboxes.length; i++) { checkboxes[i].checked = true; }
+  }
+}
+
+async function deleteAllBgm() {
+  if (!_bgmResults.length) return;
+  var alive = 0;
+  for (var i = 0; i < _bgmResults.length; i++) { if (!_bgmDeleted[_bgmResults[i].name]) alive++; }
+  if (alive === 0) { toast('所有BGM/混响片段已删除', 'info'); return; }
+  if (!confirm('确定要删除 ' + alive + ' 个BGM/混响片段吗？\n此操作不可撤销。')) return;
+
+  var toDelete = [];
+  for (var i = 0; i < _bgmResults.length; i++) {
+    if (!_bgmDeleted[_bgmResults[i].name]) toDelete.push(_bgmResults[i].path);
+  }
+
+  try {
+    var resp = await fetch(API + '/api/results/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: toDelete }),
+    });
+    var data = await resp.json();
+    toast('已删除 ' + data.deleted + ' 个BGM/混响片段', 'success');
+    for (var j = 0; j < _bgmResults.length; j++) { _bgmDeleted[_bgmResults[j].name] = true; }
+    _bgmSelected = {};
+    renderBgmResults();
+    loadReviewClips();
+  } catch(e) { toast('删除失败: ' + e.message, 'error'); }
+}
+
+// ============================================================
+// Male voice detection
+// ============================================================
+// ============================================================
+// Denoise — Unreviewed sub-tab
+// ============================================================
+
+function restoreDenoiseJobs() {
+  fetch(API + '/api/denoise/jobs')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.jobs || !data.jobs.length) return;
+      for (var i = 0; i < data.jobs.length; i++) {
+        if (data.jobs[i].status === 'running') {
+          _denoiseJobId = data.jobs[i].job_id;
+          document.getElementById('denoise-progress').style.display = 'block';
+          document.getElementById('denoise-interrupted-section').style.display = 'none';
+          document.getElementById('btn-denoise-all').style.display = 'none';
+          document.getElementById('btn-denoise-source-select').style.display = 'none';
+          startPolling();
+          updateDenoiseUI(data.jobs[i]);
+          return;
+        }
+      }
+      for (var i = 0; i < data.jobs.length; i++) {
+        if (data.jobs[i].status === 'interrupted') {
+          renderDenoiseInterrupted(data.jobs[i]);
+          return;
+        }
+      }
+    }).catch(function() {});
+}
+
+function renderDenoiseInterrupted(job) {
+  var completed = 0, pending = 0;
+  for (var i = 0; i < job.files.length; i++) {
+    if (job.files[i].status === 'completed') completed++;
+    else pending++;
+  }
+  var html = '<div style="background:var(--bg2);border:1px solid #ff6b6b;border-radius:8px;padding:16px;margin-bottom:12px;">';
+  html += '<div style="font-size:16px;font-weight:bold;color:#ff6b6b;margin-bottom:8px;">降噪任务因服务器重启中断</div>';
+  html += '<div style="font-size:13px;color:var(--text2);margin-bottom:4px;">视频: ' + escapeHtml(job.video_name) + '</div>';
+  html += '<div style="font-size:13px;color:var(--text2);margin-bottom:4px;">总文件数: ' + job.files.length + ' | 已完成: ' + completed + ' | 待处理: ' + pending + '</div>';
+  html += '<div style="font-size:13px;color:var(--text2);margin-bottom:12px;">进度: ' + (job.progress || 0).toFixed(0) + '%</div>';
+  html += '<div style="display:flex;gap:8px;">';
+  html += '<button class="btn btn-success" onclick="denoiseResumeInterrupted(\'' + job.job_id + '\')" style="background:var(--success);color:#000;">继续执行 (跳过已完成)</button>';
+  html += '<button class="btn btn-secondary" onclick="denoiseDiscardInterrupted(\'' + job.job_id + '\')" style="background:var(--danger);color:#fff;">丢弃任务</button>';
+  html += '</div></div>';
+  document.getElementById('denoise-interrupted-section').style.display = 'block';
+  document.getElementById('denoise-interrupted-section').innerHTML = html;
+}
+
+async function denoiseResumeInterrupted(jobId) {
+  if (!confirm('确定恢复此降噪任务？将跳过已完成的文件继续处理。')) return;
+  try {
+    var resp = await fetch(API + '/api/denoise/job/' + jobId + '/resume', { method: 'POST' });
+    var data = await resp.json();
+    if (resp.ok) {
+      toast('降噪任务已恢复执行', 'success');
+      document.getElementById('denoise-interrupted-section').style.display = 'none';
+      document.getElementById('denoise-progress').style.display = 'block';
+      document.getElementById('btn-denoise-all').style.display = 'none';
+      document.getElementById('btn-denoise-source-select').style.display = 'none';
+      _denoiseJobId = jobId;
+      startPolling();
+    } else {
+      toast('恢复失败: ' + (data.detail || ''), 'error');
+    }
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function denoiseDiscardInterrupted(jobId) {
+  if (!confirm('确定丢弃此中断的降噪任务？')) return;
+  try {
+    var resp = await fetch(API + '/api/denoise/job/' + jobId + '/discard', { method: 'POST' });
+    var data = await resp.json();
+    if (resp.ok) {
+      toast('已丢弃', 'info');
+      document.getElementById('denoise-interrupted-section').style.display = 'none';
+      refreshDenoise();
+    } else {
+      toast('丢弃失败: ' + (data.detail || ''), 'error');
+    }
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+}
+
+var _denoiseUrevDir = '';
+var _denoiseUrevClips = [];
+var _denoiseUrevJobId = null;
+var _denoiseUrevPollTimer = null;
+var _denoiseUrevSelectMode = false;
+var _denoiseUrevSelected = {};
+
+function switchDenoiseSubtab(name) {
+  _uiState.denoiseSubtab = name; _saveUiState();
+  document.getElementById('denoise-panel-reviewed').style.display = (name === 'reviewed') ? 'block' : 'none';
+  document.getElementById('denoise-panel-unreviewed').style.display = (name === 'unreviewed') ? 'block' : 'none';
+  document.getElementById('denoise-subtab-reviewed').className = (name === 'reviewed') ? 'btn btn-primary' : 'btn btn-secondary';
+  document.getElementById('denoise-subtab-unreviewed').className = (name === 'unreviewed') ? 'btn btn-primary' : 'btn btn-secondary';
+  var stepCfg = document.getElementById('denoise-step-config');
+  if (name === 'reviewed' || name === 'unreviewed') {
+    stepCfg.style.display = 'block';
+    if (!window._denoiseStepsLoaded) { renderStepConfig(); window._denoiseStepsLoaded = true; }
+  }
+  if (name === 'unreviewed') loadUnreviewedDirs();
+  if (name === 'reviewed') loadDenoiseDirs();
+}
+
+async function loadUnreviewedDirs() {
+  var select = document.getElementById('denoise-urev-dir-select');
+  // Save currently selected values
+  var selectedValues = [];
+  for (var i = 0; i < select.selectedOptions.length; i++) {
+    selectedValues.push(select.selectedOptions[i].value);
+  }
+  select.innerHTML = '<option value="">加载中...</option>';
+  try {
+    var resp = await fetch(API + '/api/denoise/unreviewed-dirs');
+    var data = await resp.json();
+    var dirs = data.dirs || [];
+    var html = '<option value="" disabled>选择视频...（按住Ctrl多选）</option>';
+    for (var i = 0; i < dirs.length; i++) {
+      var d = dirs[i];
+      var statusTag2 = d.denoised_all ? ' ✅已全部降噪' : (d.denoised > 0 ? ' ⏳部分降噪(' + d.denoised + '/' + d.pending + ')' : ' ❌未降噪');
+      html += '<option value="' + escapeHtml(d.path) + '">' +
+        escapeHtml(d.name) + ' — 待审核' + d.pending + ' | 已降噪' + (d.denoised || 0) + statusTag2 + '</option>';
+    }
+    select.innerHTML = html;
+    // Restore previously selected values
+    if (selectedValues.length > 0) {
+      for (var i = 0; i < select.options.length; i++) {
+        if (selectedValues.indexOf(select.options[i].value) >= 0) {
+          select.options[i].selected = true;
+        }
+      }
+    }
+    showUrevToolbar();
+  } catch(e) { select.innerHTML = '<option value="">加载失败</option>'; }
+}
+
+function showUrevToolbar() {
+  document.getElementById('btn-denoise-urev-refresh').style.display = 'inline-block';
+}
+
+async function refreshUnreviewedDenoise() {
+  await loadUnreviewedDirs();
+  loadUnreviewedClips();
+  toast('列表已刷新', 'info');
+}
+
+async function loadUnreviewedClips() {
+  var sel = document.getElementById('denoise-urev-dir-select');
+  var dirs = [];
+  for (var i = 0; i < sel.selectedOptions.length; i++) {
+    if (sel.selectedOptions[i].value) dirs.push(sel.selectedOptions[i].value);
+  }
+  if (!dirs.length) { return; }
+  _denoiseUrevDir = dirs[0]; // Keep for backward compatibility
+  _denoiseUrevSelectMode = false;
+  _denoiseUrevSelected = {};
+  _denoiseUrevClips = [];
+  var list = document.getElementById('denoise-urev-file-list');
+  list.innerHTML = '<div class="empty-state"><p>加载中...</p></div>';
+
+  // Load clips from all selected directories
+  for (var d = 0; d < dirs.length; d++) {
+    var dir = dirs[d];
+    try {
+      var resp = await fetch(API + '/api/denoise/unreviewed-clips?clip_dir=' + encodeURIComponent(dir));
+      var data = await resp.json();
+      var clips = data.clips || [];
+      var dirName = dir.replace(/\\/g, '/').split('/').pop() || '';
+      for (var c = 0; c < clips.length; c++) {
+        clips[c].video = dirName;
+        clips[c].clip_dir = dir;
+      }
+      _denoiseUrevClips = _denoiseUrevClips.concat(clips);
+    } catch(e) { console.error(e); }
+  }
+
+  if (!_denoiseUrevClips.length) {
+    list.innerHTML = '<div class="empty-state"><p>所选视频没有未审核片段</p></div>';
+    document.getElementById('btn-denoise-urev-all').style.display = 'none';
+    document.getElementById('btn-denoise-urev-select').style.display = 'none';
+    document.getElementById('btn-denoise-urev-selected').style.display = 'none';
+    document.getElementById('btn-denoise-urev-select-all').style.display = 'none';
+  } else {
+    buildUrevFileList();
+    document.getElementById('btn-denoise-urev-all').style.display = 'inline-block';
+    document.getElementById('btn-denoise-urev-select').style.display = 'inline-block';
+  }
+  document.getElementById('denoise-urev-stats').textContent = '共 ' + _denoiseUrevClips.length + ' 个未审核片段';
+  // Load existing results for selected videos
+  loadUrevDenoiseResults();
+}
+
+function buildUrevFileList() {
+  var list = document.getElementById('denoise-urev-file-list');
+  var html = '';
+  for (var i = 0; i < _denoiseUrevClips.length; i++) {
+    var c = _denoiseUrevClips[i];
+    var checked = _denoiseUrevSelected[c.path] ? ' checked' : '';
+    var cbStyle = _denoiseUrevSelectMode ? '' : ' style="display:none;"';
+    html += '<div class="file-item" data-urev-path="' + safeAttr(c.path) + '">' +
+      '<input type="checkbox"' + checked + cbStyle + ' onchange="onUrevCheckbox(this,\'' +
+        escapeHtml(c.path).replace(/'/g, "\\'") + '\')">' +
+      (c.video ? '<span style="font-size:10px;color:var(--warning);padding:1px 5px;border-radius:3px;background:var(--bg3);margin-right:4px;">' + escapeHtml(c.video) + '</span>' : '') +
+      '<span class="file-name" style="font-size:12px;cursor:pointer;" data-play="' + safeAttr(c.path) + '" data-playname="' + safeAttr('[未审核] ' + c.name) + '">' + escapeHtml(c.name) + '</span>' +
+      '<span class="file-size">' + c.size_mb + ' MB</span>' +
+      '</div>';
+  }
+  list.innerHTML = html;
+}
+
+function toggleUrevSourceSelect() {
+  _denoiseUrevSelectMode = !_denoiseUrevSelectMode;
+  var cbs = document.querySelectorAll('#denoise-urev-file-list input[type=checkbox]');
+  for (var i = 0; i < cbs.length; i++) { cbs[i].style.display = _denoiseUrevSelectMode ? '' : 'none'; }
+  document.getElementById('btn-denoise-urev-select-all').style.display = _denoiseUrevSelectMode ? 'inline-block' : 'none';
+  document.getElementById('btn-denoise-urev-selected').style.display = _denoiseUrevSelectMode ? 'inline-block' : 'none';
+  if (!_denoiseUrevSelectMode) { _denoiseUrevSelected = {}; }
+}
+
+function onUrevCheckbox(cb, path) {
+  if (cb.checked) { _denoiseUrevSelected[path] = true; }
+  else { delete _denoiseUrevSelected[path]; }
+}
+
+function selectAllUrevSources() {
+  var allSelected = Object.keys(_denoiseUrevSelected).length === _denoiseUrevClips.length;
+  if (allSelected) {
+    _denoiseUrevSelected = {};
+  } else {
+    for (var i = 0; i < _denoiseUrevClips.length; i++) { _denoiseUrevSelected[_denoiseUrevClips[i].path] = true; }
+  }
+  var cbs = document.querySelectorAll('#denoise-urev-file-list input[type=checkbox]');
+  for (var i = 0; i < cbs.length; i++) { cbs[i].checked = !allSelected; }
+}
+
+async function denoiseUrevAll() {
+  if (!_denoiseUrevClips.length) return;
+  var paths = [];
+  for (var i = 0; i < _denoiseUrevClips.length; i++) { paths.push(_denoiseUrevClips[i].path); }
+  startUrevDenoise(paths);
+}
+
+async function denoiseUrevSelected() {
+  var selected = Object.keys(_denoiseUrevSelected).filter(function(k) { return _denoiseUrevSelected[k]; });
+  if (!selected.length) { toast('请先选择要降噪的片段', 'info'); return; }
+  startUrevDenoise(selected);
+}
+
+async function startUrevDenoise(paths) {
+  var enabledKeys = getEnabledStepKeys();
+  if (!enabledKeys.length) { toast('请至少启用一个处理步骤', 'error'); return; }
+
+  var sel = document.getElementById('denoise-urev-dir-select');
+  if (!sel.selectedOptions.length) { toast('请先选择视频', 'error'); return; }
+
+  _denoiseUrevSelectMode = false; _denoiseUrevSelected = {};
+  document.getElementById('btn-denoise-urev-selected').style.display = 'none';
+  document.getElementById('btn-denoise-urev-select-all').style.display = 'none';
+  buildUrevFileList();
+
+  var videoName = ''; // Let backend determine output dir per-file for multi-select support
+  var payload = { video_name: videoName, paths: paths, steps: enabledKeys };
+  try {
+    var resp = await fetch(API + '/api/denoise/unreviewed-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    var data = await resp.json();
+    if (data.status !== 'ok') throw new Error('启动失败');
+
+    _denoiseUrevJobId = data.job_id;
+    document.getElementById('denoise-urev-progress').style.display = 'block';
+    document.getElementById('denoise-urev-progress-fill').style.width = '0%';
+    document.getElementById('denoise-urev-progress-text').textContent = '启动降噪...';
+    toast('开始降噪 ' + data.file_count + ' 个片段...', 'info');
+    startUrevDenoisePolling();
+  } catch(e) { toast('启动失败: ' + e.message, 'error'); }
+}
+
+function startUrevDenoisePolling() {
+  stopUrevDenoisePolling();
+  _denoiseUrevPollTimer = setInterval(pollUrevDenoiseJob, 1500);
+}
+
+function stopUrevDenoisePolling() {
+  if (_denoiseUrevPollTimer) { clearInterval(_denoiseUrevPollTimer); _denoiseUrevPollTimer = null; }
+}
+
+async function pollUrevDenoiseJob() {
+  if (!_denoiseUrevJobId) { stopUrevDenoisePolling(); return; }
+  try {
+    var resp = await fetch(API + '/api/denoise/job/' + _denoiseUrevJobId);
+    var job = await resp.json();
+    var pct = job.progress || 0;
+    document.getElementById('denoise-urev-progress-fill').style.width = pct + '%';
+    document.getElementById('denoise-urev-progress-text').textContent =
+      (job.current_file || '') + ' — ' + Math.round(pct) + '%';
+
+    if (job.status === 'completed') {
+      stopUrevDenoisePolling();
+      toast('降噪完成！已保存到 cleaned_unreviewed/', 'success');
+      // Show results with passed/discarded split
+      renderUrevJobResults(job);
+      loadUrevDenoiseResults();
+    }
+  } catch(e) { console.error(e); }
+}
+
+function renderUrevJobResults(job) {
+  var files = job.files || [];
+  var passed = []; var discarded = [];
+  for (var i = 0; i < files.length; i++) {
+    if (files[i].status === 'completed') passed.push(files[i]);
+    else if (files[i].status === 'discarded') discarded.push(files[i]);
+  }
+
+  // Passed
+  var pSection = document.getElementById('denoise-urev-results-section');
+  var pList = document.getElementById('denoise-urev-result-list');
+  var pCount = document.getElementById('denoise-urev-passed-count');
+  pCount.textContent = passed.length;
+  if (passed.length) {
+    var html = '';
+    for (var i = 0; i < passed.length; i++) {
+      var r = passed[i];
+      html += '<div class="file-item">' +
+        '<span class="file-name" style="font-size:12px;cursor:pointer;" data-play="' + safeAttr(r.output_path || '') + '" data-playname="' + safeAttr(r.name) + '">🎵 ' + escapeHtml(r.name) + '</span>' +
+        '<span class="file-size">通过</span></div>';
+    }
+    pList.innerHTML = html;
+  }
+  pSection.style.display = 'block';
+
+  // Discarded
+  var dSection = document.getElementById('denoise-urev-discarded-section');
+  var dList = document.getElementById('denoise-urev-discarded-list');
+  var dCount = document.getElementById('denoise-urev-discarded-count');
+  dCount.textContent = discarded.length;
+  if (discarded.length) {
+    var dhtml = '';
+    for (var i = 0; i < discarded.length; i++) {
+      var d = discarded[i];
+      var reason = '';
+      if (d.steps && d.steps.length) {
+        for (var si = 0; si < d.steps.length; si++) {
+          if (d.steps[si].status === 'discarded') { reason = d.steps[si].message; break; }
+        }
+      }
+      dhtml += '<div class="file-item">' +
+        '<span class="file-name" style="font-size:12px;">' + escapeHtml(d.name) + '</span>' +
+        '<span class="file-size" style="color:var(--danger);">' + escapeHtml(reason) + '</span></div>';
+    }
+    dList.innerHTML = dhtml;
+  }
+  dSection.style.display = discarded.length ? 'block' : 'none';
+}
+
+async function loadUrevDenoiseResults() {
+  var sel = document.getElementById('denoise-urev-dir-select');
+  var dirs = [];
+  for (var i = 0; i < sel.selectedOptions.length; i++) {
+    if (sel.selectedOptions[i].value) dirs.push(sel.selectedOptions[i].value);
+  }
+  if (!dirs.length) return;
+  var section = document.getElementById('denoise-urev-results-section');
+  var list = document.getElementById('denoise-urev-result-list');
+  var countEl = document.getElementById('denoise-urev-passed-count');
+
+  var allResults = [];
+  for (var d = 0; d < dirs.length; d++) {
+    var videoName = dirs[d].replace(/\\/g, '/').split('/').pop() || '';
+    try {
+      var resp = await fetch(API + '/api/denoise/unreviewed-results?video_name=' + encodeURIComponent(videoName));
+      var data = await resp.json();
+      var results = data.results || [];
+      for (var r = 0; r < results.length; r++) {
+        results[r].video = videoName;
+      }
+      allResults = allResults.concat(results);
+    } catch(e) { console.error(e); }
+  }
+
+  countEl.textContent = allResults.length;
+  if (!allResults.length) {
+    list.innerHTML = '<div class="empty-state"><p>所选视频暂无降噪通过的音频</p></div>';
+    section.style.display = 'block';
+    return;
+  }
+  var html = '';
+  for (var i = 0; i < allResults.length; i++) {
+    var r = allResults[i];
+    html += '<div class="file-item">' +
+      (r.video ? '<span style="font-size:10px;color:var(--warning);padding:1px 5px;border-radius:3px;background:var(--bg3);margin-right:4px;">' + escapeHtml(r.video) + '</span>' : '') +
+      '<span class="file-name" style="font-size:12px;cursor:pointer;" data-play="' + safeAttr(r.path) + '" data-playname="' + safeAttr(r.name) + '">🎵 ' + escapeHtml(r.name) + '</span>' +
+      '<span class="file-size">' + r.size_mb + ' MB</span>' +
+      '</div>';
+  }
+  list.innerHTML = html;
+  section.style.display = 'block';
+}
+
+var _maleResults = [];
+var _maleSelected = {};
+var _maleDeleted = {};       // {name: true}
+var _multiVoiceResults = [];
+var _multiVoiceSelected = {};
+var _multiVoiceDeleted = {}; // {name: true}
+
+async function detectMaleClips() {
+  if (!window._reviewDir) { toast('请先加载审核目录', 'error'); return; }
+  var btn = document.getElementById('btn-detect-male');
+  btn.disabled = true;
+  btn.textContent = '检测中...';
+  toast('正在分析音高特征，请稍候...', 'info');
+
+  try {
+    var url = API + '/api/review/detect-male?clip_dir=' + encodeURIComponent(window._reviewDir);
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    if (data.status !== 'started') { throw new Error('启动失败'); }
+
+    var pollTimer = setInterval(async function() {
+      try {
+        var r2 = await fetch(API + '/api/jobs/' + data.job_id);
+        var job = await r2.json();
+        if (job.status === 'completed') {
+          clearInterval(pollTimer);
+          var results = [];
+          if (job.steps && job.steps.length) {
+            var sd = job.steps[job.steps.length - 1].data;
+            if (sd && sd.results) results = sd.results;
+          }
+          _maleResults = results;
+          _maleSelected = {};
+          renderMaleResults();
+          if (results.length === 0) {
+            toast('未检测到男声片段', 'success');
+          } else {
+            // Auto-delete all male voice clips
+            var toDelete = [];
+            for (var i = 0; i < results.length; i++) { toDelete.push(results[i].path); }
+            try {
+              var dr = await fetch(API + '/api/results/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paths: toDelete }),
+              });
+              var dd = await dr.json();
+              toast('已自动删除 ' + dd.deleted + ' 个男声片段', 'success');
+              for (var j = 0; j < _maleResults.length; j++) { _maleDeleted[_maleResults[j].name] = true; }
+              renderMaleResults();
+              loadReviewClips();
+            } catch(e2) { toast('自动删除失败: ' + e2.message, 'error'); }
+          }
+          btn.disabled = false;
+          btn.textContent = '检测男声';
+        } else if (job.status === 'failed') {
+          clearInterval(pollTimer);
+          btn.disabled = false;
+          btn.textContent = '检测男声';
+          toast('检测失败', 'error');
+        }
+      } catch(e) { clearInterval(pollTimer); btn.disabled = false; btn.textContent = '检测男声'; }
+    }, 1500);
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = '检测男声';
+    toast('启动失败: ' + e.message, 'error');
+  }
+}
+
+function renderMaleResults() {
+  var panel = document.getElementById('male-results-panel');
+  var list = document.getElementById('male-results-list');
+  var countEl = document.getElementById('male-count');
+  var selectAllBtn = document.getElementById('btn-male-select-all');
+  var deleteBtn = document.getElementById('btn-male-delete-selected');
+
+  if (!_maleResults.length) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  panel.style.display = 'block';
+  var deletedCount = Object.keys(_maleDeleted).length;
+  countEl.textContent = '(' + _maleResults.length + ' 个' + (deletedCount > 0 ? ', 已删除 ' + deletedCount + ' 个' : '') + ')';
+
+  if (deletedCount >= _maleResults.length) {
+    if (selectAllBtn) selectAllBtn.style.display = 'none';
+    if (deleteBtn) deleteBtn.style.display = 'none';
+  }
+
+  var html = '';
+  for (var i = 0; i < _maleResults.length; i++) {
+    var r = _maleResults[i];
+    var isDeleted = !!_maleDeleted[r.name];
+    var checked = (!isDeleted && _maleSelected[r.name]) ? ' checked' : '';
+    var safePath = r.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    var safeName = escapeHtml(r.name);
+    var escapedName = safeName.replace(/'/g, "\\'");
+    var rowStyle = isDeleted ? 'opacity:0.55;text-decoration:line-through;' : '';
+
+    html += '<div class="file-item" style="cursor:pointer;' + rowStyle + '" ' +
+      'onclick="' + (isDeleted ? '' : 'playMaleClip(\'' + safePath + '\',\'' + safeName + '\')') + '">' +
+      (isDeleted ? '<span style="width:14px;flex-shrink:0;"></span>' :
+        '<input type="checkbox"' + checked + ' style="pointer-events:auto;" ' +
+        'onclick="event.stopPropagation();toggleMaleCheckbox(\'' + escapedName + '\', this.checked)">') +
+      '<span style="background:#4a9eff;color:#fff;font-size:10px;padding:1px 5px;border-radius:3px;">男</span>' +
+      (isDeleted ? '<span style="background:var(--danger);color:#fff;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;">已删除</span>' : '') +
+      '<span class="file-name" style="font-size:12px;margin-left:6px;" title="' + (r.median_pitch || '') + 'Hz">' +
+        safeName + '</span>' +
+      '<span class="file-size">' + r.size_mb + ' MB</span>' +
+      '<span style="font-size:10px;color:var(--text2);">' + (r.median_pitch || '') + 'Hz</span>' +
+      (isDeleted ? '' :
+        '<a href="' + API + '/api/review/stream?path=' + encodeURIComponent(r.path) + '" target="_blank" ' +
+        'style="font-size:10px;color:var(--text2);text-decoration:none;margin-left:6px;" ' +
+        'onclick="event.stopPropagation();" title="新窗口打开">↗</a>') +
+      '</div>';
+  }
+  list.innerHTML = html;
+}
+
+function playMaleClip(path, name) {
+  var player = document.getElementById('review-player');
+  player.src = API + '/api/review/stream?path=' + encodeURIComponent(path);
+  player.load();
+  player.play().catch(function() {});
+  document.getElementById('review-clip-name').textContent = '[男声] ' + name;
+}
+
+function toggleMaleCheckbox(escapedName, checked) {
+  for (var i = 0; i < _maleResults.length; i++) {
+    if (escapeHtml(_maleResults[i].name) === escapedName) {
+      if (checked) { _maleSelected[_maleResults[i].name] = true; }
+      else { delete _maleSelected[_maleResults[i].name]; }
+      return;
+    }
+  }
+}
+
+function toggleMaleSelectAll() {
+  var allSelected = Object.keys(_maleSelected).length === _maleResults.length;
+  var checkboxes = document.querySelectorAll('#male-results-list input[type=checkbox]');
+  if (allSelected) {
+    _maleSelected = {};
+    for (var i = 0; i < checkboxes.length; i++) { checkboxes[i].checked = false; }
+  } else {
+    for (var i = 0; i < _maleResults.length; i++) { _maleSelected[_maleResults[i].name] = true; }
+    for (var i = 0; i < checkboxes.length; i++) { checkboxes[i].checked = true; }
+  }
+}
+
+async function deleteMaleSelected() {
+  var alive = 0;
+  for (var i = 0; i < _maleResults.length; i++) { if (!_maleDeleted[_maleResults[i].name]) alive++; }
+  if (alive === 0) { toast('所有男声片段已删除', 'info'); return; }
+  if (!confirm('确定要删除 ' + alive + ' 个男声片段吗？\n此操作不可撤销。')) return;
+
+  var toDelete = [];
+  for (var i = 0; i < _maleResults.length; i++) {
+    if (!_maleDeleted[_maleResults[i].name]) toDelete.push(_maleResults[i].path);
+  }
+
+  try {
+    var resp = await fetch(API + '/api/results/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: toDelete }),
+    });
+    var data = await resp.json();
+    toast('已删除 ' + data.deleted + ' 个男声片段', 'success');
+    for (var j = 0; j < _maleResults.length; j++) { _maleDeleted[_maleResults[j].name] = true; }
+    _maleSelected = {};
+    renderMaleResults();
+    loadReviewClips();
+  } catch(e) { toast('删除失败: ' + e.message, 'error'); }
+}
+
+// ============================================================
+// Multi-voice detection (review page)
+// ============================================================
+async function detectMultiVoiceClips() {
+  if (!window._reviewDir) { toast('请先加载审核目录', 'error'); return; }
+  var btn = document.getElementById('btn-detect-multi-voice');
+  btn.disabled = true;
+  btn.textContent = '检测中...';
+  toast('正在分析多人声特征，请稍候...', 'info');
+
+  try {
+    var url = API + '/api/review/detect-multi-voice?clip_dir=' + encodeURIComponent(window._reviewDir);
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    if (data.status !== 'started') { throw new Error('启动失败'); }
+
+    var pollTimer = setInterval(async function() {
+      try {
+        var r2 = await fetch(API + '/api/jobs/' + data.job_id);
+        var job = await r2.json();
+        if (job.status === 'completed') {
+          clearInterval(pollTimer);
+          var results = [];
+          if (job.steps && job.steps.length) {
+            var sd = job.steps[job.steps.length - 1].data;
+            if (sd && sd.results) results = sd.results;
+          }
+          _multiVoiceResults = results;
+          _multiVoiceSelected = {};
+          renderMultiVoiceResults();
+          if (results.length === 0) {
+            toast('未检测到多人声片段', 'success');
+          } else {
+            var toDelete = [];
+            for (var i = 0; i < results.length; i++) { toDelete.push(results[i].path); }
+            try {
+              var dr = await fetch(API + '/api/results/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paths: toDelete }),
+              });
+              var dd = await dr.json();
+              toast('已自动删除 ' + dd.deleted + ' 个多人声片段', 'success');
+              for (var j = 0; j < _multiVoiceResults.length; j++) { _multiVoiceDeleted[_multiVoiceResults[j].name] = true; }
+              renderMultiVoiceResults();
+              loadReviewClips();
+            } catch(e2) { toast('自动删除失败: ' + e2.message, 'error'); }
+          }
+          btn.disabled = false;
+          btn.textContent = '检测多人声';
+        } else if (job.status === 'failed') {
+          clearInterval(pollTimer);
+          btn.disabled = false;
+          btn.textContent = '检测多人声';
+          toast('检测失败', 'error');
+        }
+      } catch(e) { clearInterval(pollTimer); btn.disabled = false; btn.textContent = '检测多人声'; }
+    }, 1500);
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = '检测多人声';
+    toast('启动失败: ' + e.message, 'error');
+  }
+}
+
+// ============================================================
+// Low-volume detection (review page)
+// ============================================================
+var _lowVolumeResults = [];
+var _lowVolumeDeleted = {};
+
+async function detectLowVolumeClips() {
+  if (!window._reviewDir) { toast('请先加载审核目录', 'error'); return; }
+  var btn = document.getElementById('btn-detect-low-volume');
+  btn.disabled = true;
+  btn.textContent = '检测中...';
+  toast('正在分析低音量特征，请稍候...', 'info');
+
+  try {
+    var url = API + '/api/review/detect-low-volume?clip_dir=' + encodeURIComponent(window._reviewDir);
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    if (data.status !== 'started') { throw new Error('启动失败'); }
+
+    var pollTimer = setInterval(async function() {
+      try {
+        var r2 = await fetch(API + '/api/jobs/' + data.job_id);
+        var job = await r2.json();
+        if (job.status === 'completed') {
+          clearInterval(pollTimer);
+          var results = [];
+          if (job.steps && job.steps.length) {
+            var sd = job.steps[job.steps.length - 1].data;
+            if (sd && sd.results) results = sd.results;
+          }
+          _lowVolumeResults = results;
+          if (results.length === 0) {
+            toast('未检测到含长段低音量的片段', 'success');
+          } else {
+            // Auto-delete flagged clips
+            var toDelete = [];
+            for (var i = 0; i < results.length; i++) { toDelete.push(results[i].path); }
+            try {
+              var dr = await fetch(API + '/api/results/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paths: toDelete }),
+              });
+              var dd = await dr.json();
+              toast('已自动删除 ' + dd.deleted + ' 个低音量片段', 'success');
+              for (var j = 0; j < results.length; j++) { _lowVolumeDeleted[results[j].name] = true; }
+              loadReviewClips();
+            } catch(e2) { toast('自动删除失败: ' + e2.message, 'error'); }
+          }
+          btn.disabled = false;
+          btn.textContent = '检测低音量';
+        } else if (job.status === 'failed') {
+          clearInterval(pollTimer);
+          btn.disabled = false;
+          btn.textContent = '检测低音量';
+          toast('检测失败', 'error');
+        }
+      } catch(e) { clearInterval(pollTimer); btn.disabled = false; btn.textContent = '检测低音量'; }
+    }, 1500);
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = '检测低音量';
+    toast('启动失败: ' + e.message, 'error');
+  }
+}
+
+function renderMultiVoiceResults() {
+  var panel = document.getElementById('multi-voice-results-panel');
+  var list = document.getElementById('multi-voice-results-list');
+  var countEl = document.getElementById('multi-voice-count');
+  var deleteBtn = document.getElementById('btn-multi-voice-delete-all');
+
+  if (!_multiVoiceResults.length) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  panel.style.display = 'block';
+  var deletedCount = Object.keys(_multiVoiceDeleted).length;
+  countEl.textContent = '(' + _multiVoiceResults.length + ' 个' + (deletedCount > 0 ? ', 已删除 ' + deletedCount + ' 个' : '') + ')';
+
+  if (deleteBtn && deletedCount >= _multiVoiceResults.length) {
+    deleteBtn.style.display = 'none';
+  }
+
+  var html = '';
+  for (var i = 0; i < _multiVoiceResults.length; i++) {
+    var r = _multiVoiceResults[i];
+    var isDeleted = !!_multiVoiceDeleted[r.name];
+    var safePath = r.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    var safeName = escapeHtml(r.name);
+    var rowStyle = isDeleted ? 'opacity:0.55;text-decoration:line-through;' : '';
+
+    html += '<div class="file-item" style="cursor:pointer;' + rowStyle + '" ' +
+      'onclick="' + (isDeleted ? '' : 'playMultiVoiceClip(\'' + safePath + '\',\'' + safeName + '\')') + '">' +
+      '<span style="background:#9b59b6;color:#fff;font-size:10px;padding:1px 5px;border-radius:3px;">多</span>' +
+      (isDeleted ? '<span style="background:var(--danger);color:#fff;font-size:10px;padding:1px 5px;border-radius:3px;margin-left:4px;">已删除</span>' : '') +
+      '<span class="file-name" style="font-size:12px;margin-left:6px;" title="' + (r.details || '') + '">' +
+        safeName + '</span>' +
+      '<span class="file-size">' + r.size_mb + ' MB</span>' +
+      '<span style="font-size:10px;color:var(--text2);">段' + r.segment_count + '</span>' +
+      '<span style="font-size:10px;color:var(--text2);">跨' + r.pitch_span + 'Hz</span>' +
+      (isDeleted ? '' :
+        '<a href="' + API + '/api/review/stream?path=' + encodeURIComponent(r.path) + '" target="_blank" ' +
+        'style="font-size:10px;color:var(--text2);text-decoration:none;margin-left:6px;" ' +
+        'onclick="event.stopPropagation();" title="新窗口打开">↗</a>') +
+      '</div>';
+  }
+  list.innerHTML = html;
+}
+
+function playMultiVoiceClip(path, name) {
+  var player = document.getElementById('review-player');
+  player.src = API + '/api/review/stream?path=' + encodeURIComponent(path);
+  player.load();
+  player.play().catch(function() {});
+  document.getElementById('review-clip-name').textContent = '[多人声] ' + name;
+}
+
+function deleteAllMultiVoice() {
+  var alive = 0;
+  for (var i = 0; i < _multiVoiceResults.length; i++) { if (!_multiVoiceDeleted[_multiVoiceResults[i].name]) alive++; }
+  if (alive === 0) { toast('所有多人声片段已删除', 'info'); return; }
+  if (!confirm('确定要删除 ' + alive + ' 个多人声片段吗？\n此操作不可撤销。')) return;
+
+  var toDelete = [];
+  for (var i = 0; i < _multiVoiceResults.length; i++) {
+    if (!_multiVoiceDeleted[_multiVoiceResults[i].name]) toDelete.push(_multiVoiceResults[i].path);
+  }
+
+  fetch(API + '/api/results/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths: toDelete }),
+  }).then(function(resp) { return resp.json(); })
+    .then(function(data) {
+      toast('已删除 ' + data.deleted + ' 个多人声片段', 'success');
+      for (var j = 0; j < _multiVoiceResults.length; j++) { _multiVoiceDeleted[_multiVoiceResults[j].name] = true; }
+      _multiVoiceSelected = {};
+      renderMultiVoiceResults();
+      loadReviewClips();
+    }).catch(function(e) { toast('删除失败: ' + e.message, 'error'); });
+}
+
+// ============================================================
+// Multi-voice removal (denoise review page)
+// ============================================================
+async function dreviewRemoveMultiVoice() {
+  if (!window._dreviewDir) { toast('请先加载审核目录', 'error'); return; }
+  if (!confirm('确定要检测并删除所有含多人声的降噪音频吗？\n此操作不可撤销。')) return;
+  var btn = document.getElementById('btn-dreview-remove-multi-voice');
+  btn.disabled = true;
+  btn.textContent = '检测中...';
+  toast('正在分析多人声特征，请稍候...', 'info');
+  try {
+    var url = API + '/api/denoise-review/remove-multi-voice?clip_dir=' + encodeURIComponent(window._dreviewDir);
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    if (data.status === 'started') {
+      var pollTimer = setInterval(async function() {
+        try {
+          var r2 = await fetch(API + '/api/jobs/' + data.job_id);
+          var job = await r2.json();
+          if (job.status === 'completed') {
+            clearInterval(pollTimer);
+            var msg = (job.steps && job.steps.length) ? job.steps[job.steps.length - 1].message : '完成';
+            toast(msg, 'success');
+            var stepData = (job.steps && job.steps.length) ? job.steps[job.steps.length - 1].data : null;
+            if (stepData && stepData.deleted && stepData.deleted.length > 0) {
+              var now = new Date().toLocaleTimeString();
+              for (var d = 0; d < stepData.deleted.length; d++) {
+                window._dreviewDeleted.push({name: stepData.deleted[d], time: now, reason: '多人声'});
+              }
+              renderDreviewDeleted();
+            }
+            btn.disabled = false;
+            btn.textContent = '去除多人声';
+            loadDreviewClips();
+          } else if (job.status === 'failed') {
+            clearInterval(pollTimer);
+            toast('检测失败', 'error');
+            btn.disabled = false;
+            btn.textContent = '去除多人声';
+            loadDreviewClips();
+          }
+        } catch(e) { clearInterval(pollTimer); btn.disabled = false; btn.textContent = '去除多人声'; }
+      }, 1000);
+    }
+  } catch(e) { toast('操作失败: ' + e.message, 'error'); btn.disabled = false; btn.textContent = '去除多人声'; }
+}
+
+async function dreviewRemoveLowVolume() {
+  if (!window._dreviewDir) { toast('请先加载审核目录', 'error'); return; }
+  if (!confirm('确定要检测并删除所有含长段低音量的降噪音频吗？\n此操作不可撤销。')) return;
+  var btn = document.getElementById('btn-dreview-remove-low-volume');
+  btn.disabled = true;
+  btn.textContent = '检测中...';
+  toast('正在分析低音量特征，请稍候...', 'info');
+  try {
+    var url = API + '/api/denoise-review/remove-low-volume?clip_dir=' + encodeURIComponent(window._dreviewDir);
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    if (data.status === 'started') {
+      var pollTimer = setInterval(async function() {
+        try {
+          var r2 = await fetch(API + '/api/jobs/' + data.job_id);
+          var job = await r2.json();
+          if (job.status === 'completed') {
+            clearInterval(pollTimer);
+            var msg = (job.steps && job.steps.length) ? job.steps[job.steps.length - 1].message : '完成';
+            toast(msg, 'success');
+            var stepData = (job.steps && job.steps.length) ? job.steps[job.steps.length - 1].data : null;
+            if (stepData && stepData.deleted && stepData.deleted.length > 0) {
+              var now = new Date().toLocaleTimeString();
+              for (var d = 0; d < stepData.deleted.length; d++) {
+                window._dreviewDeleted.push({name: stepData.deleted[d], time: now, reason: '低音量'});
+              }
+              renderDreviewDeleted();
+            }
+            btn.disabled = false;
+            btn.textContent = '去除低音量';
+            loadDreviewClips();
+          } else if (job.status === 'failed') {
+            clearInterval(pollTimer);
+            toast('检测失败', 'error');
+            btn.disabled = false;
+            btn.textContent = '去除低音量';
+            loadDreviewClips();
+          }
+        } catch(e) { clearInterval(pollTimer); btn.disabled = false; btn.textContent = '去除低音量'; }
+      }, 1000);
+    }
+  } catch(e) { toast('操作失败: ' + e.message, 'error'); btn.disabled = false; btn.textContent = '去除低音量'; }
+}
+
+// Keyboard shortcuts for review tabs
+document.addEventListener('keydown', function(e) {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+
+  // Review tab (video clips)
+  var reviewTab = document.getElementById('tab-review');
+  if (reviewTab && reviewTab.classList.contains('active') && window._reviewClips && window._reviewClips.length > 0) {
+    if (e.key === 'p' || e.key === 'P') { e.preventDefault(); reviewAction('approve'); return; }
+    if (e.key === 's' || e.key === 'S') { e.preventDefault(); reviewAction('skip'); return; }
+    if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      var next = window._reviewIndex + 1;
+      if (next >= window._reviewClips.length) next = 0;
+      playReviewClip(next); return;
+    }
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      var prev = window._reviewIndex - 1;
+      if (prev < 0) prev = window._reviewClips.length - 1;
+      playReviewClip(prev); return;
+    }
+  }
+
+  // Denoise review tab (denoised audio)
+  var dreviewTab = document.getElementById('tab-denoise-review');
+  if (dreviewTab && dreviewTab.classList.contains('active') && window._dreviewClips && window._dreviewClips.length > 0) {
+    if (e.key === 'p' || e.key === 'P') { e.preventDefault(); dreviewAction('approve'); return; }
+    if (e.key === 's' || e.key === 'S') { e.preventDefault(); dreviewAction('skip'); return; }
+    if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      var next2 = window._dreviewIndex + 1;
+      if (next2 >= window._dreviewClips.length) next2 = 0;
+      playDreviewClip(next2); return;
+    }
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      var prev2 = window._dreviewIndex - 1;
+      if (prev2 < 0) prev2 = window._dreviewClips.length - 1;
+      playDreviewClip(prev2); return;
+    }
+  }
+});
+
+// ============================================================
+// Denoise Review
+// ============================================================
+window._dreviewDeleted = [];  // [{name, time}] — tracks deleted denoised files
+window._dreviewClips = [];
+window._dreviewDir = '';
+window._dreviewIndex = 0;
+
+function renderDreviewDeleted() {
+  var panel = document.getElementById('dreview-deleted-panel');
+  var list = document.getElementById('dreview-deleted-list');
+  var countEl = document.getElementById('dreview-deleted-count');
+  if (!panel || !list) return;
+  if (!window._dreviewDeleted || !window._dreviewDeleted.length) {
+    panel.style.display = 'none';
+    return;
+  }
+  panel.style.display = 'block';
+  countEl.textContent = '(' + window._dreviewDeleted.length + ' 个)';
+  var html = '';
+  for (var i = window._dreviewDeleted.length - 1; i >= 0; i--) {
+    var d = window._dreviewDeleted[i];
+    var reasonBadge = d.reason === '短音频' ? 'background:var(--danger);' :
+                      d.reason === '混响' ? 'background:var(--warning);color:#000;' :
+                      d.reason === '男声' ? 'background:#4a9eff;' :
+                      'background:#9b59b6;';
+    html += '<div class="file-item" style="opacity:0.55;text-decoration:line-through;">' +
+      '<span style="' + reasonBadge + 'color:#fff;font-size:10px;padding:1px 5px;border-radius:3px;">' + (d.reason || '已删除') + '</span>' +
+      '<span class="file-name" style="font-size:12px;margin-left:6px;">' + escapeHtml(d.name) + '</span>' +
+      '<span style="font-size:10px;color:var(--text2);">' + d.time + '</span>' +
+      '</div>';
+  }
+  list.innerHTML = html;
+}
+
+async function loadDreviewBaseDirs() {
+  try {
+    var resp = await fetch(API + '/api/denoise-review/base-dirs');
+    var data = await resp.json();
+    var select = document.getElementById('dreview-base-select');
+    var curVal = select.value;
+    var html = '<option value="">数据目录...</option>';
+    for (var i = 0; i < data.bases.length; i++) {
+      var b = data.bases[i];
+      html += '<option value="' + safeAttr(b.path) + '">' + escapeHtml(b.name) + '</option>';
+    }
+    select.innerHTML = html;
+    // Default to cleaned_unreviewed
+    if (curVal && select.querySelector('option[value="' + safeAttr(curVal) + '"]')) {
+      select.value = curVal;
+    } else {
+      // Find and select cleaned_unreviewed by default
+      var defOpt = select.querySelector('option[value]');
+      for (var j = 0; j < select.options.length; j++) {
+        if (select.options[j].value.indexOf('cleaned_unreviewed') >= 0) {
+          select.value = select.options[j].value; break;
+        }
+      }
+      if (!select.value && defOpt) select.value = defOpt.value;
+    }
+    loadDenoiseReviewDirs(select.value);
+  } catch(e) { console.error('loadDreviewBaseDirs:', e); }
+}
+
+function onDreviewBaseChange() {
+  var base = document.getElementById('dreview-base-select').value;
+  loadDenoiseReviewDirs(base);
+}
+
+async function loadDenoiseReviewDirs(base) {
+  try {
+    var url = API + '/api/denoise-review/dirs';
+    if (base) url += '?base=' + encodeURIComponent(base);
+    var resp = await fetch(url);
+    var data = await resp.json();
+    var select = document.getElementById('dreview-dir-select');
+    var curVal = select.value;
+    var html = '<option value="">选择子目录...</option>';
+    for (var i = 0; i < data.dirs.length; i++) {
+      var d = data.dirs[i];
+      html += '<option value="' + safeAttr(d.path) + '">' + escapeHtml(d.name) + ' (' + escapeHtml(d.source) + ')</option>';
+    }
+    select.innerHTML = html;
+    if (curVal && select.querySelector('option[value="' + safeAttr(curVal) + '"]')) {
+      select.value = curVal;
+      loadDreviewClips();
+      return;
+    }
+    if (data.dirs.length > 0) {
+      select.value = data.dirs[data.dirs.length - 1].path;
+      loadDreviewClips();
+    }
+  } catch(e) { console.error('loadDenoiseReviewDirs:', e); }
+}
+
+async function loadDreviewClips() {
+  var dir = document.getElementById('dreview-dir-select').value;
+  if (!dir) { toast('请先选择目录', 'info'); return; }
+  var btn = document.getElementById('btn-dreview-load');
+  btn.disabled = true;
+  btn.textContent = '加载中...';
+  try {
+    var resp = await fetch(API + '/api/denoise-review/clips?clip_dir=' + encodeURIComponent(dir));
+    var data = await resp.json();
+    window._dreviewClips = data.clips;
+    window._dreviewDir = data.clip_dir;
+    window._dreviewIndex = data.pending_index >= 0 ? data.pending_index : 0;
+
+    updateDreviewStats();
+    buildDreviewList();
+    playDreviewClip(window._dreviewIndex, false);
+  } catch(e) { toast('加载降噪审核列表失败: ' + e.message, 'error'); }
+  btn.disabled = false;
+  btn.textContent = '加载';
+}
+
+function updateDreviewStats() {
+  var clips = window._dreviewClips || [];
+  var approved = 0, skipped = 0;
+  for (var i = 0; i < clips.length; i++) {
+    if (clips[i].status === 'approved') approved++;
+    else if (clips[i].status === 'skipped') skipped++;
+  }
+  document.getElementById('dreview-stats').textContent =
+    '共 ' + clips.length + ' 个 | 已保留 ' + approved + ' | 已跳过 ' + skipped + ' | 待审核 ' + (clips.length - approved - skipped);
+}
+
+function buildDreviewList() {
+  var clips = window._dreviewClips || [];
+  var html = '';
+  for (var i = 0; i < clips.length; i++) {
+    var c = clips[i];
+    var icon = c.status === 'approved' ? '✅' : (c.status === 'skipped' ? '⏭️' : '🎵');
+    var activeClass = (i === window._dreviewIndex) ? ' style="background:var(--bg3);"' : '';
+    html += '<div class="file-item"' + activeClass + ' data-dreview-idx="' + i + '">' +
+      '<span>' + icon + '</span>' +
+      '<span class="file-name" style="font-size:12px;">' + escapeHtml(c.name) + '</span>' +
+      '<span class="file-size">' + c.size_mb + ' MB</span>' +
+    '</div>';
+  }
+  document.getElementById('dreview-list').innerHTML = html;
+}
+
+function refreshDreviewListHighlight() {
+  var items = document.querySelectorAll('#dreview-list .file-item[data-dreview-idx]');
+  for (var i = 0; i < items.length; i++) {
+    var idx = parseInt(items[i].getAttribute('data-dreview-idx'));
+    items[i].style.background = (idx === window._dreviewIndex) ? 'var(--bg3)' : '';
+    var spans = items[i].querySelectorAll('span');
+    var clips = window._dreviewClips;
+    if (clips && idx >= 0 && idx < clips.length && spans.length > 0) {
+      var c = clips[idx];
+      var icon = c.status === 'approved' ? '✅' : (c.status === 'skipped' ? '⏭️' : '🎵');
+      spans[0].textContent = icon;
+    }
+  }
+}
+
+function playDreviewClip(idx, autoPlay) {
+  if (autoPlay === undefined) autoPlay = true;
+  if (!window._dreviewClips || window._dreviewClips.length === 0) return;
+  if (idx < 0 || idx >= window._dreviewClips.length) idx = 0;
+  window._dreviewIndex = idx;
+  var c = window._dreviewClips[idx];
+
+  var player = document.getElementById('dreview-player');
+  var newSrc = API + '/api/denoise-review/stream?path=' + encodeURIComponent(c.path);
+  if (player.src !== newSrc) {
+    player.src = newSrc;
+    player.load();
+  }
+  if (autoPlay) { player.play().catch(function() {}); }
+  document.getElementById('dreview-clip-name').textContent = c.name + ' (' + c.size_mb + ' MB)';
+
+  refreshDreviewListHighlight();
+  refreshEmotionLabels('dreview-emotion-bar', c.name, window._dreviewDir, '/api/denoise-review/clip-emotions');
+}
+
+document.getElementById('dreview-list').addEventListener('click', function(e) {
+  var item = e.target.closest('.file-item[data-dreview-idx]');
+  if (!item) return;
+  var idx = parseInt(item.getAttribute('data-dreview-idx'));
+  if (!isNaN(idx)) playDreviewClip(idx);
+});
+
+async function dreviewAction(action) {
+  if (!window._dreviewDir || !window._dreviewClips || window._dreviewIndex < 0 || window._dreviewIndex >= window._dreviewClips.length) return;
+  var c = window._dreviewClips[window._dreviewIndex];
+  try {
+    var url = API + '/api/denoise-review/' + action + '?clip_dir=' + encodeURIComponent(window._dreviewDir) + '&clip_name=' + encodeURIComponent(c.name);
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+
+    if (data.status === 'ok') {
+      c.status = action === 'approve' ? 'approved' : 'skipped';
+    }
+
+    updateDreviewStats();
+    refreshDreviewListHighlight();
+
+    var nextIdx = window._dreviewIndex + 1;
+    if (nextIdx >= window._dreviewClips.length) nextIdx = 0;
+    playDreviewClip(nextIdx);
+  } catch(e) { toast('操作失败: ' + e.message, 'error'); }
+}
+
+async function classifyDreviewEmotion(emotion) {
+  if (!window._dreviewDir || !window._dreviewClips || window._dreviewIndex < 0 || window._dreviewIndex >= window._dreviewClips.length) {
+    toast('请先加载并选择要分类的音频', 'info');
+    return;
+  }
+  var c = window._dreviewClips[window._dreviewIndex];
+  try {
+    var url = API + '/api/denoise-review/classify-emotion?clip_dir=' + encodeURIComponent(window._dreviewDir) + '&clip_name=' + encodeURIComponent(c.name) + '&emotion=' + encodeURIComponent(emotion);
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    if (data.status === 'ok') {
+      toast('已分类到「' + emotion + '」（降噪）', 'success');
+      refreshEmotionLabels('dreview-emotion-bar', c.name, window._dreviewDir, '/api/denoise-review/clip-emotions');
+      loadEmotionCounts('dreview-emotion-bar', '/api/denoise-review/emotion-counts');
+    } else {
+      toast('分类失败', 'error');
+    }
+  } catch(e) { toast('分类失败: ' + e.message, 'error'); }
+}
+
+function dreviewPrev() {
+  if (!window._dreviewClips || window._dreviewClips.length === 0) return;
+  var prev = window._dreviewIndex - 1;
+  if (prev < 0) prev = window._dreviewClips.length - 1;
+  playDreviewClip(prev);
+}
+
+function dreviewNext() {
+  if (!window._dreviewClips || window._dreviewClips.length === 0) return;
+  var next = window._dreviewIndex + 1;
+  if (next >= window._dreviewClips.length) next = 0;
+  playDreviewClip(next);
+}
+
+function dreviewJumpToPending() {
+  if (!window._dreviewClips || window._dreviewClips.length === 0) return;
+  for (var i = 0; i < window._dreviewClips.length; i++) {
+    if (window._dreviewClips[i].status === 'pending') { playDreviewClip(i); scrollDreviewListToCurrent(); return; }
+  }
+  toast('所有降噪音频已审核完毕', 'info');
+}
+
+function scrollDreviewListToCurrent() {
+  var list = document.getElementById('dreview-list');
+  var item = list.querySelector('.file-item[data-dreview-idx="' + window._dreviewIndex + '"]');
+  if (item) item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function dreviewClearShort() {
+  if (!window._dreviewDir) { toast('请先加载审核目录', 'error'); return; }
+  var minDur = parseFloat(document.getElementById('dreview-clear-dur').value) || 2.0;
+  if (!confirm('确定要删除所有时长 <= ' + minDur + ' 秒的降噪音频吗？\n此操作不可撤销。')) return;
+  var btn = document.getElementById('btn-dreview-clear-short');
+  btn.disabled = true;
+  btn.textContent = '扫描中...';
+  try {
+    var url = API + '/api/denoise-review/remove-short?clip_dir=' + encodeURIComponent(window._dreviewDir) + '&min_duration=' + minDur;
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    if (data.status === 'started') {
+      toast('正在扫描并删除短音频...', 'info');
+      var pollTimer = setInterval(async function() {
+        try {
+          var r2 = await fetch(API + '/api/jobs/' + data.job_id);
+          var job = await r2.json();
+          if (job.status === 'completed') {
+            clearInterval(pollTimer);
+            var msg = (job.steps && job.steps.length) ? job.steps[job.steps.length - 1].message : '完成';
+            toast(msg, 'success');
+            var stepData = (job.steps && job.steps.length) ? job.steps[job.steps.length - 1].data : null;
+            if (stepData && stepData.deleted && stepData.deleted.length > 0) {
+              var now = new Date().toLocaleTimeString();
+              for (var d = 0; d < stepData.deleted.length; d++) {
+                window._dreviewDeleted.push({name: stepData.deleted[d], time: now, reason: '短音频'});
+              }
+              renderDreviewDeleted();
+            }
+            btn.disabled = false;
+            btn.textContent = '删除';
+            loadDreviewClips();
+          } else if (job.status === 'failed') {
+            clearInterval(pollTimer);
+            toast('删除失败', 'error');
+            btn.disabled = false;
+            btn.textContent = '删除';
+            loadDreviewClips();
+          }
+        } catch(e) { clearInterval(pollTimer); btn.disabled = false; btn.textContent = '删除'; }
+      }, 1000);
+    }
+  } catch(e) { toast('操作失败: ' + e.message, 'error'); btn.disabled = false; btn.textContent = '删除'; }
+}
+
+async function dreviewRemoveReverb() {
+  if (!window._dreviewDir) { toast('请先加载审核目录', 'error'); return; }
+  if (!confirm('确定要检测并删除所有含混响的降噪音频吗？\n此操作不可撤销。')) return;
+  var btn = document.getElementById('btn-dreview-remove-reverb');
+  btn.disabled = true;
+  btn.textContent = '检测中...';
+  toast('正在分析混响特征，请稍候...', 'info');
+  try {
+    var url = API + '/api/denoise-review/remove-reverb?clip_dir=' + encodeURIComponent(window._dreviewDir);
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    if (data.status === 'started') {
+      var pollTimer = setInterval(async function() {
+        try {
+          var r2 = await fetch(API + '/api/jobs/' + data.job_id);
+          var job = await r2.json();
+          if (job.status === 'completed') {
+            clearInterval(pollTimer);
+            var msg = (job.steps && job.steps.length) ? job.steps[job.steps.length - 1].message : '完成';
+            toast(msg, 'success');
+            var stepData = (job.steps && job.steps.length) ? job.steps[job.steps.length - 1].data : null;
+            if (stepData && stepData.deleted && stepData.deleted.length > 0) {
+              var now = new Date().toLocaleTimeString();
+              for (var d = 0; d < stepData.deleted.length; d++) {
+                window._dreviewDeleted.push({name: stepData.deleted[d], time: now, reason: '混响'});
+              }
+              renderDreviewDeleted();
+            }
+            btn.disabled = false;
+            btn.textContent = '去除混响';
+            loadDreviewClips();
+          } else if (job.status === 'failed') {
+            clearInterval(pollTimer);
+            toast('检测失败', 'error');
+            btn.disabled = false;
+            btn.textContent = '去除混响';
+            loadDreviewClips();
+          }
+        } catch(e) { clearInterval(pollTimer); btn.disabled = false; btn.textContent = '去除混响'; }
+      }, 1000);
+    }
+  } catch(e) { toast('操作失败: ' + e.message, 'error'); btn.disabled = false; btn.textContent = '去除混响'; }
+}
+
+async function dreviewRemoveMale() {
+  if (!window._dreviewDir) { toast('请先加载审核目录', 'error'); return; }
+  if (!confirm('确定要检测并删除所有含男声的降噪音频吗？\n此操作不可撤销。')) return;
+  var btn = document.getElementById('btn-dreview-remove-male');
+  btn.disabled = true;
+  btn.textContent = '检测中...';
+  toast('正在分析男声特征，请稍候...', 'info');
+  try {
+    var url = API + '/api/denoise-review/remove-male?clip_dir=' + encodeURIComponent(window._dreviewDir);
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    if (data.status === 'started') {
+      var pollTimer = setInterval(async function() {
+        try {
+          var r2 = await fetch(API + '/api/jobs/' + data.job_id);
+          var job = await r2.json();
+          if (job.status === 'completed') {
+            clearInterval(pollTimer);
+            var msg = (job.steps && job.steps.length) ? job.steps[job.steps.length - 1].message : '完成';
+            toast(msg, 'success');
+            var stepData = (job.steps && job.steps.length) ? job.steps[job.steps.length - 1].data : null;
+            if (stepData && stepData.deleted && stepData.deleted.length > 0) {
+              var now = new Date().toLocaleTimeString();
+              for (var d = 0; d < stepData.deleted.length; d++) {
+                window._dreviewDeleted.push({name: stepData.deleted[d], time: now, reason: '男声'});
+              }
+              renderDreviewDeleted();
+            }
+            btn.disabled = false;
+            btn.textContent = '去除男声';
+            loadDreviewClips();
+          } else if (job.status === 'failed') {
+            clearInterval(pollTimer);
+            toast('检测失败', 'error');
+            btn.disabled = false;
+            btn.textContent = '去除男声';
+            loadDreviewClips();
+          }
+        } catch(e) { clearInterval(pollTimer); btn.disabled = false; btn.textContent = '去除男声'; }
+      }, 1000);
+    }
+  } catch(e) { toast('操作失败: ' + e.message, 'error'); btn.disabled = false; btn.textContent = '去除男声'; }
+}
+
+// ============================================================
+// Results
+// ============================================================
+var _resultsSelected = {};
+var _resultsSelectMode = false;
+var _resultsAllSubs = [];
+var _resultsAllAudio = [];
+
+function switchResultsSubtab(tab) {
+  var subBtn = document.getElementById('results-subtab-sub');
+  var audioBtn = document.getElementById('results-subtab-audio');
+  var subPanel = document.getElementById('results-panel-sub');
+  var audioPanel = document.getElementById('results-panel-audio');
+
+  subBtn.className = tab === 'sub' ? 'btn btn-primary' : 'btn btn-secondary';
+  audioBtn.className = tab === 'audio' ? 'btn btn-primary' : 'btn btn-secondary';
+  subPanel.style.display = tab === 'sub' ? 'block' : 'none';
+  audioPanel.style.display = tab === 'audio' ? 'block' : 'none';
+
+  if (tab === 'audio') renderApprovedAudio();
+}
+
+function enterSelectMode() {
+  _resultsSelectMode = true;
+  renderApprovedAudio();
+}
+
+function exitSelectMode() {
+  _resultsSelectMode = false;
+  _resultsSelected = {};
+  renderApprovedAudio();
+}
+
+function renderApprovedAudio() {
+  var aCont = document.getElementById('approved-list');
+  var toolbar = document.getElementById('results-toolbar');
+  var btnEnter = document.getElementById('btn-enter-select');
+  var btnExit = document.getElementById('btn-exit-select');
+  var data = _resultsAllAudio;
+
+  if (!data.length) {
+    aCont.innerHTML = '<div class="empty-state"><p>暂无审核通过的音频</p></div>';
+    toolbar.style.display = 'none';
+    btnEnter.style.display = 'none';
+    btnExit.style.display = 'none';
+    return;
+  }
+
+  var hint = document.getElementById('results-audio-hint');
+  if (_resultsSelectMode) {
+    toolbar.style.display = 'flex';
+    btnEnter.style.display = 'none';
+    btnExit.style.display = 'inline-block';
+    hint.style.display = 'none';
+  } else {
+    toolbar.style.display = 'none';
+    btnEnter.style.display = 'inline-block';
+    btnExit.style.display = 'none';
+    hint.style.display = 'inline';
+  }
+
+  var html = '';
+  for (var j = 0; j < data.length; j++) {
+    var a = data[j];
+    var durStr = a.duration_s > 0 ? formatDuration(a.duration_s) : '?';
+    var checked = _resultsSelected[a.path] ? ' checked' : '';
+
+    html += '<div class="file-item" data-path="' + safeAttr(a.path) + '" style="flex-wrap:wrap;">';
+    // Checkbox only visible in select mode
+    if (_resultsSelectMode) {
+      html += '<input type="checkbox" value="' + safeAttr(a.path) + '" style="flex-shrink:0;"' + checked + ' data-result-check="1">';
+    }
+    html += '<span style="font-size:14px;flex-shrink:0;cursor:pointer;" data-play="' + safeAttr(a.path) + '" data-playname="' + safeAttr(a.name) + '">🎵</span>' +
+      '<span class="file-name" style="cursor:pointer;font-size:13px;" data-play="' + safeAttr(a.path) + '" data-playname="' + safeAttr(a.name) + '">' + escapeHtml(a.name) + '</span>' +
+      '<span class="file-size">' + a.size_mb + ' MB | ' + durStr + (a.codec ? ' | ' + a.codec : '') + (a.sample_rate ? ' | ' + a.sample_rate + 'Hz' : '') + (a.bitrate ? ' | ' + a.bitrate : '') + '</span>' +
+    '</div>';
+  }
+  aCont.innerHTML = html;
+
+  // Wire checkbox changes + update count
+  if (_resultsSelectMode) {
+    var checks = aCont.querySelectorAll('input[data-result-check]');
+    var countEl = document.getElementById('results-select-count');
+    function updateCount() {
+      var n = Object.values(_resultsSelected).filter(function(v) { return v; }).length;
+      countEl.textContent = n > 0 ? '已选 ' + n + ' 个' : '未选中';
+    }
+    updateCount();
+    for (var i = 0; i < checks.length; i++) {
+      checks[i].onchange = function() {
+        _resultsSelected[this.value] = this.checked;
+        updateCount();
+      };
+    }
+  }
+
+  // Re-highlight playing item after list rebuild
+  if (_playingEl) {
+    var curPath = _playingEl.getAttribute('data-path');
+    _playingEl = null;
+    var items = aCont.querySelectorAll('.file-item');
+    for (var k = 0; k < items.length; k++) {
+      if (items[k].getAttribute('data-path') === curPath) {
+        items[k].classList.add('playing');
+        _playingEl = items[k];
+        break;
+      }
+    }
+  }
+}
+
+async function loadResults() {
+  try {
+    var resp = await fetch(API + '/api/results/videos');
+    var data = await resp.json();
+    var sel = document.getElementById('results-video-select');
+    var curVal = sel.value;
+    var selHtml = '<option value="">选择视频...</option>';
+    for (var i = 0; i < data.videos.length; i++) {
+      var v = data.videos[i];
+      selHtml += '<option value="' + escapeHtml(v.name) + '" data-approved="' + v.approved + '" data-total="' + v.total_clips + '">' + escapeHtml(v.name) + '</option>';
+    }
+    sel.innerHTML = selHtml;
+    if (curVal) {
+      for (var j = 0; j < sel.options.length; j++) {
+        if (sel.options[j].value === curVal) { sel.selectedIndex = j; break; }
+      }
+    }
+    if (data.videos.length > 0 && !curVal) { sel.selectedIndex = 1; loadResultsForVideo(); }
+    else if (curVal) loadResultsForVideo();
+  } catch(e) { console.error(e); }
+
+  document.getElementById('btn-select-all').onclick = function() {
+    var checks = document.querySelectorAll('#approved-list input[data-result-check]');
+    for (var i = 0; i < checks.length; i++) { checks[i].checked = true; _resultsSelected[checks[i].value] = true; }
+    document.getElementById('results-select-count').textContent = '已选 ' + checks.length + ' 个';
+  };
+  document.getElementById('btn-deselect-all').onclick = function() {
+    var checks = document.querySelectorAll('#approved-list input[data-result-check]');
+    for (var i = 0; i < checks.length; i++) { checks[i].checked = false; _resultsSelected = {}; }
+    document.getElementById('results-select-count').textContent = '未选中';
+  };
+  document.getElementById('btn-delete-selected').onclick = deleteSelected;
+}
+
+async function loadResultsForVideo() {
+  var sel = document.getElementById('results-video-select');
+  var name = sel.value;
+  _resultsSelected = {};
+  _resultsSelectMode = false;
+  _resultsAllSubs = [];
+  _resultsAllAudio = [];
+  if (!name) {
+    document.getElementById('subtitles-list').innerHTML = '<div class="empty-state"><p>选择视频后显示</p></div>';
+    document.getElementById('approved-list').innerHTML = '<div class="empty-state"><p>选择视频后显示</p></div>';
+    document.getElementById('btn-enter-select').style.display = 'none';
+    document.getElementById('btn-exit-select').style.display = 'none';
+    document.getElementById('results-toolbar').style.display = 'none';
+    document.getElementById('results-stats').textContent = '';
+    document.getElementById('results-progress').textContent = '';
+    return;
+  }
+  // Show progress from option data
+  var opt = sel.options[sel.selectedIndex];
+  var approved = opt.getAttribute('data-approved') || '0';
+  var total = opt.getAttribute('data-total') || '0';
+  document.getElementById('results-progress').textContent = '审核 ' + approved + '/' + total + ' 通过';
+
+  // Subtitles
+  try {
+    var sResp = await fetch(API + '/api/results/video/' + encodeURIComponent(name) + '/subtitles');
+    var sData = await sResp.json();
+    _resultsAllSubs = sData.subtitles;
+    var sCont = document.getElementById('subtitles-list');
+    if (!sData.subtitles.length) {
+      sCont.innerHTML = '<div class="empty-state"><p>未找到字幕</p></div>';
+    } else {
+      var sHtml = '';
+      for (var i = 0; i < sData.subtitles.length; i++) {
+        var s = sData.subtitles[i];
+        sHtml += '<div class="file-item"><span>📝</span><span class="file-name">' + escapeHtml(s.name) + '</span><span class="file-size">' + s.size_kb + ' KB</span></div>';
+      }
+      sCont.innerHTML = sHtml;
+    }
+  } catch(e) { console.error(e); }
+
+  // Approved audio
+  try {
+    var aResp = await fetch(API + '/api/results/video/' + encodeURIComponent(name) + '/approved');
+    var aData = await aResp.json();
+    _resultsAllAudio = aData.approved;
+    document.getElementById('results-stats').textContent = aData.count + ' 个通过音频';
+    if (!aData.approved.length) {
+      document.getElementById('results-player-bar').style.display = 'none';
+    }
+    // Render based on current sub-tab
+    var audioPanel = document.getElementById('results-panel-audio');
+    if (audioPanel.style.display !== 'none') {
+      renderApprovedAudio();
+    } else {
+      // Audio tab not active, just show the enter-select button
+      document.getElementById('btn-enter-select').style.display = aData.approved.length ? 'inline-block' : 'none';
+    }
+  } catch(e) { console.error(e); }
+}
+
+var _playingEl = null;
+
+function _getActivePlayerInfo() {
+  // Detect which tab is visible and return the right player/bar/name IDs
+  var resultsTab = document.getElementById('tab-results');
+  var denoiseTab = document.getElementById('tab-denoise');
+  if (denoiseTab && denoiseTab.classList.contains('active')) {
+    return { player: 'denoise-audio-player', bar: 'denoise-player-bar', name: 'denoise-playing-name' };
+  }
+  return { player: 'results-audio-player', bar: 'results-player-bar', name: 'results-playing-name' };
+}
+
+function playResultAudio(path, name) {
+  var info = _getActivePlayerInfo();
+  var player = document.getElementById(info.player);
+  var bar = document.getElementById(info.bar);
+  player.src = API + '/api/results/stream?path=' + encodeURIComponent(path);
+  player.load();
+  player.play().catch(function(){});
+  document.getElementById(info.name).textContent = name || path;
+  bar.style.display = 'block';
+
+  if (_playingEl) _playingEl.classList.remove('playing');
+  _playingEl = null;
+  var containers = ['#approved-list', '#denoise-file-list', '#denoise-result-list'];
+  for (var c = 0; c < containers.length; c++) {
+    var items = document.querySelectorAll(containers[c] + ' .file-item');
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].getAttribute('data-path') === path) {
+        items[i].classList.add('playing');
+        _playingEl = items[i];
+        return;
+      }
+    }
+  }
+}
+
+function closeResultsPlayer() {
+  var info = _getActivePlayerInfo();
+  var player = document.getElementById(info.player);
+  player.pause();
+  player.src = '';
+  document.getElementById(info.bar).style.display = 'none';
+  if (_playingEl) { _playingEl.classList.remove('playing'); _playingEl = null; }
+}
+
+function closeDenoisePlayer() { closeResultsPlayer(); }
+
+// ============================================================
+// Denoise
+// ============================================================
+var _denoiseSources = [];       // {name, path, size_mb, duration_s}
+var _denoiseResults = [];      // passed files {name, path, size_mb, duration_s}
+var _denoiseDiscarded = [];    // discarded files {name, path, reason}
+var _denoiseJobId = null;
+var _denoisePollTimer = null;
+var _denoiseSourceSelectMode = false;
+var _denoiseSourceSelected = {};
+var _denoiseResultSelectMode = false;
+var _denoiseResultSelected = {};
+
+// Default step order (all enabled)
+var STEP_DEFAULTS = [
+  {key: 'music_separate', label: 'BGM分离', enabled: false},
+  {key: 'male_voice', label: '去除男声', enabled: true},
+  {key: 'enhance', label: '语音增强', enabled: true},
+  {key: 'super_resolve', label: '超分辨率', enabled: true},
+  {key: 'reverb', label: '混响检测', enabled: false},
+  {key: 'silence', label: '静音过滤', enabled: false},
+  {key: 'vad', label: 'VAD', enabled: false},
+  {key: 'pad', label: '规范化', enabled: false},
+  {key: 'clear_short', label: '清除短音频', enabled: false},
+];
+var _denoiseSteps = JSON.parse(JSON.stringify(STEP_DEFAULTS)); // deep copy
+
+// Get active STEP_CONFIG for rendering (enabled steps only)
+function getActiveStepConfig() {
+  var config = [];
+  var num = 1;
+  for (var i = 0; i < _denoiseSteps.length; i++) {
+    if (_denoiseSteps[i].enabled) {
+      config.push({key: _denoiseSteps[i].key, label: _denoiseSteps[i].label, num: num});
+      num++;
+    }
+  }
+  return config;
+}
+
+// Get ordered list of enabled step keys (sent to API)
+function getEnabledStepKeys() {
+  var keys = [];
+  for (var i = 0; i < _denoiseSteps.length; i++) {
+    if (_denoiseSteps[i].enabled) keys.push(_denoiseSteps[i].key);
+  }
+  return keys;
+}
+
+function stepStatusForDisplay(steps, stepKey) {
+  for (var i = steps.length - 1; i >= 0; i--) {
+    if (steps[i].step === stepKey) return steps[i].status;
+  }
+  return 'pending';
+}
+
+function renderStepDots(steps) {
+  var config = getActiveStepConfig();
+  var html = '';
+  for (var i = 0; i < config.length; i++) {
+    var sc = config[i];
+    var status = stepStatusForDisplay(steps || [], sc.key);
+    html += '<span class="step-dot ' + status + '" title="' + sc.label + '">' + sc.num + '</span>';
+  }
+  return html;
+}
+
+// ============================================================
+// Step config panel (drag + toggle)
+// ============================================================
+function renderStepConfig() {
+  var cont = document.getElementById('denoise-step-list');
+  var html = '';
+  for (var i = 0; i < _denoiseSteps.length; i++) {
+    var s = _denoiseSteps[i];
+    var cls = s.enabled ? '' : 'step-disabled';
+    html += '<div class="step-config-item ' + cls + '" draggable="true" data-step-idx="' + i + '"';
+    html += ' style="display:flex;align-items:center;gap:4px;background:var(--bg3);border-radius:6px;padding:4px 8px;cursor:grab;transition:opacity 0.2s;';
+    if (!s.enabled) html += 'opacity:0.45;';
+    html += '">';
+    html += '<span style="cursor:grab;color:var(--text2);font-size:12px;" title="拖拽排序">⠿</span>';
+    html += '<input type="checkbox" ' + (s.enabled ? 'checked' : '') + ' data-step-toggle="' + s.key + '" style="cursor:pointer;">';
+    html += '<span style="font-size:11px;color:' + (s.enabled ? 'var(--text)' : 'var(--text2)') + ';white-space:nowrap;">' + s.label + '</span>';
+    html += '</div>';
+    if (i < _denoiseSteps.length - 1) {
+      html += '<span style="color:var(--text2);font-size:10px;">→</span>';
+    }
+  }
+  cont.innerHTML = html;
+
+  // Wire checkbox toggles
+  var toggles = cont.querySelectorAll('[data-step-toggle]');
+  for (var t = 0; t < toggles.length; t++) {
+    toggles[t].onchange = function() {
+      var key = this.getAttribute('data-step-toggle');
+      for (var s = 0; s < _denoiseSteps.length; s++) {
+        if (_denoiseSteps[s].key === key) {
+          _denoiseSteps[s].enabled = this.checked;
+          break;
+        }
+      }
+      renderStepConfig();
+      renderDenoiseFileList();
+      _saveDenoiseSteps();
+    };
+  }
+
+  // Wire drag-and-drop
+  var items = cont.querySelectorAll('.step-config-item');
+  var dragIdx = -1;
+  for (var d = 0; d < items.length; d++) {
+    items[d].addEventListener('dragstart', function(e) {
+      dragIdx = parseInt(this.getAttribute('data-step-idx'));
+      this.style.opacity = '0.4';
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    items[d].addEventListener('dragend', function(e) {
+      this.style.opacity = '';
+      dragIdx = -1;
+      // Remove all drop-zone highlights
+      var all = cont.querySelectorAll('.step-config-item');
+      for (var a = 0; a < all.length; a++) all[a].style.borderLeft = '';
+    });
+    items[d].addEventListener('dragover', function(e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      this.style.borderLeft = '2px solid var(--accent)';
+    });
+    items[d].addEventListener('dragleave', function(e) {
+      this.style.borderLeft = '';
+    });
+    items[d].addEventListener('drop', function(e) {
+      e.preventDefault();
+      this.style.borderLeft = '';
+      var dropIdx = parseInt(this.getAttribute('data-step-idx'));
+      if (dragIdx >= 0 && dragIdx !== dropIdx) {
+        var moved = _denoiseSteps.splice(dragIdx, 1)[0];
+        _denoiseSteps.splice(dropIdx, 0, moved);
+        renderStepConfig();
+        renderDenoiseFileList();
+        _saveDenoiseSteps();
+      }
+    });
+  }
+}
+
+function _saveDenoiseSteps() {
+  var map = {};
+  for (var i = 0; i < _denoiseSteps.length; i++) {
+    map[_denoiseSteps[i].key] = _denoiseSteps[i].enabled;
+  }
+  _uiState.denoiseSteps = map;
+  _saveUiState();
+}
+
+function resetStepConfig() {
+  _denoiseSteps = JSON.parse(JSON.stringify(STEP_DEFAULTS));
+  _saveDenoiseSteps();
+  renderStepConfig();
+  renderDenoiseFileList();
+}
+
+// ============================================================
+// Load sources
+// ============================================================
+async function loadDenoiseDirs() {
+  try {
+    var resp = await fetch(API + '/api/results/videos');
+    var data = await resp.json();
+    var sel = document.getElementById('denoise-video-select');
+    // Save currently selected values
+    var selectedValues = [];
+    for (var i = 0; i < sel.selectedOptions.length; i++) {
+      selectedValues.push(sel.selectedOptions[i].value);
+    }
+    var dhHtml = '<option value="" disabled>选择视频...（按住Ctrl多选）</option>';
+    for (var i = 0; i < data.videos.length; i++) {
+      var v = data.videos[i];
+      var statusTag = v.denoised_all ? ' ✅已全部降噪' : (v.cleaned > 0 ? ' ⏳部分降噪(' + v.cleaned + '/' + v.approved + ')' : ' ❌未降噪');
+      dhHtml += '<option value="' + escapeHtml(v.name) + '">' + escapeHtml(v.name) + ' — 已审核' + v.approved + ' | 已降噪' + (v.cleaned || 0) + statusTag + '</option>';
+    }
+    sel.innerHTML = dhHtml;
+    // Restore previously selected values
+    if (selectedValues.length > 0) {
+      for (var j = 0; j < sel.options.length; j++) {
+        if (selectedValues.indexOf(sel.options[j].value) >= 0) {
+          sel.options[j].selected = true;
+        }
+      }
+    } else if (data.videos.length > 0) {
+      sel.options[1].selected = true; // auto-select first on initial load
+    }
+    loadDenoiseSources();
+  } catch(e) { console.error(e); }
+}
+
+async function loadDenoiseSources() {
+  var sel = document.getElementById('denoise-video-select');
+  var names = [];
+  for (var i = 0; i < sel.selectedOptions.length; i++) {
+    if (sel.selectedOptions[i].value) names.push(sel.selectedOptions[i].value);
+  }
+  _denoiseSources = []; _denoiseResults = []; _denoiseDiscarded = [];
+  _denoiseSourceSelectMode = false; _denoiseSourceSelected = {};
+  _denoiseResultSelectMode = false; _denoiseResultSelected = {};
+  stopPolling();
+
+  if (!names.length) {
+    document.getElementById('denoise-file-list').innerHTML = '<div class="empty-state"><p>选择视频后显示待处理音频</p></div>';
+    document.getElementById('denoise-results-section').style.display = 'none';
+    document.getElementById('denoise-discarded-section').style.display = 'none';
+    hideDenoiseButtons();
+    return;
+  }
+
+  // Load approved sources and cleaned results for each selected video
+  for (var n = 0; n < names.length; n++) {
+    var name = names[n];
+    // Load approved sources
+    var approved = [];
+    try {
+      var aResp = await fetch(API + '/api/results/video/' + encodeURIComponent(name) + '/approved');
+      var aData = await aResp.json();
+      approved = aData.approved || [];
+      for (var a = 0; a < approved.length; a++) {
+        approved[a].video = name;
+      }
+    } catch(e) { console.error(e); }
+
+    // Load cleaned results for this video
+    var cleanedNames = {};
+    try {
+      var cResp = await fetch(API + '/api/results/video/' + encodeURIComponent(name) + '/cleaned');
+      var cData = await cResp.json();
+      var cleaned = cData.cleaned || [];
+      for (var c = 0; c < cleaned.length; c++) {
+        cleanedNames[cleaned[c].name] = true;
+      }
+      _denoiseResults = _denoiseResults.concat(cleaned);
+    } catch(e) {}
+
+    // Filter out already-denoised sources
+    var filtered = approved.filter(function(s) {
+      return !cleanedNames[s.name.replace('.wav', '_norm.wav')] && !cleanedNames[s.name];
+    });
+    _denoiseSources = _denoiseSources.concat(filtered);
+  }
+
+  renderDenoiseFileList();
+  renderDenoiseResults();
+  renderDenoiseDiscarded();
+  updateDenoiseStats();
+  showDenoiseButtons();
+}
+
+function hideDenoiseButtons() {
+  document.getElementById('btn-denoise-all').style.display = 'none';
+  document.getElementById('btn-denoise-selected').style.display = 'none';
+  document.getElementById('btn-denoise-select-all').style.display = 'none';
+  document.getElementById('btn-denoise-delete-src').style.display = 'none';
+  document.getElementById('btn-denoise-source-select').style.display = 'none';
+  document.getElementById('btn-denoise-refresh').style.display = 'none';
+  document.getElementById('denoise-step-config').style.display = 'none';
+}
+
+function showDenoiseButtons() {
+  document.getElementById('btn-denoise-all').style.display = 'inline-block';
+  document.getElementById('btn-denoise-source-select').style.display = 'inline-block';
+  document.getElementById('btn-denoise-refresh').style.display = 'inline-block';
+  document.getElementById('denoise-step-config').style.display = 'block';
+  renderStepConfig();
+}
+
+function refreshDenoise() {
+  loadDenoiseDirs();
+  toast('列表已刷新', 'info');
+}
+
+function openDenoiseFileDialog() {
+  document.getElementById('denoise-file-input').click();
+}
+
+async function handleDenoiseFileSelect(event) {
+  var files = event.target.files;
+  if (!files || files.length === 0) return;
+
+  // Switch to reviewed sub-tab (uploaded WAV files use the reviewed pipeline)
+  // Manually switch panels to avoid loadDenoiseDirs() wiping _denoiseSources
+  document.getElementById('denoise-panel-reviewed').style.display = 'block';
+  document.getElementById('denoise-panel-unreviewed').style.display = 'none';
+  document.getElementById('denoise-subtab-reviewed').className = 'btn btn-primary';
+  document.getElementById('denoise-subtab-unreviewed').className = 'btn btn-secondary';
+  var stepCfg = document.getElementById('denoise-step-config');
+  stepCfg.style.display = 'block';
+  if (!window._denoiseStepsLoaded) { renderStepConfig(); window._denoiseStepsLoaded = true; }
+
+  var formData = new FormData();
+  for (var i = 0; i < files.length; i++) {
+    if (files[i].name.toLowerCase().endsWith('.wav')) {
+      formData.append('files', files[i]);
+    }
+  }
+
+  var wavCount = formData.getAll('files').length;
+  if (wavCount === 0) { toast('未选择WAV文件', 'error'); return; }
+
+  toast('正在上传 ' + wavCount + ' 个文件...', 'info');
+  try {
+    var resp = await fetch(API + '/api/denoise/upload', { method: 'POST', body: formData });
+    var data = await resp.json();
+    if (data.status === 'ok' && data.files.length > 0) {
+      for (var j = 0; j < data.files.length; j++) {
+        _denoiseSources.push(data.files[j]);
+      }
+      renderDenoiseFileList();
+      showDenoiseButtons();
+      updateDenoiseStats();
+      toast('已添加 ' + data.files.length + ' 个文件', 'success');
+    }
+  } catch(e) { toast('上传失败: ' + e.message, 'error'); }
+
+  // Reset file input so same file can be re-selected
+  event.target.value = '';
+}
+
+function updateDenoiseStats() {
+  var pending = _denoiseSources.length;
+  var passed = _denoiseResults.length;
+  var enabled = getEnabledStepKeys().length;
+  var msg = pending + ' 个待降噪 | ' + enabled + ' 步';
+  if (passed > 0) msg += ' | ' + passed + ' 个已通过';
+  document.getElementById('denoise-stats').textContent = msg;
+}
+
+// ============================================================
+// Render file list with step indicators
+// ============================================================
+function renderDenoiseFileList() {
+  var cont = document.getElementById('denoise-file-list');
+  if (!_denoiseSources.length && !_denoiseJobId) {
+    cont.innerHTML = '<div class="empty-state"><p>暂无待处理音频</p></div>';
+    return;
+  }
+
+  var config = getActiveStepConfig();
+  var html = '';
+  for (var i = 0; i < _denoiseSources.length; i++) {
+    var a = _denoiseSources[i];
+    var durStr = a.duration_s > 0 ? formatDuration(a.duration_s) : '?';
+    var checked = _denoiseSourceSelected[a.path] ? ' checked' : '';
+
+    html += '<div class="denoise-file-card pending" data-denoise-path="' + safeAttr(a.path) + '">';
+    html += '<div style="display:flex;align-items:center;gap:10px;">';
+    if (_denoiseSourceSelectMode) {
+      html += '<input type="checkbox" value="' + safeAttr(a.path) + '" style="flex-shrink:0;"' + checked + ' data-src-check="1">';
+    }
+    html += '<span style="font-size:14px;cursor:pointer;" data-play="' + safeAttr(a.path) + '" data-playname="' + safeAttr(a.name) + '">🎵</span>';
+    if (a.video) {
+      html += '<span style="font-size:10px;color:var(--warning);padding:1px 5px;border-radius:3px;background:var(--bg3);">' + escapeHtml(a.video) + '</span>';
+    }
+    html += '<span style="flex:1;font-size:12px;cursor:pointer;" data-play="' + safeAttr(a.path) + '" data-playname="' + safeAttr(a.name) + '">' + escapeHtml(a.name) + '</span>';
+    html += '<span style="font-size:11px;color:var(--text2);">' + durStr + ' | ' + a.size_mb + 'MB</span>';
+    html += '<span style="display:flex;gap:3px;" data-denoise-steps="' + safeAttr(a.path) + '">';
+    for (var s = 0; s < config.length; s++) {
+      html += '<span class="step-dot" title="' + config[s].label + '">' + config[s].num + '</span>';
+    }
+    html += '</span>';
+    html += '</div></div>';
+  }
+  cont.innerHTML = html;
+
+  if (_denoiseSourceSelectMode) {
+    var checks = cont.querySelectorAll('input[data-src-check]');
+    for (var k = 0; k < checks.length; k++) {
+      checks[k].onchange = function() {
+        _denoiseSourceSelected[this.value] = this.checked;
+        var n = Object.values(_denoiseSourceSelected).filter(function(v) { return v; }).length;
+        document.getElementById('btn-denoise-selected').textContent = '降噪选中 (' + n + ')';
+        document.getElementById('btn-denoise-selected').style.display = n > 0 ? 'inline-block' : 'none';
+      };
+    }
+  }
+}
+
+// ============================================================
+// Start/poll denoise job
+// ============================================================
+async function denoiseAll() {
+  if (!_denoiseSources.length) { toast('没有可降噪的音频', 'info'); return; }
+  var paths = _denoiseSources.map(function(s) { return s.path; });
+  startDenoiseJob(paths);
+}
+
+async function denoiseSelected() {
+  var selected = Object.keys(_denoiseSourceSelected).filter(function(k) { return _denoiseSourceSelected[k]; });
+  if (!selected.length) { toast('请先选择要降噪的音频', 'info'); return; }
+  startDenoiseJob(selected);
+}
+
+async function startDenoiseJob(paths) {
+  var enabledKeys = getEnabledStepKeys();
+  if (!enabledKeys.length) { toast('请至少启用一个处理步骤', 'error'); return; }
+
+  _denoiseSourceSelectMode = false; _denoiseSourceSelected = {};
+  document.getElementById('btn-denoise-selected').style.display = 'none';
+  document.getElementById('btn-denoise-select-all').style.display = 'none';
+  document.getElementById('btn-denoise-delete-src').style.display = 'none';
+
+  var videoName = ''; // Let backend determine output dir per-file for multi-select support
+  try {
+    var resp = await fetch(API + '/api/denoise/batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ video_name: videoName, paths: paths, steps: enabledKeys })
+    });
+    var data = await resp.json();
+    if (data.status !== 'ok') { toast('启动失败', 'error'); return; }
+    _denoiseJobId = data.job_id;
+    startPolling();
+    document.getElementById('denoise-progress').style.display = 'block';
+    document.getElementById('btn-denoise-all').style.display = 'none';
+    document.getElementById('btn-denoise-source-select').style.display = 'none';
+    toast('降噪任务已启动 (' + enabledKeys.length + ' 步)，共 ' + data.file_count + ' 个文件', 'info');
+  } catch(e) { toast('启动失败: ' + e.message, 'error'); }
+}
+
+function startPolling() {
+  if (_denoisePollTimer) clearInterval(_denoisePollTimer);
+  _denoisePollTimer = setInterval(pollDenoiseJob, 1000);
+  pollDenoiseJob();
+}
+
+function stopPolling() {
+  if (_denoisePollTimer) { clearInterval(_denoisePollTimer); _denoisePollTimer = null; }
+  _denoiseJobId = null;
+}
+
+async function pollDenoiseJob() {
+  if (!_denoiseJobId) { stopPolling(); return; }
+  try {
+    var resp = await fetch(API + '/api/denoise/job/' + _denoiseJobId);
+    var job = await resp.json();
+    updateDenoiseUI(job);
+    if (job.status === 'completed') { stopPolling(); onDenoiseComplete(job); }
+  } catch(e) { console.error(e); }
+}
+
+function updateDenoiseUI(job) {
+  var fill = document.getElementById('denoise-progress-fill');
+  var text = document.getElementById('denoise-progress-text');
+  fill.style.width = Math.round(job.progress) + '%';
+  text.textContent = '处理中... ' + job.current_file + ' (' + Math.round(job.progress) + '%)';
+
+  for (var i = 0; i < job.files.length; i++) {
+    var f = job.files[i];
+    var stepsContainer = document.querySelector('[data-denoise-steps="' + safeAttr(f.input_path) + '"]');
+    if (!stepsContainer) continue;
+    var dotsHtml = renderStepDots(f.steps);
+    stepsContainer.innerHTML = dotsHtml;
+
+    var card = stepsContainer.closest('.denoise-file-card');
+    if (card) {
+      card.className = 'denoise-file-card ' + f.status;
+    }
+  }
+}
+
+function onDenoiseComplete(job) {
+  document.getElementById('denoise-progress').style.display = 'none';
+  document.getElementById('denoise-progress-fill').style.width = '0%';
+
+  _denoiseResults = [];
+  _denoiseDiscarded = [];
+  for (var i = 0; i < job.files.length; i++) {
+    var f = job.files[i];
+    if (f.status === 'completed' && f.output_path) {
+      _denoiseResults.push({
+        name: f.output_path.split('/').pop().split('\\').pop(),
+        path: f.output_path,
+        size_mb: '',
+        duration_s: 0,
+      });
+    } else if (f.status === 'discarded') {
+      var reason = '';
+      for (var s = 0; s < f.steps.length; s++) {
+        if (f.steps[s].status === 'discarded') { reason = f.steps[s].message; break; }
+      }
+      _denoiseDiscarded.push({ name: f.name, path: f.input_path, reason: reason });
+    }
+  }
+
+  _denoiseSources = [];
+  renderDenoiseFileList();
+  renderDenoiseResults();
+  renderDenoiseDiscarded();
+  updateDenoiseStats();
+  showDenoiseButtons();
+  toast('降噪完成！通过 ' + _denoiseResults.length + ' 个，舍弃 ' + _denoiseDiscarded.length + ' 个', 'success');
+}
+
+// ============================================================
+// Render results (passed)
+// ============================================================
+function renderDenoiseResults() {
+  var section = document.getElementById('denoise-results-section');
+  var cont = document.getElementById('denoise-result-list');
+  var title = document.getElementById('denoise-passed-count');
+  var btnSel = document.getElementById('btn-denoise-result-select');
+  var btnExit = document.getElementById('btn-denoise-result-exit');
+  var btnDel = document.getElementById('btn-denoise-result-delete');
+
+  if (!_denoiseResults.length) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+  title.textContent = _denoiseResults.length;
+
+  btnSel.style.display = _denoiseResultSelectMode ? 'none' : 'inline-block';
+  btnExit.style.display = _denoiseResultSelectMode ? 'inline-block' : 'none';
+  document.getElementById('btn-denoise-result-selectall').style.display = _denoiseResultSelectMode ? 'inline-block' : 'none';
+  btnDel.style.display = _denoiseResultSelectMode ? 'inline-block' : 'none';
+
+  var html = '';
+  for (var i = 0; i < _denoiseResults.length; i++) {
+    var a = _denoiseResults[i];
+    var durStr = a.duration_s > 0 ? formatDuration(a.duration_s) : '?';
+    var sizeStr = a.size_mb ? a.size_mb + 'MB' : '';
+    var checked = _denoiseResultSelected[a.path] ? ' checked' : '';
+
+    html += '<div class="file-item" data-path="' + safeAttr(a.path) + '" style="background:#1a2a1a;">';
+    if (_denoiseResultSelectMode) {
+      html += '<input type="checkbox" value="' + safeAttr(a.path) + '" style="flex-shrink:0;"' + checked + ' data-result-check="1">';
+    }
+    html += '<span style="font-size:14px;cursor:pointer;" data-play="' + safeAttr(a.path) + '" data-playname="' + safeAttr(a.name) + '">🎵</span>';
+    html += '<span class="file-name" style="font-size:12px;cursor:pointer;color:var(--success);" data-play="' + safeAttr(a.path) + '" data-playname="' + safeAttr(a.name) + '">' + escapeHtml(a.name) + '</span>';
+    html += '<span class="file-size">' + (durStr + (sizeStr ? ' | ' + sizeStr : '')) + '</span>';
+    html += '</div>';
+  }
+  cont.innerHTML = html;
+
+  if (_denoiseResultSelectMode) {
+    var checks = cont.querySelectorAll('input[data-result-check]');
+    for (var k = 0; k < checks.length; k++) {
+      checks[k].onchange = function() {
+        _denoiseResultSelected[this.value] = this.checked;
+      };
+    }
+  }
+}
+
+// ============================================================
+// Render discarded
+// ============================================================
+function renderDenoiseDiscarded() {
+  var section = document.getElementById('denoise-discarded-section');
+  var cont = document.getElementById('denoise-discarded-list');
+  var count = document.getElementById('denoise-discarded-count');
+
+  if (!_denoiseDiscarded.length) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+  count.textContent = _denoiseDiscarded.length;
+
+  var html = '';
+  for (var i = 0; i < _denoiseDiscarded.length; i++) {
+    var d = _denoiseDiscarded[i];
+    html += '<div class="file-item" style="opacity:0.7;">';
+    html += '<span style="font-size:14px;">🗑️</span>';
+    html += '<span class="file-name" style="font-size:12px;color:var(--danger);">' + escapeHtml(d.name) + '</span>';
+    html += '<span style="font-size:11px;color:var(--text2);">' + escapeHtml(d.reason || '已舍弃') + '</span>';
+    html += '</div>';
+  }
+  cont.innerHTML = html;
+}
+
+// ============================================================
+// Selection toggles
+// ============================================================
+function toggleSourceSelect() {
+  _denoiseSourceSelectMode = !_denoiseSourceSelectMode;
+  if (!_denoiseSourceSelectMode) {
+    _denoiseSourceSelected = {};
+    document.getElementById('btn-denoise-selected').style.display = 'none';
+    document.getElementById('btn-denoise-select-all').style.display = 'none';
+    document.getElementById('btn-denoise-delete-src').style.display = 'none';
+  }
+  document.getElementById('btn-denoise-source-select').textContent = _denoiseSourceSelectMode ? '退出选择' : '选择';
+  if (_denoiseSourceSelectMode) {
+    document.getElementById('btn-denoise-selected').style.display = 'inline-block';
+    document.getElementById('btn-denoise-selected').textContent = '降噪选中';
+    document.getElementById('btn-denoise-select-all').style.display = 'inline-block';
+    document.getElementById('btn-denoise-delete-src').style.display = 'inline-block';
+  }
+  renderDenoiseFileList();
+}
+
+function selectAllSources() {
+  for (var i = 0; i < _denoiseSources.length; i++) {
+    _denoiseSourceSelected[_denoiseSources[i].path] = true;
+  }
+  var n = Object.values(_denoiseSourceSelected).filter(function(v) { return v; }).length;
+  document.getElementById('btn-denoise-selected').textContent = '降噪选中 (' + n + ')';
+  renderDenoiseFileList();
+}
+
+async function deleteSelectedSources() {
+  var paths = Object.keys(_denoiseSourceSelected).filter(function(k) { return _denoiseSourceSelected[k]; });
+  if (!paths.length) { toast('请先选择要删除的音频', 'info'); return; }
+  if (!confirm('确定删除 ' + paths.length + ' 个未处理音频？此操作不可恢复。')) return;
+  try {
+    var resp = await fetch(API + '/api/results/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: paths })
+    });
+    var data = await resp.json();
+    toast('已删除 ' + data.deleted + ' 个文件', 'success');
+    _denoiseSourceSelected = {};
+    loadDenoiseSources();
+  } catch(e) { toast('删除失败: ' + e.message, 'error'); }
+}
+
+function enterResultSelect() {
+  _denoiseResultSelectMode = true;
+  _denoiseResultSelected = {};
+  renderDenoiseResults();
+}
+
+function exitResultSelect() {
+  _denoiseResultSelectMode = false;
+  _denoiseResultSelected = {};
+  renderDenoiseResults();
+}
+
+function selectAllDenoiseResults() {
+  for (var i = 0; i < _denoiseResults.length; i++) {
+    _denoiseResultSelected[_denoiseResults[i].path] = true;
+  }
+  renderDenoiseResults();
+}
+
+async function deleteDenoiseResults() {
+  var paths = Object.keys(_denoiseResultSelected).filter(function(k) { return _denoiseResultSelected[k]; });
+  if (!paths.length) { toast('请先选择要删除的音频', 'info'); return; }
+  if (!confirm('确定删除 ' + paths.length + ' 个降噪音频？')) return;
+  try {
+    var resp = await fetch(API + '/api/results/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: paths })
+    });
+    var data = await resp.json();
+    toast('已删除 ' + data.deleted + ' 个文件', 'success');
+    exitResultSelect();
+    loadDenoiseSources();
+  } catch(e) { toast('删除失败: ' + e.message, 'error'); }
+}
+
+function formatDuration(sec) {
+  var m = Math.floor(sec / 60);
+  var s = Math.floor(sec % 60);
+  return m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+async function deleteSelected() {
+  var paths = Object.keys(_resultsSelected).filter(function(k) { return _resultsSelected[k]; });
+  if (!paths.length) { toast('请先选择要删除的音频', 'info'); return; }
+  if (!confirm('确定删除 ' + paths.length + ' 个音频文件？此操作不可恢复。')) return;
+
+  try {
+    var resp = await fetch(API + '/api/results/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: paths })
+    });
+    var data = await resp.json();
+    toast('已删除 ' + data.deleted + ' 个文件', 'success');
+    if (data.failed && data.failed.length) toast('失败 ' + data.failed.length + ' 个', 'error');
+    exitSelectMode();
+    loadResultsForVideo();
+  } catch(e) {
+    toast('删除失败: ' + e.message, 'error');
+  }
+}
+
+// ============================================================
+// Subtitle Extraction
+// ============================================================
+var _extractFiles = [];
+var _extractTracks = [];
+var _extractActiveFile = null;
+var _extractSelectedTracks = {};
+var _extractJobId = null;
+var _extractPollTimer = null;
+
+async function loadExtractFiles() {
+  var cont = document.getElementById('extract-file-list');
+  try {
+    var resp = await fetch(API + '/api/extract/mkv-files');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var data = await resp.json();
+    _extractFiles = data.files || [];
+
+    // Also load existing subtitles for matching
+    var subMap = {};
+    try {
+      var sResp = await fetch(API + '/api/extract/subtitle-files');
+      if (sResp.ok) {
+        var sData = await sResp.json();
+        var subs = sData.subtitles || [];
+        for (var si = 0; si < subs.length; si++) {
+          subMap[subs[si].name] = true;
+        }
+      }
+    } catch(e) { console.error(e); }
+
+    if (!_extractFiles.length) {
+      cont.innerHTML = '<div class="empty-state"><p>data/downloads 中没有 MKV 文件</p></div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < _extractFiles.length; i++) {
+      var f = _extractFiles[i];
+      var activeClass = _extractActiveFile === f.path ? ' active' : '';
+      // Check for existing subtitle matching this MKV base name
+      var mkvBase = f.name.replace(/\.[^.]+$/, '').toLowerCase();
+      var matchedSub = null;
+      var subNames = Object.keys(subMap);
+      for (var si = 0; si < subNames.length; si++) {
+        if (subNames[si].toLowerCase().indexOf(mkvBase + '_track') === 0) {
+          matchedSub = subNames[si]; break;
+        }
+      }
+      var subInfo = matchedSub
+        ? '<span style="color:var(--success);font-size:11px;">📝 ' + escapeHtml(matchedSub) + '</span>'
+        : '<span style="color:var(--text2);font-size:11px;">无现成字幕</span>';
+      html += '<div class="mkv-file-item' + activeClass + '" data-extract-path="' + safeAttr(f.path) + '">' +
+        '<span style="font-size:16px;">📦</span>' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(f.name) + '</div>' +
+          '<div style="font-size:11px;color:var(--text2);">' + f.size_mb + ' MB | ' + f.time_str + ' | ' + subInfo + '</div>' +
+        '</div>' +
+      '</div>';
+    }
+    cont.innerHTML = html;
+    // Re-highlight active
+    if (_extractActiveFile) {
+      var items = cont.querySelectorAll('.mkv-file-item');
+      for (var k = 0; k < items.length; k++) {
+        if (items[k].getAttribute('data-extract-path') === _extractActiveFile) {
+          items[k].classList.add('active');
+          break;
+        }
+      }
+    }
+  } catch(e) {
+    cont.innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
+  }
+}
+
+async function selectExtractFile(path) {
+  _extractActiveFile = path;
+  _extractSelectedTracks = {};
+  _extractJobId = null;
+  if (_extractPollTimer) { clearInterval(_extractPollTimer); _extractPollTimer = null; }
+  document.getElementById('extract-status').style.display = 'none';
+
+  // Highlight active file
+  var items = document.querySelectorAll('#extract-file-list .mkv-file-item');
+  for (var i = 0; i < items.length; i++) {
+    var p = items[i].getAttribute('data-extract-path');
+    items[i].classList.toggle('active', p === path);
+  }
+
+  // Show track panel
+  document.getElementById('extract-empty-state').style.display = 'none';
+  var panel = document.getElementById('extract-track-panel');
+  panel.style.display = 'block';
+  document.getElementById('extract-current-file').textContent = '轨道 — ' + (path.split('/').pop().split('\\').pop());
+
+  // Load tracks
+  var tCont = document.getElementById('extract-track-list');
+  tCont.innerHTML = '<div class="empty-state"><p>加载轨道信息...</p></div>';
+  var btnExtract = document.getElementById('btn-extract-selected');
+  var btnAll = document.getElementById('btn-extract-all-subs');
+  btnExtract.style.display = 'none';
+  btnAll.style.display = 'none';
+
+  try {
+    var resp = await fetch(API + '/api/extract/tracks?path=' + encodeURIComponent(path));
+    var data = await resp.json();
+    _extractTracks = data.tracks || [];
+    renderExtractTracks();
+  } catch(e) {
+    tCont.innerHTML = '<div class="empty-state"><p>获取轨道失败: ' + escapeHtml(e.message) + '</p></div>';
+  }
+}
+
+function renderExtractTracks() {
+  var tCont = document.getElementById('extract-track-list');
+  var btnExtract = document.getElementById('btn-extract-selected');
+  var btnAll = document.getElementById('btn-extract-all-subs');
+  var hasSubs = false;
+
+  if (!_extractTracks.length) {
+    tCont.innerHTML = '<div class="empty-state"><p>此文件无可提取轨道</p></div>';
+    btnExtract.style.display = 'none';
+    btnAll.style.display = 'none';
+    return;
+  }
+
+  var html = '';
+  for (var i = 0; i < _extractTracks.length; i++) {
+    var t = _extractTracks[i];
+    var typeClass = t.type === 'video' ? 'video' : (t.type === 'audio' ? 'audio' : (t.type === 'subtitles' ? 'subtitles' : 'other'));
+    var typeLabel = t.type === 'video' ? '视频' : (t.type === 'audio' ? '音频' : (t.type === 'subtitles' ? '字幕' : '其他'));
+
+    if (t.type === 'subtitles') hasSubs = true;
+
+    var isSelected = _extractSelectedTracks[t.id] || false;
+    var trackClass = isSelected ? ' selected' : '';
+    var checkbox = t.type === 'subtitles'
+      ? '<input type="checkbox" ' + (isSelected ? 'checked' : '') + ' data-track-id="' + t.id + '" style="flex-shrink:0;cursor:pointer;">'
+      : '';
+
+    html += '<div class="track-card' + trackClass + '" data-track-card="' + t.id + '">' +
+      checkbox +
+      '<span class="track-type ' + typeClass + '">' + typeLabel + '</span>' +
+      '<div class="track-info">' +
+        '<span>ID: ' + t.id + ' — ' + escapeHtml(t.codec || '?') + '</span>' +
+        '<div class="track-meta">' +
+          '语言: ' + escapeHtml(t.language || '未知') +
+          (t.name ? ' | 名称: ' + escapeHtml(t.name) : '') +
+          (t.codec_id ? ' | ' + escapeHtml(t.codec_id) : '') +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+  tCont.innerHTML = html;
+
+  // Wire checkbox changes
+  var checks = tCont.querySelectorAll('input[data-track-id]');
+  for (var c = 0; c < checks.length; c++) {
+    checks[c].onchange = function() {
+      var tid = parseInt(this.getAttribute('data-track-id'));
+      _extractSelectedTracks[tid] = this.checked;
+      updateTrackCardHighlight(tid, this.checked);
+      updateExtractButtons();
+    };
+  }
+
+  btnAll.style.display = hasSubs ? 'inline-block' : 'none';
+  updateExtractButtons();
+}
+
+function updateTrackCardHighlight(trackId, selected) {
+  var card = document.querySelector('[data-track-card="' + trackId + '"]');
+  if (card) card.classList.toggle('selected', selected);
+}
+
+function updateExtractButtons() {
+  var btnExtract = document.getElementById('btn-extract-selected');
+  var count = Object.values(_extractSelectedTracks).filter(function(v) { return v; }).length;
+  btnExtract.style.display = count > 0 ? 'inline-block' : 'none';
+  btnExtract.textContent = count > 0 ? '提取选中轨道 (' + count + ')' : '提取选中轨道';
+}
+
+async function extractSelectedTracks() {
+  if (!_extractActiveFile) return;
+  var ids = [];
+  for (var k in _extractSelectedTracks) {
+    if (_extractSelectedTracks[k]) ids.push(k);
+  }
+  if (!ids.length) { toast('请先选择要提取的字幕轨道', 'info'); return; }
+  startExtraction(_extractActiveFile, ids.join(','));
+}
+
+async function extractAllSubs() {
+  if (!_extractActiveFile) return;
+  startExtraction(_extractActiveFile, '');
+}
+
+async function startExtraction(path, trackIds) {
+  try {
+    var url = API + '/api/extract/run?path=' + encodeURIComponent(path);
+    if (trackIds) url += '&track_ids=' + encodeURIComponent(trackIds);
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    if (data.status !== 'started') { toast('启动提取失败', 'error'); return; }
+    _extractJobId = data.job_id;
+    document.getElementById('extract-status').style.display = 'block';
+    document.getElementById('extract-status-text').textContent = '启动提取...';
+    document.getElementById('extract-progress-fill').style.width = '0%';
+    toast('字幕提取任务已启动', 'success');
+    startExtractPolling();
+  } catch(e) {
+    toast('提取失败: ' + e.message, 'error');
+  }
+}
+
+function startExtractPolling() {
+  if (_extractPollTimer) clearInterval(_extractPollTimer);
+  _extractPollTimer = setInterval(pollExtractJob, 800);
+  pollExtractJob();
+}
+
+function stopExtractPolling() {
+  if (_extractPollTimer) { clearInterval(_extractPollTimer); _extractPollTimer = null; }
+}
+
+async function pollExtractJob() {
+  if (!_extractJobId) { stopExtractPolling(); return; }
+  try {
+    var resp = await fetch(API + '/api/jobs/' + _extractJobId);
+    var job = await resp.json();
+    var fill = document.getElementById('extract-progress-fill');
+    var text = document.getElementById('extract-status-text');
+    fill.style.width = (job.progress || 0) + '%';
+    text.textContent = job.current_step || '处理中...';
+
+    if (job.status === 'completed') {
+      stopExtractPolling();
+      document.getElementById('extract-status-text').textContent = job.steps && job.steps.length ? job.steps[0].message : '提取完成';
+      if (job.status === 'completed') {
+        toast('字幕提取完成', 'success');
+      }
+      loadExtractedSubs();
+    } else if (job.status === 'failed') {
+      stopExtractPolling();
+      var msg = job.steps && job.steps.length ? job.steps[0].message : '提取失败';
+      document.getElementById('extract-status-text').textContent = '失败: ' + msg;
+      toast('提取失败: ' + msg, 'error');
+    }
+  } catch(e) { console.error(e); }
+}
+
+async function loadExtractedSubs() {
+  try {
+    var resp = await fetch(API + '/api/extract/subtitle-files');
+    if (!resp.ok) return;
+    var data = await resp.json();
+    var subs = data.subtitles || [];
+    var cont = document.getElementById('extract-sub-list');
+    document.getElementById('extract-sub-count').textContent = subs.length;
+    if (!subs.length) {
+      cont.innerHTML = '<div class="empty-state"><p>暂无提取的字幕</p></div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < subs.length; i++) {
+      var s = subs[i];
+      html += '<div class="file-item"><span>📝</span><span class="file-name">' + escapeHtml(s.name) + '</span><span class="file-size">' + s.size_kb + ' KB</span>' +
+        '<button class="btn btn-secondary" style="font-size:10px;padding:2px 8px;margin-left:4px;" onclick="viewExtractSub(\'' +
+          s.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">查看</button>' +
+        '<button class="btn btn-primary" style="font-size:10px;padding:2px 8px;margin-left:4px;" onclick="jumpToSplitFromExtract(\'' +
+          s.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">切割</button></div>';
+    }
+    cont.innerHTML = html;
+  } catch(e) { console.error(e); }
+}
+
+var _pendingSplitSubPath = null;
+var _pendingSplitMkvPath = null;
+
+function jumpToSplitFromExtract(subPath) {
+  _pendingSplitSubPath = subPath;
+  _pendingSplitMkvPath = _extractActiveFile;
+  switchTab('split');
+  if (_extractActiveFile) {
+    var dir = _extractActiveFile.replace(/\\/g, '/');
+    dir = dir.substring(0, dir.lastIndexOf('/'));
+    loadSplitFolderBrowser(dir, true);
+  }
+}
+
+function viewExtractSub(path) {
+  var url = API + '/api/results/stream?path=' + encodeURIComponent(path);
+  window.open(url, '_blank');
+}
+
+// Wire delegation for extract file list clicks
+document.getElementById('extract-file-list').addEventListener('click', function(e) {
+  var item = e.target.closest('.mkv-file-item');
+  if (!item) return;
+  var path = item.getAttribute('data-extract-path');
+  if (path) selectExtractFile(path);
+});
+
+// ============================================================
+// ASR Extraction
+// ============================================================
+var _asrVideos = [];
+var _asrActiveVideo = null;
+var _asrJobId = null;
+var _asrPollTimer = null;
+var _asrModels = [];
+var _asrSelected = {};       // { path: true } for multi-select
+var _asrQueue = [];          // ordered array of { name, path } to process
+var _asrQueueIndex = -1;     // current position in queue
+
+async function loadAsrVideos() {
+  var cont = document.getElementById('asr-video-list');
+  try {
+    var resp = await fetch(API + '/api/asr/videos');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var data = await resp.json();
+    _asrVideos = data.videos || [];
+
+    // Load existing subtitles for matching
+    var asrSubMap = {};
+    try {
+      var sResp = await fetch(API + '/api/extract/subtitle-files');
+      if (sResp.ok) {
+        var sData = await sResp.json();
+        var subs = sData.subtitles || [];
+        for (var si = 0; si < subs.length; si++) {
+          asrSubMap[subs[si].name] = true;
+        }
+      }
+    } catch(e) { console.error(e); }
+
+    if (!_asrVideos.length) {
+      cont.innerHTML = '<div class="empty-state"><p>没有找到视频文件</p><p style="font-size:11px;color:var(--text2);">请将视频放入 data/downloads/ 目录</p></div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < _asrVideos.length; i++) {
+      var v = _asrVideos[i];
+      var activeClass = _asrActiveVideo === v.path ? ' active' : '';
+      var checkedClass = _asrSelected[v.path] ? ' checked' : '';
+      var asrBase = v.name.replace(/\.[^.]+$/, '').toLowerCase();
+      var asrExtractSub = null;   // extracted subtitle (_track pattern)
+      var asrAsrSub = null;       // ASR subtitle (_sensevoice etc.)
+      var asrSubNames = Object.keys(asrSubMap);
+      for (var si = 0; si < asrSubNames.length; si++) {
+        var subLower = asrSubNames[si].toLowerCase();
+        if (subLower.indexOf(asrBase + '_track') === 0) {
+          asrExtractSub = asrSubNames[si];
+        } else if (subLower.indexOf(asrBase + '_sensevoice') === 0 || subLower.indexOf(asrBase + '_asr') === 0) {
+          asrAsrSub = asrSubNames[si];
+        }
+      }
+      var asrSubInfo;
+      if (asrAsrSub) {
+        asrSubInfo = '<span style="color:#4a9eff;font-size:11px;">🎙️ ' + escapeHtml(asrAsrSub) + '</span>';
+      } else if (asrExtractSub) {
+        asrSubInfo = '<span style="color:var(--success);font-size:11px;">📝 ' + escapeHtml(asrExtractSub) + '</span>';
+      } else {
+        asrSubInfo = '<span style="color:var(--text2);font-size:11px;">无现成字幕</span>';
+      }
+      var queueBadge = '';
+      if (_asrQueue.length > 0) {
+        var qi = -1;
+        for (var qj = 0; qj < _asrQueue.length; qj++) {
+          if (_asrQueue[qj].path === v.path) { qi = qj; break; }
+        }
+        if (qi >= 0) {
+          if (qi < _asrQueueIndex) {
+            queueBadge = '<span class="queue-badge queue-done">✅</span>';
+          } else if (qi === _asrQueueIndex) {
+            queueBadge = '<span class="queue-badge queue-processing">🔄 处理中</span>';
+          } else {
+            queueBadge = '<span class="queue-badge queue-waiting">⏳ 等待</span>';
+          }
+        }
+      }
+      html += '<div class="mkv-file-item' + activeClass + checkedClass + '" data-asr-path="' + safeAttr(v.path) + '">' +
+        '<input type="checkbox" class="item-check" data-asr-path="' + safeAttr(v.path) + '" onclick="event.stopPropagation();asrToggleItem(this)">' +
+        '<span style="font-size:16px;">🎬</span>' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(v.name) + '</div>' +
+          '<div style="font-size:11px;color:var(--text2);">' + v.size_mb + ' MB | ' + v.time_str + ' | ' + asrSubInfo + '</div>' +
+        '</div>' +
+        queueBadge +
+      '</div>';
+    }
+    cont.innerHTML = html;
+    if (_asrActiveVideo) {
+      var items = cont.querySelectorAll('.mkv-file-item');
+      for (var k = 0; k < items.length; k++) {
+        if (items[k].getAttribute('data-asr-path') === _asrActiveVideo) {
+          items[k].classList.add('active');
+          break;
+        }
+      }
+    }
+    updateAsrBatchUI();
+  } catch(e) {
+    cont.innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
+  }
+}
+
+async function loadAsrModels() {
+  try {
+    var resp = await fetch(API + '/api/asr/models');
+    if (!resp.ok) return;
+    var data = await resp.json();
+    _asrModels = data.models || [];
+    var selEl = document.getElementById('asr-model-select');
+    var html = '';
+    for (var i = 0; i < _asrModels.length; i++) {
+      var m = _asrModels[i];
+      var selAttr = m.key === 'qwen3-asr' ? ' selected' : '';
+      html += '<option value="' + safeAttr(m.key) + '"' + selAttr + '>' + escapeHtml(m.name) + ' — ' + escapeHtml(m.description) + '</option>';
+    }
+    if (!html) html = '<option value="">无可用模型</option>';
+    selEl.innerHTML = html;
+    // Apply saved ASR defaults
+    if (_savedAsrConfig && _savedAsrConfig.ASR_DEFAULT_MODEL) {
+      selEl.value = _savedAsrConfig.ASR_DEFAULT_MODEL;
+    }
+    if (_savedAsrConfig && _savedAsrConfig.ASR_DEFAULT_LANGUAGE) {
+      var langSel = document.getElementById('asr-lang-select');
+      if (langSel) langSel.value = _savedAsrConfig.ASR_DEFAULT_LANGUAGE;
+    }
+  } catch(e) { console.error('loadAsrModels:', e); }
+}
+
+// --- ASR batch selection ---
+function asrToggleItem(cb) {
+  var path = cb.getAttribute('data-asr-path');
+  if (!path) return;
+  if (cb.checked) { _asrSelected[path] = true; }
+  else { delete _asrSelected[path]; }
+  updateAsrBatchUI();
+  var item = cb.closest('.mkv-file-item');
+  if (item) item.classList.toggle('checked', cb.checked);
+}
+
+function asrToggleSelectAll() {
+  var masterCb = document.getElementById('asr-select-all-cb');
+  var checked = masterCb.checked;
+  _asrSelected = {};
+  var cbs = document.querySelectorAll('#asr-video-list .item-check');
+  for (var i = 0; i < cbs.length; i++) {
+    cbs[i].checked = checked;
+    var path = cbs[i].getAttribute('data-asr-path');
+    if (checked && path) _asrSelected[path] = true;
+    var item = cbs[i].closest('.mkv-file-item');
+    if (item) item.classList.toggle('checked', checked);
+  }
+  updateAsrBatchUI();
+}
+
+function updateAsrBatchUI() {
+  var bar = document.getElementById('asr-batch-bar');
+  var count = Object.keys(_asrSelected).length;
+  document.getElementById('asr-selected-count').textContent = '已选 ' + count + ' 个';
+  document.getElementById('btn-asr-batch-run').disabled = count === 0 || _asrQueue.length > 0;
+  bar.classList.toggle('visible', _asrVideos.length > 0);
+
+  // Sync master checkbox
+  var masterCb = document.getElementById('asr-select-all-cb');
+  var cbs = document.querySelectorAll('#asr-video-list .item-check');
+  if (cbs.length === 0) {
+    masterCb.checked = false;
+    masterCb.indeterminate = false;
+  } else if (count === cbs.length) {
+    masterCb.checked = true;
+    masterCb.indeterminate = false;
+  } else if (count > 0) {
+    masterCb.checked = false;
+    masterCb.indeterminate = true;
+  } else {
+    masterCb.checked = false;
+    masterCb.indeterminate = false;
+  }
+
+  // Restore item checkbox states
+  for (var i = 0; i < cbs.length; i++) {
+    var path = cbs[i].getAttribute('data-asr-path');
+    cbs[i].checked = !!_asrSelected[path];
+  }
+}
+
+function runAsrBatch() {
+  var keys = Object.keys(_asrSelected);
+  if (!keys.length) { toast('请先勾选文件', 'info'); return; }
+
+  // Build ordered queue from selected paths
+  _asrQueue = [];
+  for (var i = 0; i < _asrVideos.length; i++) {
+    if (_asrSelected[_asrVideos[i].path]) {
+      _asrQueue.push({ name: _asrVideos[i].name, path: _asrVideos[i].path });
+    }
+  }
+  _asrQueueIndex = 0;
+
+  // Clear selection UI
+  _asrSelected = {};
+  document.getElementById('asr-select-all-cb').checked = false;
+  document.getElementById('btn-asr-batch-run').disabled = true;
+
+  // Refresh list to show queue badges
+  loadAsrVideos();
+
+  // Start processing
+  processNextAsrInQueue();
+}
+
+function processNextAsrInQueue() {
+  if (_asrQueueIndex >= _asrQueue.length) {
+    // All done
+    _asrQueue = [];
+    _asrQueueIndex = -1;
+    document.getElementById('asr-queue-status').style.display = 'none';
+    document.getElementById('btn-asr-batch-run').disabled = Object.keys(_asrSelected).length === 0;
+    loadAsrVideos();
+    toast('全部 ASR 批量任务已完成', 'success');
+    return;
+  }
+
+  var item = _asrQueue[_asrQueueIndex];
+  document.getElementById('asr-queue-status').style.display = 'inline';
+  document.getElementById('asr-queue-status').textContent =
+    '队列: ' + (_asrQueueIndex + 1) + '/' + _asrQueue.length + ' — ' + item.name;
+
+  // Set as active and run
+  _asrActiveVideo = item.path;
+  var model = document.getElementById('asr-model-select').value;
+  var lang = document.getElementById('asr-lang-select').value;
+  var device = document.getElementById('asr-device-select').value;
+  var hotwords = document.getElementById('asr-hotwords').value.trim();
+
+  // Update UI
+  document.getElementById('asr-current-video').textContent = 'ASR 语音识别 — ' + item.name;
+  document.getElementById('asr-status').style.display = 'block';
+  document.getElementById('asr-status-text').textContent = '启动队列任务 ' + (_asrQueueIndex + 1) + '/' + _asrQueue.length + '...';
+  document.getElementById('asr-progress-fill').style.width = '0%';
+  document.getElementById('btn-asr-run').disabled = true;
+  document.getElementById('btn-asr-run').textContent = '队列处理中...';
+
+  // Highlight current item
+  loadAsrVideos();
+
+  var url = API + '/api/asr/run?path=' + encodeURIComponent(item.path) +
+    '&model=' + encodeURIComponent(model) +
+    '&language=' + encodeURIComponent(lang) +
+    '&device=' + encodeURIComponent(device) +
+    '&hotwords=' + encodeURIComponent(hotwords);
+
+  fetch(url, { method: 'POST' }).then(function(resp) { return resp.json(); }).then(function(data) {
+    if (data.status !== 'started') {
+      toast('启动 ASR 失败: ' + item.name, 'error');
+      _asrQueueIndex++;
+      processNextAsrInQueue();
+      return;
+    }
+    _asrJobId = data.job_id;
+    toast('队列 ' + (_asrQueueIndex + 1) + '/' + _asrQueue.length + ': ' + item.name, 'success');
+    startAsrPolling();
+  }).catch(function(e) {
+    toast('启动失败: ' + e.message, 'error');
+    _asrQueueIndex++;
+    processNextAsrInQueue();
+  });
+}
+
+async function selectAsrVideo(path) {
+  // Don't interrupt active batch queue
+  if (_asrQueue.length > 0 && _asrQueueIndex >= 0 && _asrQueueIndex < _asrQueue.length) return;
+
+  _asrActiveVideo = path;
+  _asrJobId = null;
+  if (_asrPollTimer) { clearInterval(_asrPollTimer); _asrPollTimer = null; }
+  document.getElementById('asr-status').style.display = 'none';
+  document.getElementById('asr-current-video').textContent = 'ASR 语音识别 — ' + (path.split('/').pop().split('\\').pop());
+
+  // Highlight
+  var items = document.querySelectorAll('#asr-video-list .mkv-file-item');
+  for (var i = 0; i < items.length; i++) {
+    var p = items[i].getAttribute('data-asr-path');
+    items[i].classList.toggle('active', p === path);
+  }
+
+  // Ensure models are loaded
+  if (!_asrModels.length) await loadAsrModels();
+
+  // Check audio status
+  updateAsrAudioStatus(path);
+}
+
+async function updateAsrAudioStatus(path) {
+  var statusEl = document.getElementById('asr-audio-status');
+  var btn = document.getElementById('btn-asr-play-audio');
+  try {
+    var base = path.split('/').pop().split('\\\\').pop().replace(/\.[^.]+$/, '');
+    var resp = await fetch(API + '/api/asr/results?video_name=' + encodeURIComponent(base));
+    var data = await resp.json();
+    var found = false;
+    for (var i = 0; i < (data.results || []).length; i++) {
+      if (data.results[i].audio_name) {
+        found = true;
+        _asrPreviewWavPath = data.results[i].audio_path;
+        break;
+      }
+    }
+    statusEl.textContent = found ? '已提取 WAV' : '通过视频实时播放';
+    statusEl.style.color = found ? 'var(--success)' : 'var(--text2)';
+  } catch(e) {
+    statusEl.textContent = '通过视频实时播放';
+    statusEl.style.color = 'var(--text2)';
+  }
+  btn.style.display = 'block';
+}
+
+var _asrPreviewWavPath = '';
+
+function previewAsrAudio() {
+  if (!_asrActiveVideo) return;
+  var streamPath = _asrPreviewWavPath || _asrActiveVideo;
+  var url = _asrPreviewWavPath
+    ? (API + '/api/asr/stream?path=' + encodeURIComponent(streamPath))
+    : (API + '/api/asr/preview-audio?path=' + encodeURIComponent(streamPath));
+  var name = _asrActiveVideo.split('/').pop().split('\\\\').pop();
+  var player = document.getElementById('asr-audio-player');
+  var bar = document.getElementById('asr-player-bar');
+  player.src = url;
+  player.load();
+  player.play().catch(function(e) { toast('播放失败: ' + e.message, 'error'); });
+  document.getElementById('asr-playing-name').textContent = name;
+  bar.style.display = 'flex';
+}
+
+async function runAsrExtraction() {
+  if (!_asrActiveVideo) { toast('请先选择视频文件', 'info'); return; }
+  var model = document.getElementById('asr-model-select').value;
+  var lang = document.getElementById('asr-lang-select').value;
+  var device = document.getElementById('asr-device-select').value;
+  var hotwords = document.getElementById('asr-hotwords').value.trim();
+  var outputDir = document.getElementById('asr-video-output').value.trim();
+
+  try {
+    var url = API + '/api/asr/run?path=' + encodeURIComponent(_asrActiveVideo) +
+      '&model=' + encodeURIComponent(model) +
+      '&language=' + encodeURIComponent(lang) +
+      '&device=' + encodeURIComponent(device) +
+      '&hotwords=' + encodeURIComponent(hotwords);
+    if (outputDir) url += '&output_dir=' + encodeURIComponent(outputDir);
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    if (data.status !== 'started') { toast('启动 ASR 失败', 'error'); return; }
+    _asrJobId = data.job_id;
+    document.getElementById('asr-status').style.display = 'block';
+    document.getElementById('asr-status-text').textContent = '启动语音识别...';
+    document.getElementById('asr-progress-fill').style.width = '0%';
+    document.getElementById('btn-asr-run').disabled = true;
+    document.getElementById('btn-asr-run').textContent = '识别中...';
+    toast('ASR 语音识别任务已启动', 'success');
+    startAsrPolling();
+  } catch(e) {
+    toast('启动失败: ' + e.message, 'error');
+  }
+}
+
+function startAsrPolling() {
+  if (_asrPollTimer) clearInterval(_asrPollTimer);
+  _asrPollTimer = setInterval(pollAsrJob, 1000);
+  pollAsrJob();
+}
+
+function stopAsrPolling() {
+  if (_asrPollTimer) { clearInterval(_asrPollTimer); _asrPollTimer = null; }
+}
+
+async function pollAsrJob() {
+  if (!_asrJobId) { stopAsrPolling(); return; }
+  try {
+    var resp = await fetch(API + '/api/asr/job/' + _asrJobId);
+    var job = await resp.json();
+    var fill = document.getElementById('asr-progress-fill');
+    var text = document.getElementById('asr-status-text');
+    var prog = job.progress || 0;
+    fill.style.width = prog + '%';
+    text.textContent = job.current_step || '处理中...';
+
+    if (job.status === 'completed') {
+      stopAsrPolling();
+      var result = job.result || {};
+      document.getElementById('asr-status-text').textContent =
+        '识别完成！共 ' + (result.segments_count || 0) + ' 个段落，' +
+        '音频时长 ' + (result.duration_sec || 0) + ' 秒，' +
+        '耗时 ' + ((result.extract_time_sec || 0) + (result.asr_time_sec || 0)).toFixed(1) + ' 秒';
+      toast('ASR 识别完成', 'success');
+      loadAsrResults();
+
+      // Queue continuation
+      if (_asrQueue.length > 0 && _asrQueueIndex < _asrQueue.length) {
+        _asrQueueIndex++;
+        processNextAsrInQueue();
+      } else {
+        document.getElementById('btn-asr-run').disabled = false;
+        document.getElementById('btn-asr-run').textContent = '开始语音识别';
+      }
+    } else if (job.status === 'failed') {
+      stopAsrPolling();
+      document.getElementById('asr-status-text').textContent = '失败: ' + (job.error || '未知错误');
+      toast('ASR 失败: ' + (job.error || '未知错误'), 'error');
+
+      // Queue continuation (skip failed, continue to next)
+      if (_asrQueue.length > 0 && _asrQueueIndex < _asrQueue.length) {
+        _asrQueueIndex++;
+        processNextAsrInQueue();
+      } else {
+        document.getElementById('btn-asr-run').disabled = false;
+        document.getElementById('btn-asr-run').textContent = '开始语音识别';
+      }
+    } else if (job.status === 'interrupted') {
+      stopAsrPolling();
+      document.getElementById('asr-status-text').textContent = '任务被服务器重启中断';
+      toast('ASR 任务被中断，可选择恢复或丢弃', 'warning');
+      document.getElementById('btn-asr-run').disabled = false;
+      document.getElementById('btn-asr-run').textContent = '开始语音识别';
+      restoreAsrInterruptedJobs();
+    }
+  } catch(e) { console.error(e); }
+}
+
+async function restoreAsrInterruptedJobs() {
+  /* Restore ASR jobs on page load / tab switch:
+     - 'running' jobs → auto-resume polling (survives page refresh)
+     - 'interrupted' jobs → show resume/discard buttons */
+  try {
+    var resp = await fetch(API + '/api/asr/jobs');
+    if (!resp.ok) return;
+    var data = await resp.json();
+    var jobs = data.jobs || [];
+
+    var running = jobs.filter(function(j) { return j.status === 'running'; });
+    var interrupted = jobs.filter(function(j) { return j.status === 'interrupted'; });
+
+    // Remove existing interrupted sections
+    var existing = document.querySelectorAll('#asr-interrupted-section');
+    for (var e = 0; e < existing.length; e++) existing[e].remove();
+
+    // --- Auto-restore running jobs ---
+    if (running.length) {
+      // Pick the most recent running job (there should be at most one)
+      var rj = running[0];
+      if (rj.type === 'folder') {
+        _asrFolderJobId = rj.job_id;
+        document.getElementById('asr-folder-progress').style.display = 'block';
+        document.getElementById('btn-asr-folder-cancel').style.display = 'inline-block';
+        document.getElementById('btn-asr-folder-run').disabled = true;
+        document.getElementById('btn-asr-folder-run').textContent = '处理中...';
+        startAsrFolderPolling();
+      } else {
+        _asrJobId = rj.job_id;
+        document.getElementById('asr-status').style.display = 'block';
+        document.getElementById('btn-asr-run').disabled = true;
+        document.getElementById('btn-asr-run').textContent = '识别中...';
+        startAsrPolling();
+      }
+    }
+
+    // --- Show interrupted recovery UI ---
+    if (interrupted.length) {
+      var videoJobs = interrupted.filter(function(j) { return j.type !== 'folder'; });
+      var folderJobs = interrupted.filter(function(j) { return j.type === 'folder'; });
+      if (videoJobs.length) {
+        var vPanel = document.getElementById('asr-config-panel');
+        if (vPanel) vPanel.insertAdjacentHTML('beforeend', _renderInterruptedHtml(videoJobs, '视频任务'));
+      }
+      if (folderJobs.length) {
+        var fPanel = document.getElementById('asr-folder-panel');
+        if (fPanel) fPanel.insertAdjacentHTML('afterbegin', _renderInterruptedHtml(folderJobs, '文件夹任务'));
+      }
+    }
+  } catch(e) { console.error(e); }
+}
+
+function _renderInterruptedHtml(jobs, typeLabel) {
+  var html = '<div id="asr-interrupted-section" style="margin-top:12px;padding:12px;border-radius:8px;background:#3a1a1a;border:1px solid #ff6b6b;">';
+  html += '<div style="font-size:13px;color:#ff6b6b;font-weight:600;margin-bottom:8px;">' +
+    '有 ' + jobs.length + ' 个' + typeLabel + '因服务器重启而中断</div>';
+  for (var i = 0; i < jobs.length; i++) {
+    var j = jobs[i];
+    var label = j.type === 'folder'
+      ? (j.folder_name || '文件夹任务') + ' (' + (j.completed || 0) + '/' + (j.total || 0) + ' 完成)'
+      : (j.video_name || '未知视频');
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,107,107,0.2);">' +
+      '<span style="font-size:12px;color:var(--text);">' + escapeHtml(label) + '</span>' +
+      '<span style="flex-shrink:0;">' +
+      '<button class="btn btn-primary" style="font-size:10px;padding:2px 8px;margin-left:8px;" onclick="resumeAsrJob(\'' + j.job_id + '\')">恢复</button>' +
+      '<button class="btn" style="font-size:10px;padding:2px 8px;margin-left:4px;background:var(--danger);color:#fff;" onclick="discardAsrJob(\'' + j.job_id + '\')">丢弃</button>' +
+      '</span></div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+async function resumeAsrJob(jobId) {
+  try {
+    var resp = await fetch(API + '/api/asr/job/' + jobId + '/resume', { method: 'POST' });
+    if (!resp.ok) { var err = await resp.json(); toast('恢复失败: ' + (err.detail || '未知错误'), 'error'); return; }
+    toast('ASR 任务已恢复');
+    var sections = document.querySelectorAll('#asr-interrupted-section');
+    for (var s = 0; s < sections.length; s++) sections[s].remove();
+    // Fetch job to determine type for correct UI
+    var jr = await fetch(API + '/api/asr/job/' + jobId);
+    var job = await jr.json();
+    if (job.type === 'folder') {
+      _asrFolderJobId = jobId;
+      document.getElementById('asr-folder-progress').style.display = 'block';
+      document.getElementById('asr-folder-progress-fill').style.width = '0%';
+      document.getElementById('asr-folder-progress-text').textContent = '恢复中...';
+      document.getElementById('btn-asr-folder-cancel').style.display = 'inline-block';
+      startAsrFolderPolling();
+    } else {
+      _asrJobId = jobId;
+      startAsrPolling();
+      document.getElementById('asr-status').style.display = 'block';
+      document.getElementById('asr-status-text').textContent = '恢复中...';
+    }
+  } catch(e) { toast('恢复失败', 'error'); }
+}
+
+async function discardAsrJob(jobId) {
+  if (!confirm('确定要丢弃此 ASR 任务吗？')) return;
+  try {
+    var resp = await fetch(API + '/api/asr/job/' + jobId + '/discard', { method: 'POST' });
+    if (!resp.ok) { toast('丢弃失败', 'error'); return; }
+    toast('ASR 任务已丢弃');
+    var section = document.getElementById('asr-interrupted-section');
+    if (section) section.remove();
+  } catch(e) { toast('丢弃失败', 'error'); }
+}
+
+async function loadAsrResults() {
+  try {
+    var resp = await fetch(API + '/api/asr/results');
+    if (!resp.ok) return;
+    var data = await resp.json();
+    var results = data.results || [];
+    document.getElementById('asr-result-count').textContent = results.length;
+    var cont = document.getElementById('asr-result-list');
+    if (!results.length) {
+      cont.innerHTML = '<div class="empty-state"><p>暂无 ASR 识别结果</p></div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < results.length; i++) {
+      var r = results[i];
+      var audioBtn = r.audio_name
+        ? '<button class="btn btn-secondary" style="font-size:10px;padding:2px 8px;margin-left:4px;" onclick="playAsrAudio(\'' +
+            r.audio_path.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\',\'' +
+            r.audio_name.replace(/'/g, "\\'") + '\',\'' +
+            r.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">🔊</button>'
+        : '';
+      var splitBtn = r.video_path
+        ? '<button class="btn btn-primary" style="font-size:10px;padding:2px 8px;margin-left:4px;" onclick="jumpToSplitFromAsr(\'' +
+            r.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\',\'' +
+            r.video_path.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">切割</button>'
+        : '';
+      html += '<div class="file-item" data-asr-path="' + safeAttr(r.path) + '">' +
+        '<span>📝</span>' +
+        '<span class="file-name">' + escapeHtml(r.name) + '</span>' +
+        '<span class="file-size">' + r.size_kb + ' KB</span>' +
+        audioBtn +
+        '<button class="btn btn-secondary" style="font-size:10px;padding:2px 8px;margin-left:4px;" onclick="viewAsrSrt(\'' +
+          r.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">查看</button>' +
+        splitBtn +
+        '<button class="btn" style="font-size:10px;padding:2px 8px;margin-left:4px;background:var(--danger);color:#fff;" onclick="deleteAsrResult(\'' +
+          r.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">删除</button>' +
+      '</div>';
+    }
+    cont.innerHTML = html;
+  } catch(e) { console.error(e); }
+}
+
+var _asrPlayingEl = null;
+var _asrPlayingPath = null;
+
+function playAsrAudio(path, name, lookupPath) {
+  var player = document.getElementById('asr-audio-player');
+  var bar = document.getElementById('asr-player-bar');
+  player.src = API + '/api/asr/stream?path=' + encodeURIComponent(path);
+  player.load();
+  player.play().catch(function(e) { toast('播放失败: ' + e.message, 'error'); });
+  document.getElementById('asr-playing-name').textContent = name || path.split('/').pop().split('\\\\').pop();
+  bar.style.display = 'flex';
+
+  var highlightPath = lookupPath || path;
+  if (_asrPlayingEl) _asrPlayingEl.classList.remove('playing');
+  _asrPlayingEl = null;
+  _asrPlayingPath = highlightPath;
+  var items = document.querySelectorAll('#asr-result-list .file-item');
+  for (var i = 0; i < items.length; i++) {
+    if (items[i].getAttribute('data-asr-path') === highlightPath) {
+      items[i].classList.add('playing');
+      _asrPlayingEl = items[i];
+      break;
+    }
+  }
+}
+
+function closeAsrPlayer() {
+  var player = document.getElementById('asr-audio-player');
+  player.pause();
+  player.src = '';
+  document.getElementById('asr-player-bar').style.display = 'none';
+  document.getElementById('asr-playing-name').textContent = '';
+  if (_asrPlayingEl) { _asrPlayingEl.classList.remove('playing'); _asrPlayingEl = null; }
+  _asrPlayingPath = null;
+}
+
+function viewAsrSrt(path) {
+  var url = API + '/api/asr/stream?path=' + encodeURIComponent(path);
+  window.open(url, '_blank');
+}
+
+function jumpToSplitFromAsr(subPath, videoPath) {
+  _pendingSplitSubPath = subPath;
+  _pendingSplitMkvPath = videoPath;
+  switchTab('split');
+  if (videoPath) {
+    var dir = videoPath.replace(/\\/g, '/');
+    dir = dir.substring(0, dir.lastIndexOf('/'));
+    loadSplitFolderBrowser(dir, true);
+  }
+}
+
+async function deleteAsrResult(path) {
+  if (!confirm('确认删除此 ASR 结果？关联的音频文件也会被删除。')) return;
+  try {
+    var resp = await fetch(API + '/api/asr/delete?path=' + encodeURIComponent(path), { method: 'DELETE' });
+    var data = await resp.json();
+    toast('已删除: ' + (data.deleted || []).join(', '), 'success');
+    loadAsrResults();
+  } catch(e) {
+    toast('删除失败: ' + e.message, 'error');
+  }
+}
+
+// Wire delegation for ASR video list clicks
+document.getElementById('asr-video-list').addEventListener('click', function(e) {
+  var item = e.target.closest('.mkv-file-item');
+  if (!item) return;
+  var path = item.getAttribute('data-asr-path');
+  if (path) selectAsrVideo(path);
+});
+
+// Run on first ASR tab activation
+var _asrInitialized = false;
+function initAsrIfNeeded() {
+  if (!_asrInitialized) {
+    _asrInitialized = true;
+    // Models load on tab switch
+  }
+}
+
+// ============================================================
+// Folder ASR mode
+// ============================================================
+var _asrFolderJobId = null;
+var _asrFolderPollTimer = null;
+var _asrFolderFiles = [];   // detected audio files in selected folder
+var _asrFolderPath = '';    // selected folder path
+var _asrFolderSelected = {}; // {name: true} for selected files
+
+function switchAsrMode(mode) {
+  var isFolder = mode === 'folder';
+  document.getElementById('asr-video-panel').style.display = isFolder ? 'none' : 'block';
+  document.getElementById('asr-folder-panel').style.display = isFolder ? 'block' : 'none';
+  document.getElementById('asr-mode-video-btn').className = isFolder ? 'btn btn-secondary' : 'btn btn-primary';
+  document.getElementById('asr-mode-folder-btn').className = isFolder ? 'btn btn-primary' : 'btn btn-secondary';
+  // Toggle output dir sections
+  document.getElementById('asr-video-output-section').style.display = isFolder ? 'none' : 'block';
+  document.getElementById('asr-folder-output-section').style.display = isFolder ? 'block' : 'none';
+  // Toggle run buttons
+  document.getElementById('btn-asr-run').style.display = isFolder ? 'none' : 'block';
+  if (isFolder) {
+    document.getElementById('asr-current-video').textContent = '⚙️ ASR 语音识别配置（文件夹模式）';
+    loadAsrModels();
+    loadFolderBrowser(_asrFolderPath || '');
+  } else {
+    document.getElementById('asr-current-video').textContent = '⚙️ ASR 语音识别配置';
+  }
+}
+
+async function loadFolderBrowser(path) {
+  if (!path) path = '';
+  try {
+    var resp = await fetch(API + '/api/asr/dir-browse?path=' + encodeURIComponent(path));
+    if (!resp.ok) { console.error('dir-browse failed:', resp.status); return; }
+    var data = await resp.json();
+    _asrFolderPath = data.current_path;
+    _asrFolderFiles = data.audio_files || [];
+    _asrFolderSelected = {};
+    for (var i = 0; i < _asrFolderFiles.length; i++) {
+      _asrFolderSelected[_asrFolderFiles[i].name] = true;
+    }
+
+    // Breadcrumb
+    document.getElementById('asr-folder-current-path').textContent = _asrFolderPath || '/';
+    var upBtn = document.getElementById('btn-asr-folder-up');
+    upBtn.disabled = !data.parent_path;
+
+    // Subdirs list
+    var subdirsHtml = '';
+    if (data.subdirs.length) {
+      for (var i = 0; i < data.subdirs.length; i++) {
+        var subPath = (_asrFolderPath ? _asrFolderPath + '/' + data.subdirs[i] : data.subdirs[i]);
+        subdirsHtml += '<div class="file-item" onclick="loadFolderBrowser(\'' + safeAttr(subPath) + '\')" style="cursor:pointer;display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--accent);">';
+        subdirsHtml += '<span style="font-size:14px;">📁</span>';
+        subdirsHtml += '<span style="font-size:12px;">' + escapeHtml(data.subdirs[i]) + '</span>';
+        subdirsHtml += '</div>';
+      }
+    } else {
+      subdirsHtml = '<div class="empty-state" style="padding:16px;"><p style="font-size:12px;">此目录下没有子文件夹</p></div>';
+    }
+    document.getElementById('asr-folder-subdirs').innerHTML = subdirsHtml;
+
+    // Audio files list
+    var infoEl = document.getElementById('asr-folder-file-info');
+    var barEl = document.getElementById('asr-folder-select-bar');
+    var listEl = document.getElementById('asr-folder-file-list');
+    if (_asrFolderFiles.length) {
+      infoEl.style.display = 'block';
+      var totalMb = 0;
+      for (var i = 0; i < _asrFolderFiles.length; i++) { totalMb += _asrFolderFiles[i].size_mb || 0; }
+      infoEl.textContent = '发现 ' + _asrFolderFiles.length + ' 个音频文件 (' + totalMb.toFixed(1) + ' MB)';
+      barEl.style.display = 'flex';
+      document.getElementById('btn-asr-folder-run').disabled = false;
+      _asrRenderFolderFileList();
+    } else {
+      infoEl.style.display = 'block';
+      infoEl.textContent = data.has_audio ? '' : '此目录下没有音频文件（支持 wav, mp3, flac, m4a, aac, ogg, wma, opus）';
+      barEl.style.display = 'none';
+      listEl.style.display = 'none';
+      document.getElementById('btn-asr-folder-run').disabled = true;
+    }
+  } catch(e) { console.error('loadFolderBrowser:', e); }
+}
+
+function asrFolderGoUp() {
+  if (_asrFolderPath) {
+    var parent = _asrFolderPath.substring(0, _asrFolderPath.lastIndexOf('/'));
+    loadFolderBrowser(parent);
+  }
+}
+
+async function browseAsrVideoOutputDir() {
+  var current = document.getElementById('asr-video-output').value || '';
+  var path = await openFolderPicker('选择 ASR 视频输出目录', current);
+  if (path) {
+    document.getElementById('asr-video-output').value = path;
+  }
+}
+
+async function browseAsrFolderOutputDir() {
+  var current = document.getElementById('asr-folder-output').value || '';
+  var path = await openFolderPicker('选择 ASR 文件夹输出目录', current);
+  if (path) {
+    document.getElementById('asr-folder-output').value = path;
+  }
+}
+
+function _asrRenderFolderFileList() {
+  var listEl = document.getElementById('asr-folder-file-list');
+  var html = '';
+  var selCount = 0;
+  for (var i = 0; i < _asrFolderFiles.length; i++) {
+    var f = _asrFolderFiles[i];
+    if (_asrFolderSelected[f.name]) selCount++;
+    var audioPath = _asrFolderPath.replace(/\\/g, '/').replace(/\/$/, '') + '/' + f.name;
+    var checked = _asrFolderSelected[f.name] ? 'checked' : '';
+    html += '<div class="file-item" style="display:flex;align-items:center;gap:6px;padding:4px 8px;border-bottom:1px solid var(--border);">';
+    html += '<input type="checkbox" class="asr-folder-item-cb" ' + checked + ' onchange="asrFolderToggleItem(this)" data-name="' + escapeHtml(f.name) + '" style="cursor:pointer;flex-shrink:0;">';
+    html += '<span style="font-size:12px;color:var(--text2);flex-shrink:0;width:20px;text-align:center;">' + (i + 1) + '</span>';
+    html += '<span style="flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(f.name) + '">' + escapeHtml(f.name) + '</span>';
+    html += '<span style="font-size:10px;color:var(--text2);flex-shrink:0;">' + f.size_mb + ' MB</span>';
+    html += '<button class="btn btn-secondary" onclick="playAsrFolderAudio(\'' + safeAttr(audioPath) + '\',\'' + escapeHtml(f.name).replace(/'/g, "\\\\'") + '\')" style="font-size:10px;padding:2px 8px;flex-shrink:0;" title="播放">▶</button>';
+    html += '</div>';
+  }
+  listEl.innerHTML = html;
+  listEl.style.display = 'block';
+
+  // Update select-all checkbox and count
+  document.getElementById('asr-folder-select-all-cb').checked = selCount === _asrFolderFiles.length && _asrFolderFiles.length > 0;
+  document.getElementById('asr-folder-selected-count').textContent = '已选 ' + selCount + '/' + _asrFolderFiles.length + ' 个';
+}
+
+function asrFolderToggleSelectAll() {
+  var checked = document.getElementById('asr-folder-select-all-cb').checked;
+  for (var i = 0; i < _asrFolderFiles.length; i++) {
+    if (checked) { _asrFolderSelected[_asrFolderFiles[i].name] = true; }
+    else { delete _asrFolderSelected[_asrFolderFiles[i].name]; }
+  }
+  _asrRenderFolderFileList();
+}
+
+function asrFolderToggleItem(cb) {
+  var name = cb.getAttribute('data-name');
+  if (cb.checked) { _asrFolderSelected[name] = true; }
+  else { delete _asrFolderSelected[name]; }
+  _asrRenderFolderFileList();
+}
+
+// Auto-detect when user types/pastes a path
+async function runAsrFolder() {
+  var folderPath = _asrFolderPath;
+  if (!folderPath) { toast('请选择音频文件夹', 'error'); return; }
+
+  // Collect selected file names
+  var selectedFiles = [];
+  for (var i = 0; i < _asrFolderFiles.length; i++) {
+    if (_asrFolderSelected[_asrFolderFiles[i].name]) selectedFiles.push(_asrFolderFiles[i].name);
+  }
+  if (!selectedFiles.length) { toast('请至少选择一个音频文件', 'info'); return; }
+
+  var model = document.getElementById('asr-model-select').value;
+  var language = document.getElementById('asr-lang-select').value;
+  var device = document.getElementById('asr-device-select').value;
+  var outputDir = document.getElementById('asr-folder-output').value.trim();
+  var hotwords = document.getElementById('asr-hotwords').value.trim();
+
+  if (!model) { toast('请选择ASR模型', 'error'); document.getElementById('btn-asr-folder-run').disabled = false; document.getElementById('btn-asr-folder-run').textContent = '开始批量语音识别'; return; }
+  if (!language) { toast('请选择语言', 'error'); document.getElementById('btn-asr-folder-run').disabled = false; document.getElementById('btn-asr-folder-run').textContent = '开始批量语音识别'; return; }
+
+  document.getElementById('btn-asr-folder-run').disabled = true;
+  document.getElementById('btn-asr-folder-run').textContent = '启动中...';
+  document.getElementById('asr-folder-results').style.display = 'none';
+
+  try {
+    var resp = await fetch(API + '/api/asr/folder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        folder_path: folderPath,
+        model: model,
+        language: language,
+        device: device,
+        output_dir: outputDir,
+        selected_files: selectedFiles,
+        hotwords: hotwords,
+      }),
+    });
+    if (!resp.ok) {
+      var err = await resp.json();
+      throw new Error(err.detail || '启动失败');
+    }
+    var data = await resp.json();
+    _asrFolderJobId = data.job_id;
+    document.getElementById('btn-asr-folder-run').textContent = '处理中...';
+    document.getElementById('asr-folder-progress').style.display = 'block';
+    document.getElementById('asr-folder-progress-fill').style.width = '0%';
+    document.getElementById('asr-folder-progress-text').textContent = '开始处理 ' + data.file_count + ' 个文件...';
+    document.getElementById('btn-asr-folder-cancel').style.display = 'inline-block';
+    toast('开始批量ASR: ' + data.file_count + ' 个文件', 'info');
+    startAsrFolderPolling();
+  } catch(e) {
+    toast('启动失败: ' + e.message, 'error');
+    document.getElementById('btn-asr-folder-run').disabled = false;
+    document.getElementById('btn-asr-folder-run').textContent = '开始批量语音识别';
+  }
+}
+
+function startAsrFolderPolling() {
+  stopAsrFolderPolling();
+  _asrFolderPollTimer = setInterval(pollAsrFolderJob, 1500);
+  pollAsrFolderJob(); // immediate first poll
+}
+
+function stopAsrFolderPolling() {
+  if (_asrFolderPollTimer) { clearInterval(_asrFolderPollTimer); _asrFolderPollTimer = null; }
+}
+
+async function pollAsrFolderJob() {
+  if (!_asrFolderJobId) return;
+  try {
+    var resp = await fetch(API + '/api/asr/job/' + _asrFolderJobId);
+    if (!resp.ok) return;
+    var job = await resp.json();
+    var pct = job.progress || 0;
+    document.getElementById('asr-folder-progress-fill').style.width = pct + '%';
+    var statusText = job.current_file ? '正在处理: ' + job.current_file : job.current_step || '';
+    document.getElementById('asr-folder-progress-text').textContent =
+      '进度: ' + job.completed + '/' + job.total + (statusText ? ' | ' + statusText : '');
+
+    if (job.status === 'completed') {
+      stopAsrFolderPolling();
+      document.getElementById('btn-asr-folder-cancel').style.display = 'none';
+      document.getElementById('asr-folder-progress-fill').style.width = '100%';
+      document.getElementById('asr-folder-progress-text').textContent = '处理完成！';
+      document.getElementById('btn-asr-folder-run').disabled = false;
+      document.getElementById('btn-asr-folder-run').textContent = '开始批量语音识别';
+
+      // Show results
+      var resultsEl = document.getElementById('asr-folder-results');
+      resultsEl.style.display = 'block';
+
+      var resultCount = (job.results || []).length;
+      var errorCount = (job.errors || []).length;
+      var total = job.total || 0;
+      var summary = '完成 ' + resultCount + '/' + total + ' 个文件';
+      if (errorCount > 0) summary += '，' + errorCount + ' 个失败';
+      summary += ' | 输出: ' + (job.output_dir || '');
+      document.getElementById('asr-folder-result-summary').textContent = summary;
+
+      // Build result/error maps
+      var resultMap = {};
+      for (var i = 0; i < (job.results || []).length; i++) {
+        resultMap[job.results[i].audio_name] = job.results[i];
+      }
+      var errorMap = {};
+      for (var i = 0; i < (job.errors || []).length; i++) {
+        errorMap[job.errors[i].file] = job.errors[i].error;
+      }
+
+      // Build detailed file list
+      var allFiles = job.files || [];
+      var folderPath = job.folder_path || '';
+      var html = '';
+      for (var i = 0; i < allFiles.length; i++) {
+        var f = allFiles[i];
+        var audioPath = f.path || (folderPath ? folderPath.replace(/\\/g, '/') + '/' + f.name : '');
+        var result = resultMap[f.name];
+        var error = errorMap[f.name];
+        var icon = result ? '✅' : (error ? '❌' : '⏳');
+        var rowClass = result ? '' : (error ? 'style=\"opacity:0.7;\"' : '');
+
+        html += '<div class=\"file-item\" ' + rowClass + ' style=\"display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);\">';
+        html += '<span style=\"font-size:14px;flex-shrink:0;\">' + icon + '</span>';
+        html += '<div style=\"flex:1;min-width:0;\">';
+        html += '<div style=\"font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;\">' + escapeHtml(f.name) + '</div>';
+        if (result) {
+          html += '<div style=\"font-size:10px;color:var(--text2);\">' + result.segments_count + ' 段字幕 | ' + (result.model_name || '') + '</div>';
+        } else if (error) {
+          html += '<div style=\"font-size:10px;color:var(--danger);\">' + escapeHtml(error) + '</div>';
+        }
+        html += '</div>';
+        // Play button
+        html += '<button class="btn btn-secondary" onclick="playAsrFolderAudio(\'' + safeAttr(audioPath) + '\',\'' + escapeHtml(f.name).replace(/'/g, "\\'") + '\')" style="font-size:10px;padding:2px 8px;flex-shrink:0;" title="播放">▶</button>';
+        // View SRT button
+        if (result) {
+          html += '<button class="btn btn-secondary" onclick="window.open(\'' + API + '/api/asr/stream?path=' + encodeURIComponent(result.srt_path) + '\')" style="font-size:10px;padding:2px 8px;flex-shrink:0;" title="查看字幕">📝</button>';
+        }
+        html += '</div>';
+      }
+      document.getElementById('asr-folder-result-list').innerHTML = html;
+
+      // Show errors summary
+      var errEl = document.getElementById('asr-folder-error-list');
+      if (errorCount > 0) {
+        errEl.innerHTML = '<div style=\"margin-top:4px;\">⚠️ ' + errorCount + ' 个文件处理失败，详见上方红色标记</div>';
+      } else {
+        errEl.innerHTML = '';
+      }
+    } else if (job.status === 'failed') {
+      stopAsrFolderPolling();
+      document.getElementById('btn-asr-folder-cancel').style.display = 'none';
+      document.getElementById('asr-folder-progress-text').textContent = '处理失败: ' + (job.error || '未知错误');
+      document.getElementById('btn-asr-folder-run').disabled = false;
+      document.getElementById('btn-asr-folder-run').textContent = '开始批量语音识别';
+    } else if (job.status === 'interrupted') {
+      stopAsrFolderPolling();
+      document.getElementById('btn-asr-folder-cancel').style.display = 'none';
+      document.getElementById('asr-folder-progress-text').textContent = '任务被服务器重启中断';
+      document.getElementById('btn-asr-folder-run').disabled = false;
+      document.getElementById('btn-asr-folder-run').textContent = '开始批量语音识别';
+      toast('ASR 文件夹任务被中断，可选择恢复或丢弃', 'warning');
+      restoreAsrInterruptedJobs();
+    } else if (job.status === 'cancelled') {
+      stopAsrFolderPolling();
+      document.getElementById('btn-asr-folder-cancel').style.display = 'none';
+      document.getElementById('asr-folder-progress-text').textContent = '已中止（完成 ' + (job.completed || 0) + '/' + (job.total || 0) + ' 个）';
+      document.getElementById('btn-asr-folder-run').disabled = false;
+      document.getElementById('btn-asr-folder-run').textContent = '开始批量语音识别';
+      // Show partial results
+      if ((job.results || []).length || (job.errors || []).length) {
+        // re-render partial results same as completed
+        document.getElementById('asr-folder-results').style.display = 'block';
+        document.getElementById('asr-folder-result-summary').textContent = '已中止 | 完成 ' + (job.completed || 0) + '/' + (job.total || 0) + ' | 输出: ' + (job.output_dir || '');
+      }
+    }
+  } catch(e) { console.error(e); }
+}
+
+async function cancelAsrFolder() {
+  if (!_asrFolderJobId) return;
+  try {
+    var resp = await fetch(API + '/api/asr/job/' + _asrFolderJobId, { method: 'DELETE' });
+    if (!resp.ok) { var err = await resp.json(); toast('取消失败: ' + (err.detail || ''), 'error'); return; }
+    document.getElementById('btn-asr-folder-cancel').style.display = 'none';
+    toast('已发送中止请求', 'info');
+  } catch(e) { toast('取消失败: ' + e.message, 'error'); }
+}
+
+function playAsrFolderAudio(path, name) {
+  if (!path) return;
+  var player = document.getElementById('asr-folder-audio-player');
+  player.src = API + '/api/asr/stream?path=' + encodeURIComponent(path);
+  player.style.display = 'block';
+  player.play().catch(function(e) { console.error('Play failed:', e); });
+  toast('正在播放: ' + name, 'info');
+}
+
+// Load saved settings on page load
+document.addEventListener('DOMContentLoaded', function() {
+  // Load saved settings (denoise step defaults, etc.)
+  setTimeout(loadSavedSettings, 200);
+  // Restore UI state from localStorage
+  setTimeout(restoreUiState, 150);
+  // Load hotword configurations for dropdowns
+  setTimeout(loadHotwordConfigs, 300);
+});
+
+function restoreUiState() {
+  // Restore active tab
+  if (_uiState.activeTab && _uiState.activeTab !== 'search') {
+    switchTab(_uiState.activeTab);
+  }
+  // Restore jobs filter buttons
+  if (_uiState.jobsFilter) {
+    switchJobsSubtab(_uiState.jobsFilter);
+  }
+  // Restore denoise subtab
+  if (_uiState.denoiseSubtab) {
+    switchDenoiseSubtab(_uiState.denoiseSubtab);
+  }
+  // Restore denoise step config
+  if (_uiState.denoiseSteps) {
+    for (var i = 0; i < _denoiseSteps.length; i++) {
+      var s = _uiState.denoiseSteps[_denoiseSteps[i].key];
+      if (typeof s !== 'undefined') _denoiseSteps[i].enabled = s;
+    }
+  }
+  // Restore pipeline video step config
+  if (_uiState.pvSteps) {
+    for (var i = 0; i < _pvSteps.length; i++) {
+      var s = _uiState.pvSteps[_pvSteps[i].key];
+      if (typeof s !== 'undefined') _pvSteps[i].enabled = s;
+    }
+    pvRenderStepConfig();
+  }
+  // Restore review dir
+  if (_uiState.reviewDir) {
+    _reviewDir = _uiState.reviewDir;
+  }
+}
+
+// ============================================================
+// ASR Comparison
+// ============================================================
+var _cmpLoaded = false;
+var _cmpFolderPath = '';     // current browsing path for compare
+var _cmpFolderFiles = [];    // audio files in current folder
+var _cmpFolderSelected = {}; // selected file names
+var _cmpJobId = null;
+var _cmpPollTimer = null;
+var _cmpResults = {};
+var _cmpModels = [];
+
+async function loadCmpFolderBrowser(path) {
+  if (!path) path = '';
+  try {
+    var resp = await fetch(API + '/api/asr-compare/dir-browse?path=' + encodeURIComponent(path));
+    if (!resp.ok) { console.error('cmp dir-browse failed:', resp.status); return; }
+    var data = await resp.json();
+    _cmpFolderPath = data.current_path;
+    _cmpFolderFiles = data.audio_files || [];
+    _cmpFolderSelected = {};
+    for (var i = 0; i < _cmpFolderFiles.length; i++) {
+      _cmpFolderSelected[_cmpFolderFiles[i].name] = true;
+    }
+
+    // Breadcrumb
+    document.getElementById('cmp-folder-current-path').textContent = _cmpFolderPath || '/';
+    var upBtn = document.getElementById('btn-cmp-folder-up');
+    upBtn.disabled = !data.parent_path;
+
+    // Subdirs list
+    var subdirsHtml = '';
+    if (data.subdirs.length) {
+      for (var i = 0; i < data.subdirs.length; i++) {
+        var subPath = (_cmpFolderPath ? _cmpFolderPath + '/' + data.subdirs[i] : data.subdirs[i]);
+        subdirsHtml += '<div class="file-item" onclick="loadCmpFolderBrowser(\'' + safeAttr(subPath) + '\')" style="cursor:pointer;display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--accent);">';
+        subdirsHtml += '<span style="font-size:14px;">📁</span>';
+        subdirsHtml += '<span style="font-size:12px;">' + escapeHtml(data.subdirs[i]) + '</span>';
+        subdirsHtml += '</div>';
+      }
+    } else {
+      subdirsHtml = '<div class="empty-state" style="padding:16px;"><p style="font-size:12px;">此目录下没有子文件夹</p></div>';
+    }
+    document.getElementById('cmp-folder-subdirs').innerHTML = subdirsHtml;
+
+    // Audio files list
+    var infoEl = document.getElementById('cmp-folder-file-info');
+    var barEl = document.getElementById('cmp-folder-select-bar');
+    var listEl = document.getElementById('cmp-folder-file-list');
+    if (_cmpFolderFiles.length) {
+      infoEl.style.display = 'block';
+      var totalMb = 0;
+      for (var i = 0; i < _cmpFolderFiles.length; i++) { totalMb += _cmpFolderFiles[i].size_mb || 0; }
+      infoEl.textContent = '发现 ' + _cmpFolderFiles.length + ' 个音频文件 (' + totalMb.toFixed(1) + ' MB)';
+      barEl.style.display = 'flex';
+      document.getElementById('btn-cmp-run').disabled = false;
+      _cmpRenderFolderFileList();
+    } else {
+      infoEl.style.display = 'block';
+      infoEl.textContent = data.has_audio ? '' : '此目录下没有音频文件（支持 wav, mp3, flac, m4a, aac, ogg, wma, opus）';
+      barEl.style.display = 'none';
+      listEl.style.display = 'none';
+      document.getElementById('btn-cmp-run').disabled = true;
+    }
+  } catch(e) { console.error('loadCmpFolderBrowser:', e); }
+}
+
+function cmpFolderGoUp() {
+  if (_cmpFolderPath) {
+    var parent = _cmpFolderPath.substring(0, _cmpFolderPath.lastIndexOf('/'));
+    loadCmpFolderBrowser(parent);
+  }
+}
+
+function _cmpRenderFolderFileList() {
+  var listEl = document.getElementById('cmp-folder-file-list');
+  var html = '';
+  var selCount = 0;
+  for (var i = 0; i < _cmpFolderFiles.length; i++) {
+    var f = _cmpFolderFiles[i];
+    if (_cmpFolderSelected[f.name]) selCount++;
+    var audioPath = _cmpFolderPath.replace(/\\/g, '/').replace(/\/$/, '') + '/' + f.name;
+    var checked = _cmpFolderSelected[f.name] ? 'checked' : '';
+    html += '<div class="file-item" style="display:flex;align-items:center;gap:6px;padding:4px 8px;border-bottom:1px solid var(--border);">';
+    html += '<input type="checkbox" class="cmp-folder-item-cb" ' + checked + ' onchange="cmpFolderToggleItem(this)" data-name="' + escapeHtml(f.name) + '" style="cursor:pointer;flex-shrink:0;">';
+    html += '<span style="font-size:12px;color:var(--text2);flex-shrink:0;width:20px;text-align:center;">' + (i + 1) + '</span>';
+    html += '<span style="flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(f.name) + '">' + escapeHtml(f.name) + '</span>';
+    html += '<span style="font-size:10px;color:var(--text2);flex-shrink:0;">' + f.size_mb + ' MB</span>';
+    html += '<button class="btn btn-secondary" onclick="playCmpFolderAudio(\'' + safeAttr(audioPath) + '\',\'' + escapeHtml(f.name).replace(/'/g, "\\\\'") + '\')" style="font-size:10px;padding:2px 8px;flex-shrink:0;" title="播放">▶</button>';
+    html += '</div>';
+  }
+  listEl.innerHTML = html;
+  listEl.style.display = 'block';
+
+  // Update select-all checkbox and count
+  document.getElementById('cmp-folder-select-all-cb').checked = selCount === _cmpFolderFiles.length && _cmpFolderFiles.length > 0;
+  document.getElementById('cmp-folder-selected-count').textContent = '已选 ' + selCount + '/' + _cmpFolderFiles.length + ' 个';
+}
+
+function cmpFolderToggleSelectAll() {
+  var checked = document.getElementById('cmp-folder-select-all-cb').checked;
+  for (var i = 0; i < _cmpFolderFiles.length; i++) {
+    if (checked) { _cmpFolderSelected[_cmpFolderFiles[i].name] = true; }
+    else { delete _cmpFolderSelected[_cmpFolderFiles[i].name]; }
+  }
+  _cmpRenderFolderFileList();
+}
+
+function cmpFolderToggleItem(cb) {
+  var name = cb.getAttribute('data-name');
+  if (cb.checked) { _cmpFolderSelected[name] = true; }
+  else { delete _cmpFolderSelected[name]; }
+  _cmpRenderFolderFileList();
+}
+
+function playCmpFolderAudio(audioPath, name) {
+  var player = document.getElementById('cmp-folder-audio-player');
+  player.src = API + '/api/asr-compare/stream?path=' + encodeURIComponent(audioPath);
+  player.style.display = 'block';
+  player.play().catch(function(e) { console.error('Play failed:', e); });
+  toast('正在播放: ' + name, 'info');
+}
+
+async function loadAsrCompareModels() {
+  try {
+    var resp = await fetch(API + '/api/asr-compare/models');
+    if (!resp.ok) return;
+    var data = await resp.json();
+    _cmpModels = data.models || [];
+
+    // Populate model A and B selectors
+    var selA = document.getElementById('cmp-model-a-select');
+    var selB = document.getElementById('cmp-model-b-select');
+    var optsHtml = '';
+    for (var i = 0; i < _cmpModels.length; i++) {
+      var m = _cmpModels[i];
+      optsHtml += '<option value="' + safeAttr(m.key) + '">' + escapeHtml(m.name) + '</option>';
+    }
+    selA.innerHTML = optsHtml;
+    selB.innerHTML = optsHtml;
+
+    // Apply saved defaults, or fall back to hardcoded defaults
+    if (_savedAsrConfig && _savedAsrConfig.ASR_COMPARE_MODEL_A) {
+      selA.value = _savedAsrConfig.ASR_COMPARE_MODEL_A;
+    } else if (_cmpModels.length >= 2) {
+      selA.value = 'qwen3-asr';
+    }
+    if (_savedAsrConfig && _savedAsrConfig.ASR_COMPARE_MODEL_B) {
+      selB.value = _savedAsrConfig.ASR_COMPARE_MODEL_B;
+    } else if (_cmpModels.length >= 2) {
+      selB.value = 'cohere-transcribe';
+    }
+
+    updateCmpLangs();
+  } catch(e) { console.error('loadAsrCompareModels:', e); }
+}
+
+function getCmpSelectedModels() {
+  var a = document.getElementById('cmp-model-a-select');
+  var b = document.getElementById('cmp-model-b-select');
+  return { a: a ? a.value : 'qwen3-asr', b: b ? b.value : 'cohere-transcribe' };
+}
+
+function onCmpModelChange() {
+  updateCmpLangs();
+}
+
+function updateCmpLangs() {
+  var sel = getCmpSelectedModels();
+  var modelA = null, modelB = null;
+  for (var i = 0; i < _cmpModels.length; i++) {
+    if (_cmpModels[i].key === sel.a) modelA = _cmpModels[i];
+    if (_cmpModels[i].key === sel.b) modelB = _cmpModels[i];
+  }
+  if (!modelA || !modelB) return;
+
+  var setA = {}, setB = {};
+  (modelA.languages || []).forEach(function(l) { setA[l] = true; });
+  (modelB.languages || []).forEach(function(l) { setB[l] = true; });
+
+  var langNames = { ja: '日本語', zh: '中文', en: 'English', ko: '한국어', yue: '粤语', auto: '自动检测' };
+  var langSel = document.getElementById('cmp-lang-select');
+  var html = '';
+  var langsA = Object.keys(setA);
+  for (var k = 0; k < langsA.length; k++) {
+    if (setB[langsA[k]]) {
+      var label = langNames[langsA[k]] || langsA[k];
+      var selAttr = langsA[k] === 'zh' ? ' selected' : '';
+      html += '<option value="' + safeAttr(langsA[k]) + '"' + selAttr + '>' + escapeHtml(label) + '</option>';
+    }
+  }
+  if (!html) html = '<option value="zh">中文</option>';
+  langSel.innerHTML = html;
+}
+
+function runAsrCompareAll() {
+  var folderPath = _cmpFolderPath;
+  if (!folderPath) { toast('请选择音频文件夹', 'error'); return; }
+
+  // Collect selected file names
+  var selectedFiles = [];
+  for (var i = 0; i < _cmpFolderFiles.length; i++) {
+    if (_cmpFolderSelected[_cmpFolderFiles[i].name]) selectedFiles.push(_cmpFolderFiles[i].name);
+  }
+  if (!selectedFiles.length) { toast('请至少选择一个音频文件', 'info'); return; }
+
+  var models = getCmpSelectedModels();
+  var lang = document.getElementById('cmp-lang-select').value || 'ja';
+  var device = document.getElementById('cmp-device-select').value || 'cuda';
+  var hotwords = document.getElementById('cmp-hotwords').value.trim();
+
+  document.getElementById('cmp-progress').style.display = 'block';
+  document.getElementById('cmp-progress-fill').style.width = '0%';
+  document.getElementById('cmp-progress-text').textContent = '启动中...';
+  document.getElementById('btn-cmp-stop').style.display = 'inline-block';
+  document.getElementById('cmp-summary').style.display = 'none';
+  document.getElementById('cmp-empty-state').style.display = 'none';
+  document.getElementById('btn-cmp-run').disabled = true;
+  document.getElementById('btn-cmp-run').textContent = '处理中...';
+  _cmpResults = {};
+
+  var url = API + '/api/asr-compare/run-all?model_a=' + encodeURIComponent(models.a) +
+    '&model_b=' + encodeURIComponent(models.b) +
+    '&language=' + encodeURIComponent(lang) +
+    '&device=' + encodeURIComponent(device) +
+    '&hotwords=' + encodeURIComponent(hotwords);
+
+  fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ folder_path: folderPath, selected_files: selectedFiles }),
+  }).then(function(resp) { return resp.json(); }).then(function(data) {
+    if (data.status !== 'started') {
+      toast('启动对比失败', 'error');
+      document.getElementById('btn-cmp-run').disabled = false;
+      document.getElementById('btn-cmp-run').textContent = '开始对比';
+      return;
+    }
+    _cmpJobId = data.job_id;
+    toast('ASR 对比任务已启动，共 ' + data.total + ' 个文件', 'success');
+    startCmpPolling();
+  }).catch(function(e) {
+    toast('启动失败: ' + e.message, 'error');
+    document.getElementById('btn-cmp-run').disabled = false;
+    document.getElementById('btn-cmp-run').textContent = '开始对比';
+  });
+}
+
+function startCmpPolling() {
+  if (_cmpPollTimer) clearInterval(_cmpPollTimer);
+  _cmpPollTimer = setInterval(pollCmpJob, 1500);
+  pollCmpJob();
+}
+
+function stopCmpPolling() {
+  if (_cmpPollTimer) { clearInterval(_cmpPollTimer); _cmpPollTimer = null; }
+}
+
+async function pollCmpJob() {
+  if (!_cmpJobId) { stopCmpPolling(); return; }
+  try {
+    var resp = await fetch(API + '/api/asr-compare/job/' + _cmpJobId);
+    var job = await resp.json();
+    var fill = document.getElementById('cmp-progress-fill');
+    var textEl = document.getElementById('cmp-progress-text');
+    fill.style.width = (job.progress || 0) + '%';
+    textEl.textContent = job.current_step || '处理中...';
+
+    if (job.status === 'completed') {
+      _cmpResetUI();
+      _cmpResults = job.results || {};
+      document.getElementById('cmp-progress-text').textContent =
+        '处理完成！共 ' + job.total + ' 个文件，' + (job.flagged_count || 0) + ' 个异常';
+      document.getElementById('btn-cmp-run').disabled = false;
+      document.getElementById('btn-cmp-run').textContent = '重新对比';
+      document.getElementById('btn-cmp-package').disabled = false;
+      renderCmpSummary();
+      renderCmpResults();
+      loadCmpFolderBrowser(_cmpFolderPath);
+      toast('ASR 对比完成 — ' + (job.flagged_count || 0) + ' 个异常', job.flagged_count > 0 ? 'info' : 'success');
+    } else if (job.status === 'failed') {
+      _cmpResetUI();
+      textEl.textContent = '失败: ' + (job.error || '未知错误');
+      document.getElementById('btn-cmp-run').disabled = false;
+      document.getElementById('btn-cmp-run').textContent = '重新对比';
+      toast('ASR 对比失败', 'error');
+    } else if (job.status === 'cancelled') {
+      _cmpResetUI();
+      _cmpResults = job.results || {};
+      textEl.textContent = '已中止 — 完成 ' + (job.completed || 0) + '/' + job.total + ' 个文件';
+      document.getElementById('btn-cmp-run').disabled = false;
+      document.getElementById('btn-cmp-run').textContent = '重新对比';
+      renderCmpSummary();
+      renderCmpResults();
+      loadCmpFolderBrowser(_cmpFolderPath);
+      toast('ASR 对比已中止', 'info');
+    }
+  } catch(e) { console.error(e); }
+}
+
+function _cmpResetUI() {
+  stopCmpPolling();
+  document.getElementById('btn-cmp-stop').style.display = 'none';
+}
+
+function stopAsrCompare() {
+  if (!_cmpJobId) return;
+  if (!confirm('确认中止当前的 ASR 对比任务？')) return;
+  fetch(API + '/api/asr-compare/cancel', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ job_id: _cmpJobId })
+  }).then(function(resp) { return resp.json(); }).then(function(data) {
+    if (data.status === 'ok') {
+      toast('正在中止...', 'info');
+    }
+  }).catch(function(e) { toast('中止失败: ' + e.message, 'error'); });
+}
+
+function renderCmpSummary() {
+  var paths = Object.keys(_cmpResults);
+  var total = paths.length;
+  var normal = 0, flagged = 0, discarded = 0;
+  for (var i = 0; i < paths.length; i++) {
+    var r = _cmpResults[paths[i]];
+    if (r.user_action === 'discarded') { discarded++; }
+    else if (r.flagged && r.user_action !== 'kept') { flagged++; }
+    else { normal++; }
+  }
+  document.getElementById('cmp-total-num').textContent = total;
+  document.getElementById('cmp-normal-num').textContent = normal;
+  document.getElementById('cmp-flagged-num').textContent = flagged;
+  document.getElementById('cmp-discarded-num').textContent = discarded;
+  document.getElementById('cmp-summary').style.display = 'block';
+}
+
+function renderCmpResults() {
+  var results = [];
+  var paths = Object.keys(_cmpResults);
+  for (var i = 0; i < paths.length; i++) {
+    results.push(_cmpResults[paths[i]]);
+  }
+  results.sort(function(a, b) {
+    return (a.source_dir || '').localeCompare(b.source_dir || '') || (a.audio_name || '').localeCompare(b.audio_name || '');
+  });
+
+  var tbody = document.getElementById('cmp-result-tbody');
+  if (!results.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text2);padding:20px;">无结果</td></tr>';
+    return;
+  }
+
+  var html = '';
+  for (var i = 0; i < results.length; i++) {
+    var r = results[i];
+    var diff = r.diff_percent;
+    var diffStr = (diff != null) ? diff + '%' : '—';
+    var diffClass = (diff != null && diff > 10) ? 'flagged' : 'normal';
+    var emptyModels = r.empty_models || [];
+    var hasEmpty = emptyModels.length > 0;
+    if (hasEmpty) diffClass = 'flagged';
+    var statusHtml, actionsHtml = '';
+
+    if (r.error) {
+      statusHtml = '<span style="color:var(--danger);">错误</span>';
+      actionsHtml = '<span style="color:var(--text2);font-size:11px;">' + escapeHtml(r.error) + '</span>';
+    } else if (r.user_action === 'discarded') {
+      statusHtml = '<span style="color:var(--warning);">已舍弃</span>';
+      diffClass = 'flagged';
+      actionsHtml = '<span style="color:var(--text2);font-size:11px;">已移至废弃目录</span>';
+    } else if (hasEmpty) {
+      diffStr = '空结果';
+      statusHtml = '<span style="color:var(--danger);font-weight:600;">⚠ 空结果</span>';
+      actionsHtml = '<div style="font-size:10px;color:var(--text2);margin-bottom:4px;">' + escapeHtml(emptyModels.join(', ')) + ' 无输出</div>' +
+        '<div class="actions-cell">' +
+        '<button class="btn btn-primary" style="font-size:10px;padding:3px 10px;" onclick="cmpKeepAudio(\'' + safeAttr(r.audio_path) + '\')">保留</button>' +
+        '<button class="btn" style="font-size:10px;padding:3px 10px;background:var(--danger);color:#fff;" onclick="cmpDiscardAudio(\'' + safeAttr(r.audio_path) + '\')">舍弃</button>' +
+        '<button class="btn btn-secondary" style="font-size:10px;padding:3px 8px;" onclick="cmpViewSrts(\'' + safeAttr(JSON.stringify(r.srt_paths || {})) + '\')">查看字幕</button>' +
+      '</div>';
+    } else if (r.flagged && r.user_action !== 'kept') {
+      statusHtml = '<span style="color:var(--danger);font-weight:600;">⚠ 异常</span>';
+      actionsHtml = '<div class="actions-cell">' +
+        '<button class="btn btn-primary" style="font-size:10px;padding:3px 10px;" onclick="cmpKeepAudio(\'' + safeAttr(r.audio_path) + '\')">保留</button>' +
+        '<button class="btn" style="font-size:10px;padding:3px 10px;background:var(--danger);color:#fff;" onclick="cmpDiscardAudio(\'' + safeAttr(r.audio_path) + '\')">舍弃</button>' +
+        '<button class="btn btn-secondary" style="font-size:10px;padding:3px 8px;" onclick="cmpViewSrts(\'' + safeAttr(JSON.stringify(r.srt_paths || {})) + '\')">查看字幕</button>' +
+      '</div>';
+    } else {
+      statusHtml = '<span style="color:var(--success);">✓ 正常</span>';
+      actionsHtml = '<button class="btn btn-secondary" style="font-size:10px;padding:3px 8px;" onclick="cmpViewSrts(\'' + safeAttr(JSON.stringify(r.srt_paths || {})) + '\')">查看字幕</button>';
+    }
+
+    html += '<tr>' +
+      '<td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px;" title="' + escapeHtml(r.audio_name || '') + '">' + escapeHtml(r.audio_name || '—') + '</td>' +
+      '<td style="color:var(--text2);font-size:11px;">' + escapeHtml(r.source_dir || '—') + '</td>' +
+      '<td><span class="cmp-diff-badge ' + diffClass + '">' + diffStr + '</span></td>' +
+      '<td>' + statusHtml + '</td>' +
+      '<td>' + actionsHtml + '</td>' +
+    '</tr>';
+  }
+  tbody.innerHTML = html;
+}
+
+function cmpKeepAudio(path) {
+  fetch(API + '/api/asr-compare/keep', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: path })
+  }).then(function(resp) { return resp.json(); }).then(function(data) {
+    if (data.status === 'ok') {
+      if (_cmpResults[path]) { _cmpResults[path].user_action = 'kept'; _cmpResults[path].flagged = false; }
+      renderCmpSummary();
+      renderCmpResults();
+      loadCmpFolderBrowser(_cmpFolderPath);
+      toast('已保留', 'success');
+    }
+  }).catch(function(e) { toast('操作失败: ' + e.message, 'error'); });
+}
+
+function cmpDiscardAudio(path) {
+  if (!confirm('确认舍弃此音频？音频将移至废弃目录，关联的字幕文件也会被移动。')) return;
+  fetch(API + '/api/asr-compare/discard', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: path })
+  }).then(function(resp) { return resp.json(); }).then(function(data) {
+    if (data.status === 'ok') {
+      if (_cmpResults[path]) { _cmpResults[path].user_action = 'discarded'; _cmpResults[path].flagged = false; }
+      renderCmpSummary();
+      renderCmpResults();
+      loadCmpFolderBrowser(_cmpFolderPath);
+      toast('已舍弃', 'success');
+    }
+  }).catch(function(e) { toast('操作失败: ' + e.message, 'error'); });
+}
+
+function cmpViewSrts(pathsJson) {
+  try {
+    var paths = JSON.parse(pathsJson);
+    var keys = Object.keys(paths);
+    for (var i = 0; i < keys.length; i++) {
+      window.open(API + '/api/asr-compare/stream?path=' + encodeURIComponent(paths[keys[i]]), '_blank');
+    }
+  } catch(e) { console.error(e); }
+}
+
+function packageAsrCompareResults() {
+  if (!confirm('确认打包所有保留的结果？\n\n将复制音频和字幕到 asr_compare_output/ 目录，按来源分类组织。')) return;
+
+  var toPackage = [];
+  var paths = Object.keys(_cmpResults);
+  for (var i = 0; i < paths.length; i++) {
+    var r = _cmpResults[paths[i]];
+    if (r.user_action !== 'discarded' && !r.error) {
+      toPackage.push(r);
+    }
+  }
+
+  fetch(API + '/api/asr-compare/package', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ results: toPackage })
+  }).then(function(resp) { return resp.json(); }).then(function(data) {
+    if (data.status === 'ok') {
+      toast('打包完成！已复制 ' + data.packaged + ' 组到 ' + data.output_dir, 'success');
+    }
+  }).catch(function(e) { toast('打包失败: ' + e.message, 'error'); });
+}
+
+// ============================================================
+// Audio Stitching
+// ============================================================
+async function restoreAsrCompareInterruptedJobs() {
+  /* Check for interrupted ASR compare jobs and show resume/discard buttons */
+  try {
+    var resp = await fetch(API + '/api/asr-compare/jobs');
+    if (!resp.ok) return;
+    var data = await resp.json();
+    var jobs = data.jobs || [];
+    var interrupted = jobs.filter(function(j) { return j.status === 'interrupted'; });
+    if (!interrupted.length) return;
+
+    // Show interrupted section above the main compare panel
+    var panel = document.getElementById('tab-asr-compare');
+    var existing = document.getElementById('cmp-interrupted-section');
+    if (existing) existing.remove();
+
+    var html = '<div id="cmp-interrupted-section" style="margin:12px 0;padding:12px;border-radius:8px;background:#3a1a1a;border:1px solid #ff6b6b;">';
+    html += '<div style="font-size:13px;color:#ff6b6b;font-weight:600;margin-bottom:8px;">' +
+      '有 ' + interrupted.length + ' 个 ASR 对比任务因服务器重启而中断</div>';
+    for (var i = 0; i < interrupted.length; i++) {
+      var j = interrupted[i];
+      var total = j.total || 0;
+      var completed = j.completed || 0;
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,107,107,0.2);">' +
+        '<span style="font-size:12px;color:var(--text);">ASR 对比任务 (' + completed + '/' + total + ' 完成)</span>' +
+        '<span style="flex-shrink:0;">' +
+        '<button class="btn btn-primary" style="font-size:10px;padding:2px 8px;margin-left:8px;" onclick="resumeAsrCompareJob(\'' + j.job_id + '\')">恢复</button>' +
+        '<button class="btn" style="font-size:10px;padding:2px 8px;margin-left:4px;background:var(--danger);color:#fff;" onclick="discardAsrCompareJob(\'' + j.job_id + '\')">丢弃</button>' +
+        '</span></div>';
+    }
+    html += '</div>';
+    panel.insertAdjacentHTML('afterbegin', html);
+  } catch(e) { console.error(e); }
+}
+
+async function resumeAsrCompareJob(jobId) {
+  try {
+    var resp = await fetch(API + '/api/asr-compare/job/' + jobId + '/resume', { method: 'POST' });
+    if (!resp.ok) { var err = await resp.json(); toast('恢复失败: ' + (err.detail || '未知错误'), 'error'); return; }
+    toast('ASR 对比任务已恢复');
+    var section = document.getElementById('cmp-interrupted-section');
+    if (section) section.remove();
+    // Start polling
+    _cmpActiveJobId = jobId;
+    pollAsrCompareJob();
+  } catch(e) { toast('恢复失败', 'error'); }
+}
+
+async function discardAsrCompareJob(jobId) {
+  if (!confirm('确定要丢弃此 ASR 对比任务吗？')) return;
+  try {
+    var resp = await fetch(API + '/api/asr-compare/job/' + jobId + '/discard', { method: 'POST' });
+    if (!resp.ok) { toast('丢弃失败', 'error'); return; }
+    toast('ASR 对比任务已丢弃');
+    var section = document.getElementById('cmp-interrupted-section');
+    if (section) section.remove();
+  } catch(e) { toast('丢弃失败', 'error'); }
+}
+
+var _stitchClips = [];
+var _stitchSelected = {};
+var _stitchOutputPath = '';
+var _stitchMergedSubs = '';
+
+async function loadStitchVideos() {
+  try {
+    var resp = await fetch(API + '/api/stitch/videos');
+    if (!resp.ok) return;
+    var data = await resp.json();
+    var sel = document.getElementById('stitch-video-select');
+    var curVal = sel.value;
+    var shHtml = '<option value="">选择视频...</option>';
+    for (var i = 0; i < data.videos.length; i++) {
+      var v = data.videos[i];
+      shHtml += '<option value="' + safeAttr(v.name) + '">' + escapeHtml(v.name) + ' (' + v.wav_count + ' 个降噪音频)</option>';
+    }
+    sel.innerHTML = shHtml;
+    if (curVal) {
+      for (var j = 0; j < sel.options.length; j++) {
+        if (sel.options[j].value === curVal) { sel.selectedIndex = j; break; }
+      }
+    }
+    if (data.videos.length > 0 && !curVal) { sel.selectedIndex = 1; loadStitchClips(); }
+    else if (curVal) loadStitchClips();
+  } catch(e) { console.error(e); }
+}
+
+async function loadStitchClips() {
+  var video = document.getElementById('stitch-video-select').value;
+  _stitchClips = [];
+  _stitchSelected = {};
+  _stitchOutputPath = '';
+  _stitchMergedSubs = '';
+  document.getElementById('stitch-result-section').style.display = 'none';
+  document.getElementById('btn-copy-subs').style.display = 'none';
+  var cont = document.getElementById('stitch-clip-list');
+
+  if (!video) {
+    cont.innerHTML = '<div class="empty-state"><p>选择视频后显示可拼接片段</p></div>';
+    document.getElementById('stitch-clip-count').textContent = '未选择视频';
+    document.getElementById('btn-stitch-selected').style.display = 'none';
+    document.getElementById('btn-stitch-all').style.display = 'none';
+    document.getElementById('stitch-subtitle-text').textContent = '请选择左侧片段查看字幕';
+    return;
+  }
+
+  try {
+    var resp = await fetch(API + '/api/stitch/clips?video=' + encodeURIComponent(video));
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    var data = await resp.json();
+    _stitchClips = data.clips || [];
+    document.getElementById('stitch-clip-count').textContent = _stitchClips.length + ' 个片段';
+    document.getElementById('btn-stitch-selected').style.display = _stitchClips.length ? 'inline-block' : 'none';
+    document.getElementById('btn-stitch-all').style.display = _stitchClips.length ? 'inline-block' : 'none';
+
+    if (!_stitchClips.length) {
+      cont.innerHTML = '<div class="empty-state"><p>没有可拼接的音频片段</p></div>';
+      return;
+    }
+
+    var html = '';
+    for (var i = 0; i < _stitchClips.length; i++) {
+      var c = _stitchClips[i];
+      var checked = _stitchSelected[c.path] ? ' checked' : '';
+      var durStr = c.duration_s > 0 ? formatDuration(c.duration_s) : '?';
+      html += '<div class="stitch-clip-card" data-stitch-path="' + safeAttr(c.path) + '">' +
+        '<input type="checkbox" value="' + safeAttr(c.path) + '" style="flex-shrink:0;margin-top:4px;"' + checked + ' data-stitch-check="1">' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-size:13px;">' + escapeHtml(c.name) + '</div>' +
+          '<div class="stitch-clip-sub">' + (c.subtitle_text ? escapeHtml(c.subtitle_text) : '<span style="color:var(--text2);">无字幕</span>') + '</div>' +
+        '</div>' +
+        '<div style="flex-shrink:0;text-align:right;font-size:11px;color:var(--text2);">' + c.size_mb + ' MB<br>' + durStr + '</div>' +
+      '</div>';
+    }
+    cont.innerHTML = html;
+
+    // Wire checkboxes
+    var checks = cont.querySelectorAll('input[data-stitch-check]');
+    for (var k = 0; k < checks.length; k++) {
+      checks[k].onchange = function() {
+        _stitchSelected[this.value] = this.checked;
+        updateStitchPreview();
+      };
+    }
+    updateStitchPreview();
+  } catch(e) {
+    cont.innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
+  }
+}
+
+function updateStitchPreview() {
+  var lines = [];
+  for (var i = 0; i < _stitchClips.length; i++) {
+    var c = _stitchClips[i];
+    if (_stitchSelected[c.path]) {
+      lines.push(c.subtitle_text || '(无字幕)');
+    }
+  }
+  var preview = document.getElementById('stitch-subtitle-text');
+  if (lines.length) {
+    preview.innerHTML = lines.map(function(l) { return '<div style="margin-bottom:4px;">' + escapeHtml(l) + '</div>'; }).join('');
+  } else {
+    preview.textContent = '请选择左侧片段查看字幕';
+  }
+}
+
+async function stitchSelected() {
+  var paths = [];
+  for (var i = 0; i < _stitchClips.length; i++) {
+    var c = _stitchClips[i];
+    if (_stitchSelected[c.path]) paths.push(c.path);
+  }
+  if (!paths.length) { toast('请先选择要拼接的片段', 'info'); return; }
+  runStitch(paths);
+}
+
+async function stitchAll() {
+  if (!_stitchClips.length) { toast('没有可拼接的片段', 'info'); return; }
+  var paths = _stitchClips.map(function(c) { return c.path; });
+  runStitch(paths);
+}
+
+async function runStitch(paths) {
+  var video = document.getElementById('stitch-video-select').value;
+  try {
+    var resp = await fetch(API + '/api/stitch/concat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({video: video, paths: paths})
+    });
+    if (!resp.ok) { var err = await resp.json(); toast('拼接失败: ' + (err.detail || ''), 'error'); return; }
+    var data = await resp.json();
+    _stitchOutputPath = data.output_path;
+    _stitchMergedSubs = data.merged_subtitle || '';
+
+    // Show result
+    var section = document.getElementById('stitch-result-section');
+    section.style.display = 'block';
+    document.getElementById('stitch-result-count').textContent = data.clip_count;
+    document.getElementById('stitch-result-name').textContent = data.output_name;
+
+    var player = document.getElementById('stitch-audio-player');
+    player.src = API + '/api/results/stream?path=' + encodeURIComponent(data.output_path);
+    player.load();
+
+    // Show merged subtitles in preview
+    var preview = document.getElementById('stitch-subtitle-text');
+    if (_stitchMergedSubs) {
+      preview.innerHTML = _stitchMergedSubs.split('\n').map(function(l) {
+        return '<div style="margin-bottom:4px;">' + escapeHtml(l) + '</div>';
+      }).join('');
+    } else {
+      preview.textContent = '(无字幕)';
+    }
+
+    document.getElementById('btn-copy-subs').style.display = _stitchMergedSubs ? 'inline-block' : 'none';
+    toast('拼接完成: ' + data.clip_count + ' 个片段', 'success');
+  } catch(e) { toast('拼接失败: ' + e.message, 'error'); }
+}
+
+function copyMergedSubs() {
+  if (!_stitchMergedSubs) return;
+  var plainText = _stitchMergedSubs.replace(/\n/g, '');  // single line
+  navigator.clipboard.writeText(plainText).then(
+    function() { toast('字幕文本已复制', 'success'); },
+    function() { toast('复制失败', 'error'); }
+  );
+}
+
+function downloadStitched() {
+  if (!_stitchOutputPath) return;
+  var a = document.createElement('a');
+  a.href = API + '/api/results/stream?path=' + encodeURIComponent(_stitchOutputPath);
+  a.download = _stitchOutputPath.split('/').pop().split('\\').pop();
+  a.click();
+}
+
+// ============================================================
+// Init
+// ============================================================
+loadLocalFiles();
+fetchFansubTeams();
+
+async function fetchFansubTeams() {
+  try {
+    var resp = await fetch(API + '/api/teams');
+    var data = await resp.json();
+    var list = document.getElementById('fansub-datalist');
+    list.innerHTML = '';
+    if (data.teams && data.teams.length) {
+      for (var i = 0; i < data.teams.length; i++) {
+        var name = data.teams[i].name || '';
+        if (name) list.innerHTML += '<option value="' + escapeHtml(name) + '">';
+      }
+    }
+  } catch(e) { console.error(e); }
+}
+
+// Auto-remove highlight when audio finishes
+document.getElementById('results-audio-player').addEventListener('ended', function() {
+  if (_playingEl) { _playingEl.classList.remove('playing'); _playingEl = null; }
+});
+
+// ============================================================
+// Video Split / Cut
+// ============================================================
+var _splitVideoPath = '';
+var _splitVideoName = '';
+var _splitFileExt = '';         // '.mkv', '.mp4', '.wav'
+var _splitMode = 'subtitle';
+var _splitJobId = null;
+window._splitLoaded = false;
+var _splitPollTimer = null;
+var _splitSubFiles = [];
+var _splitSelected = {};       // { full_path: true } for multi-select
+var _splitQueue = [];          // ordered array of { name, path, ext } to process
+var _splitQueueIndex = -1;     // current position in queue
+
+// Folder browser state
+var _splitFolderPath = '';       // current directory being browsed
+var _splitFolderFiles = [];      // [{name, ext, size_mb, full_path, is_video}]
+var _splitFolderSubdirs = [];    // subdirectory names
+
+// --- Folder browser ---
+
+async function loadSplitFolderBrowser(path, scanFiles) {
+  if (!path) path = '';
+  scanFiles = !!scanFiles;
+  var subEl = document.getElementById('split-folder-subdirs');
+  try {
+    var url = API + '/api/split/dir-browse?path=' + encodeURIComponent(path);
+    if (scanFiles) url += '&scan_files=1';
+    var resp = await fetch(url);
+    if (!resp.ok) {
+      subEl.innerHTML = '<div class=\"empty-state\" style=\"padding:16px;\"><p style=\"font-size:12px;color:var(--danger);\">加载失败 (HTTP ' + resp.status + ')，请确认服务器已重启</p></div>';
+      return;
+    }
+    var data = await resp.json();
+    _splitFolderPath = data.current_path;
+    _splitFolderSubdirs = data.subdirs || [];
+
+    // Merge video and audio files (only when scanFiles was requested)
+    _splitFolderFiles = [];
+    var vf = data.video_files || [];
+    for (var i = 0; i < vf.length; i++) {
+      vf[i].is_video = true;
+      _splitFolderFiles.push(vf[i]);
+    }
+    var af = data.audio_files || [];
+    for (var i = 0; i < af.length; i++) {
+      af[i].is_video = false;
+      _splitFolderFiles.push(af[i]);
+    }
+    _splitFolderFiles.sort(function(a, b) { return a.name.localeCompare(b.name); });
+
+    // Clear selection
+    _splitSelected = {};
+
+    // Breadcrumb
+    document.getElementById('split-folder-current-path').textContent = _splitFolderPath || '/';
+    var upBtn = document.getElementById('btn-split-folder-up');
+    upBtn.disabled = !data.parent_path;
+
+    // Subdirs list
+    var subdirsHtml = '';
+    if (_splitFolderSubdirs.length) {
+      for (var i = 0; i < _splitFolderSubdirs.length; i++) {
+        var subPath = (_splitFolderPath ? _splitFolderPath + '/' + _splitFolderSubdirs[i] : _splitFolderSubdirs[i]);
+        subdirsHtml += '<div class="file-item" onclick="loadSplitFolderBrowser(\'' + safeAttr(subPath) + '\',true)" style="cursor:pointer;display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--accent);">';
+        subdirsHtml += '<span style="font-size:14px;">📁</span>';
+        subdirsHtml += '<span style="font-size:12px;">' + escapeHtml(_splitFolderSubdirs[i]) + '</span>';
+        subdirsHtml += '</div>';
+      }
+    } else {
+      subdirsHtml = '<div class="empty-state" style="padding:16px;"><p style="font-size:12px;">此目录下没有子文件夹</p></div>';
+    }
+    document.getElementById('split-folder-subdirs').innerHTML = subdirsHtml;
+
+    // File list (only meaningful when scanFiles was requested)
+    var infoEl = document.getElementById('split-folder-file-info');
+    var barEl = document.getElementById('split-folder-select-bar');
+    var listEl = document.getElementById('split-folder-file-list');
+    if (_splitFolderFiles.length) {
+      infoEl.style.display = 'block';
+      var totalMb = 0;
+      for (var i = 0; i < _splitFolderFiles.length; i++) { totalMb += _splitFolderFiles[i].size_mb || 0; }
+      var vCount = (data.video_files || []).length;
+      var aCount = (data.audio_files || []).length;
+      var parts = [];
+      if (vCount) parts.push(vCount + ' 个视频');
+      if (aCount) parts.push(aCount + ' 个音频');
+      infoEl.textContent = '发现 ' + parts.join('，') + ' (' + totalMb.toFixed(1) + ' MB)';
+      barEl.style.display = 'flex';
+      _splitRenderFolderFileList();
+    } else if (scanFiles) {
+      infoEl.style.display = 'block';
+      infoEl.textContent = '此目录下没有视频或音频文件（支持 mkv, mp4, avi, mov, wmv, wav）';
+      barEl.style.display = 'none';
+      listEl.style.display = 'none';
+    } else {
+      infoEl.style.display = 'none';
+      barEl.style.display = 'none';
+      listEl.style.display = 'none';
+    }
+
+    // Handle pending cross-tab jump
+    if (_pendingSplitMkvPath && _splitFolderFiles.length) {
+      for (var j = 0; j < _splitFolderFiles.length; j++) {
+        if (_splitFolderFiles[j].full_path.replace(/\\/g, '/') === _pendingSplitMkvPath.replace(/\\/g, '/')) {
+          splitFolderSelectFile(_splitFolderFiles[j].name, _splitFolderFiles[j].full_path, _splitFolderFiles[j].ext);
+          _pendingSplitMkvPath = null;
+          break;
+        }
+      }
+    }
+    updateSplitBatchUI();
+  } catch(e) {
+    console.error('loadSplitFolderBrowser:', e);
+    var subEl2 = document.getElementById('split-folder-subdirs');
+    if (subEl2) subEl2.innerHTML = '<div class=\"empty-state\" style=\"padding:16px;\"><p style=\"font-size:12px;color:var(--danger);\">加载出错: ' + escapeHtml(String(e.message || e)) + '</p></div>';
+  }
+}
+
+function splitFolderGoUp() {
+  if (_splitFolderPath) {
+    var parent = _splitFolderPath.substring(0, _splitFolderPath.lastIndexOf('/'));
+    loadSplitFolderBrowser(parent, true);
+  }
+}
+
+function _splitRenderFolderFileList() {
+  var listEl = document.getElementById('split-folder-file-list');
+  var html = '';
+  var selCount = 0;
+  for (var i = 0; i < _splitFolderFiles.length; i++) {
+    var f = _splitFolderFiles[i];
+    var fp = f.full_path;
+    if (_splitSelected[fp]) selCount++;
+    var sel = (fp === _splitVideoPath) ? ' selected' : '';
+    var checked = _splitSelected[fp] ? ' checked' : '';
+    var icon = f.is_video ? '🎬' : '🎵';
+    html += '<div class="file-item' + sel + checked + '" data-split-path="' + safeAttr(fp) + '" style="display:flex;align-items:center;gap:6px;padding:4px 8px;border-bottom:1px solid var(--border);">';
+    html += '<input type="checkbox" class="item-check" data-split-path="' + safeAttr(fp) + '" onclick="event.stopPropagation();splitFolderToggleItem(this)" style="cursor:pointer;flex-shrink:0;">';
+    html += '<span style="font-size:14px;flex-shrink:0;" title="' + (f.is_video ? '视频' : '音频') + '">' + icon + '</span>';
+    html += '<div style="flex:1;min-width:0;cursor:pointer;" onclick="splitFolderSelectFile(\'' + escapeHtml(f.name).replace(/'/g, "\\'") + '\',\'' + fp.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\',\'' + escapeHtml(f.ext) + '\')">';
+    html += '<span style="flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(f.name) + '">' + escapeHtml(f.name) + '</span>';
+    html += '</div>';
+    html += '<span style="font-size:10px;color:var(--text2);flex-shrink:0;">' + f.size_mb + ' MB</span>';
+    if (!f.is_video) {
+      html += '<button class="btn btn-secondary" onclick="event.stopPropagation();playSplitFolderAudio(\'' + safeAttr(fp) + '\')" style="font-size:10px;padding:2px 8px;flex-shrink:0;" title="播放">▶</button>';
+    }
+    html += '</div>';
+  }
+  listEl.innerHTML = html;
+  listEl.style.display = 'block';
+
+  document.getElementById('split-folder-select-all-cb').checked = selCount === _splitFolderFiles.length && _splitFolderFiles.length > 0;
+  document.getElementById('split-folder-selected-count').textContent = '已选 ' + selCount + '/' + _splitFolderFiles.length + ' 个';
+}
+
+function splitFolderToggleSelectAll() {
+  var checked = document.getElementById('split-folder-select-all-cb').checked;
+  _splitSelected = {};
+  if (checked) {
+    for (var i = 0; i < _splitFolderFiles.length; i++) {
+      _splitSelected[_splitFolderFiles[i].full_path] = true;
+    }
+  }
+  _splitRenderFolderFileList();
+  updateSplitBatchUI();
+}
+
+function splitFolderToggleItem(cb) {
+  var path = cb.getAttribute('data-split-path');
+  if (!path) return;
+  if (cb.checked) { _splitSelected[path] = true; }
+  else { delete _splitSelected[path]; }
+  _splitRenderFolderFileList();
+  updateSplitBatchUI();
+}
+
+function playSplitFolderAudio(path) {
+  if (!path) return;
+  var player = document.getElementById('split-folder-audio-player');
+  player.src = API + '/api/asr/stream?path=' + encodeURIComponent(path);
+  player.style.display = 'block';
+  player.play().catch(function(e) { console.error('Play failed:', e); });
+}
+
+// --- Old loadSplitVideos / refreshSplitVideos (kept as aliases) ---
+
+function loadSplitVideos() { loadSplitFolderBrowser(_splitFolderPath, true); }
+
+function refreshSplitVideos() { loadSplitFolderBrowser(_splitFolderPath, true); }
+
+function selectSplitVideo(name, path) {
+  // Backward-compat wrapper
+  var ext = '.' + name.split('.').pop().toLowerCase();
+  splitFolderSelectFile(name, path, ext);
+}
+
+function splitFolderSelectFile(name, path, ext) {
+  // Don't interrupt active batch queue
+  if (_splitQueue.length > 0 && _splitQueueIndex >= 0 && _splitQueueIndex < _splitQueue.length) return;
+
+  _splitVideoPath = path;
+  _splitVideoName = name;
+  _splitFileExt = ext;
+
+  // Update visual selection
+  var items = document.querySelectorAll('#split-folder-file-list .file-item');
+  for (var i = 0; i < items.length; i++) {
+    items[i].classList.remove('selected');
+    if (items[i].getAttribute('data-split-path') === path) {
+      items[i].classList.add('selected');
+    }
+  }
+
+  // Show config panel
+  document.getElementById('split-no-video').style.display = 'none';
+  document.getElementById('split-config-panel').style.display = 'block';
+  document.getElementById('split-current-video').textContent = name;
+
+  // Update output dir
+  var baseName = name.replace(/\.[^.]+$/, '');
+  document.getElementById('split-output-dir').textContent = 'data/clips/' + baseName + '/';
+
+  // WAV mode adaptation: hide output format and hw accel (subtitle mode still available)
+  var isAudio = (ext === '.wav');
+  document.getElementById('split-output-format-section').style.display = isAudio ? 'none' : '';
+  document.getElementById('split-hw-accel-section').style.display = isAudio ? 'none' : '';
+  // Subtitle mode button always visible for both video and audio
+
+  // Load subtitles — for audio files, auto-detect from sibling subtitles folder
+  if (isAudio) {
+    loadSplitSubsForAudio(name);
+  } else {
+    loadSplitSubs();
+  }
+  }
+  // Load existing clips for this file
+  loadSplitClips();
+  document.getElementById('split-results-section').style.display = 'block';
+}
+
+// --- Split batch selection (backward-compat wrappers) ---
+function splitToggleItem(cb) { splitFolderToggleItem(cb); }
+function splitToggleSelectAll() { splitFolderToggleSelectAll(); }
+
+function updateSplitBatchUI() {
+  var count = Object.keys(_splitSelected).length;
+  document.getElementById('split-folder-selected-count').textContent = '已选 ' + count + '/' + _splitFolderFiles.length + ' 个';
+  document.getElementById('btn-split-batch-run').disabled = count === 0 || _splitQueue.length > 0;
+
+  var masterCb = document.getElementById('split-folder-select-all-cb');
+  var cbs = document.querySelectorAll('#split-folder-file-list .item-check');
+  if (cbs.length === 0) {
+    masterCb.checked = false;
+    masterCb.indeterminate = false;
+  } else if (count === cbs.length) {
+    masterCb.checked = true;
+    masterCb.indeterminate = false;
+  } else if (count > 0) {
+    masterCb.checked = false;
+    masterCb.indeterminate = true;
+  } else {
+    masterCb.checked = false;
+    masterCb.indeterminate = false;
+  }
+
+  for (var i = 0; i < cbs.length; i++) {
+    var path = cbs[i].getAttribute('data-split-path');
+    cbs[i].checked = !!_splitSelected[path];
+  }
+}
+
+function runSplitBatch() {
+  var keys = Object.keys(_splitSelected);
+  if (!keys.length) { toast('请先勾选文件', 'info'); return; }
+
+  _splitQueue = [];
+  for (var i = 0; i < _splitFolderFiles.length; i++) {
+    var f = _splitFolderFiles[i];
+    if (_splitSelected[f.full_path]) {
+      _splitQueue.push({ name: f.name, path: f.full_path, ext: f.ext });
+    }
+  }
+  _splitQueueIndex = 0;
+
+  _splitSelected = {};
+  document.getElementById('split-folder-select-all-cb').checked = false;
+  document.getElementById('btn-split-batch-run').disabled = true;
+
+  // Preload subtitles for subtitle mode
+  if (_splitMode === 'subtitle') {
+    loadSplitSubs().then(function() { processNextSplitInQueue(); });
+  } else {
+    processNextSplitInQueue();
+  }
+}
+
+function processNextSplitInQueue() {
+  if (_splitQueueIndex >= _splitQueue.length) {
+    _splitQueue = [];
+    _splitQueueIndex = -1;
+    document.getElementById('split-queue-status').style.display = 'none';
+    document.getElementById('btn-split-batch-run').disabled = Object.keys(_splitSelected).length === 0;
+    resetSplitUI();
+    loadSplitFolderBrowser(_splitFolderPath, true);
+    loadSplitClipDirs();
+    toast('全部切割批量任务已完成', 'success');
+    return;
+  }
+
+  var item = _splitQueue[_splitQueueIndex];
+  document.getElementById('split-queue-status').style.display = 'inline';
+  document.getElementById('split-queue-status').textContent =
+    '队列: ' + (_splitQueueIndex + 1) + '/' + _splitQueue.length + ' — ' + item.name;
+
+  _splitVideoPath = item.path;
+  _splitVideoName = item.name;
+  _splitFileExt = item.ext || '';
+
+  var isAudio = (_splitFileExt === '.wav');
+
+  // Build payload (same as runSplit but for current queue item)
+  var payload = {
+    mode: _splitMode,
+    video_path: item.path,
+  };
+  if (!isAudio) {
+    payload.hw_accel = document.getElementById('split-hw-accel').value;
+    payload.output_ext = document.getElementById('split-output-ext').value;
+  } else {
+    payload.output_ext = '.wav';
+  }
+
+  if (_splitMode === 'subtitle') {
+    // Auto-match subtitle for this video
+    if (!_splitSubFiles.length) {
+      toast('无可用字幕文件，跳过: ' + item.name, 'error');
+      _splitQueueIndex++;
+      processNextSplitInQueue();
+      return;
+    }
+    autoMatchSubtitle();
+    var subIdx = parseInt(document.getElementById('split-sub-select').value);
+    if (isNaN(subIdx) || subIdx < 0 || subIdx >= _splitSubFiles.length) {
+      toast('无法匹配字幕，跳过: ' + item.name, 'error');
+      _splitQueueIndex++;
+      processNextSplitInQueue();
+      return;
+    }
+    payload.subtitle_path = _splitSubFiles[subIdx].path;
+    payload.padding = parseFloat(document.getElementById('split-padding').value) || 0.1;
+    payload.group_count = parseInt(document.getElementById('split-group-count').value) || 1;
+    payload.deduplicate = document.getElementById('split-deduplicate').checked;
+  } else if (_splitMode === 'duration') {
+    var segDur = parseTimeInput(document.getElementById('split-seg-duration').value);
+    if (!segDur || segDur <= 0) {
+      toast('无效的片段时长，停止队列', 'error');
+      resetSplitUI();
+      _splitQueue = []; _splitQueueIndex = -1;
+      loadSplitFolderBrowser(_splitFolderPath, true);
+      return;
+    }
+    payload.segment_duration = segDur;
+    var st = parseTimeInput(document.getElementById('split-start-time').value);
+    if (st !== null) payload.start_time = st;
+    var et = parseTimeInput(document.getElementById('split-end-time').value);
+    if (et !== null) payload.end_time = et;
+  } else if (_splitMode === 'size') {
+    var tsize = parseFloat(document.getElementById('split-target-size').value);
+    if (!tsize || tsize <= 0) {
+      toast('无效的目标大小，停止队列', 'error');
+      resetSplitUI();
+      _splitQueue = []; _splitQueueIndex = -1;
+      loadSplitFolderBrowser(_splitFolderPath, true);
+      return;
+    }
+    payload.target_size_mb = tsize;
+  } else if (_splitMode === 'trim') {
+    var trimStart = parseTimeInput(document.getElementById('split-trim-start').value);
+    var trimEnd = parseTimeInput(document.getElementById('split-trim-end').value);
+    if (trimStart === null || trimEnd === null || trimEnd <= trimStart) {
+      toast('无效的裁剪时间，停止队列', 'error');
+      resetSplitUI();
+      _splitQueue = []; _splitQueueIndex = -1;
+      loadSplitFolderBrowser(_splitFolderPath, true);
+      return;
+    }
+    payload.start_time = trimStart;
+    payload.end_time = trimEnd;
+  }
+
+  // Update UI
+  document.getElementById('split-no-video').style.display = 'none';
+  document.getElementById('split-config-panel').style.display = 'block';
+  document.getElementById('split-current-video').textContent = item.name;
+  document.getElementById('split-output-dir').textContent = 'data/clips/' + item.name.replace(/\.[^.]+$/, '') + '/';
+  document.getElementById('btn-split-run').style.display = 'none';
+  document.getElementById('btn-split-cancel').style.display = 'inline-block';
+  document.getElementById('split-progress-bar').style.display = 'block';
+  document.getElementById('split-progress-fill').style.width = '2%';
+  document.getElementById('split-progress-text').textContent = '队列 ' + (_splitQueueIndex + 1) + '/' + _splitQueue.length + ' — 提交任务...';
+  document.getElementById('split-status-text').textContent = '';
+
+  loadSplitFolderBrowser(_splitFolderPath, true);
+
+  fetch(API + '/api/split/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }).then(function(resp) {
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    return resp.json();
+  }).then(function(data) {
+    _splitJobId = data.job_id;
+    document.getElementById('split-status-text').textContent = '任务 ' + _splitJobId + ' 运行中...';
+    toast('队列 ' + (_splitQueueIndex + 1) + '/' + _splitQueue.length + ': ' + item.name, 'success');
+    startSplitPolling();
+  }).catch(function(e) {
+    toast('启动失败: ' + e.message + ' — ' + item.name, 'error');
+    _splitQueueIndex++;
+    processNextSplitInQueue();
+  });
+}
+
+async function loadSplitSubs() {
+  var select = document.getElementById('split-sub-select');
+  var preview = document.getElementById('split-sub-preview');
+  select.innerHTML = '<option value="">-- 加载中 --</option>';
+  preview.style.display = 'none';
+
+  try {
+    var resp = await fetch(API + '/api/local/subtitles');
+    if (!resp.ok) throw new Error(await resp.text());
+    var data = await resp.json();
+    _splitSubFiles = data.subtitles || [];
+
+    // Also try to load subtitles matching video name
+    var resp2 = await fetch(API + '/api/extract/subtitle-files');
+    if (resp2.ok) {
+      var data2 = await resp2.json();
+      var subs2 = data2.subtitles || [];
+      // Merge, deduplicate by path
+      var seen = {};
+      var merged = [];
+      for (var i = 0; i < _splitSubFiles.length; i++) {
+        if (!seen[_splitSubFiles[i].path]) {
+          seen[_splitSubFiles[i].path] = true;
+          merged.push(_splitSubFiles[i]);
+        }
+      }
+      for (var i = 0; i < subs2.length; i++) {
+        if (!seen[subs2[i].path]) {
+          seen[subs2[i].path] = true;
+          merged.push(subs2[i]);
+        }
+      }
+      _splitSubFiles = merged;
+    }
+
+    var html = '<option value="">-- 选择字幕文件 --</option>';
+    for (var i = 0; i < _splitSubFiles.length; i++) {
+      var s = _splitSubFiles[i];
+      html += '<option value="' + i + '">' + escapeHtml(s.name) + ' (' + s.size_kb + 'KB)</option>';
+    }
+    select.innerHTML = html;
+
+    // Auto-match subtitle to selected video
+    autoMatchSubtitle();
+
+    // Apply pending subtitle from extract→split jump
+    if (_pendingSplitSubPath) {
+      for (var j = 0; j < _splitSubFiles.length; j++) {
+        if (_splitSubFiles[j].path.replace(/\\/g, '/') === _pendingSplitSubPath.replace(/\\/g, '/')) {
+          select.value = j;
+          preview.style.display = 'block';
+          preview.textContent = '已选择: ' + _splitSubFiles[j].path;
+          break;
+        }
+      }
+      _pendingSplitSubPath = null;
+    }
+  } catch(e) {
+    select.innerHTML = '<option value="">-- 加载失败 --</option>';
+  }
+}
+
+async function loadSplitSubsForAudio(audioName) {
+  // Look for subtitles in sibling 'subtitles' folder: ../subtitles/
+  var select = document.getElementById('split-sub-select');
+  select.innerHTML = '<option value="">-- 检测字幕中 --</option>';
+  _splitSubFiles = [];
+
+  if (!_splitFolderPath) {
+    select.innerHTML = '<option value="">-- 未选择文件夹 --</option>';
+    return;
+  }
+
+  // Compute sibling subtitles folder path
+  var parentPath = _splitFolderPath.replace(/\\/g, '/').replace(/\/$/, '');
+  var subtitlesFolder = parentPath.substring(0, parentPath.lastIndexOf('/')) + '/subtitles';
+
+  try {
+    var resp = await fetch(API + '/api/split/dir-browse?path=' + encodeURIComponent(subtitlesFolder) + '&scan_files=1');
+    if (!resp.ok) {
+      select.innerHTML = '<option value="">-- 未找到 subtitles 文件夹，可手动选择 --</option>';
+      return;
+    }
+    var data = await resp.json();
+    var subs = data.subtitle_files || [];
+    if (!subs.length) {
+      select.innerHTML = '<option value="">-- subtitles 文件夹为空，可手动选择 --</option>';
+      return;
+    }
+
+    // Build subtitle file list
+    _splitSubFiles = [];
+    for (var i = 0; i < subs.length; i++) {
+      _splitSubFiles.push({ name: subs[i].name, path: subs[i].full_path, size_kb: subs[i].size_kb || 0 });
+    }
+
+    // Match by base name
+    var audioBase = audioName.replace(/\.[^.]+$/, '').toLowerCase();
+    var html = '<option value="">-- 选择字幕文件 --</option>';
+    var matchedIdx = -1;
+    for (var i = 0; i < _splitSubFiles.length; i++) {
+      var subBase = _splitSubFiles[i].name.replace(/\.[^.]+$/, '').toLowerCase();
+      var sel = '';
+      if (subBase === audioBase) { sel = ' selected'; matchedIdx = i; }
+      html += '<option value="' + i + '"' + sel + '>' + escapeHtml(_splitSubFiles[i].name) + ' (' + (_splitSubFiles[i].size_kb || 0) + ' KB)</option>';
+    }
+    select.innerHTML = html;
+
+    // Show match result
+    var preview = document.getElementById('split-sub-preview');
+    if (matchedIdx >= 0) {
+      preview.textContent = '已自动匹配: ' + _splitSubFiles[matchedIdx].name;
+      preview.style.display = 'block';
+    } else {
+      preview.textContent = '未匹配到同名字幕，请手动选择';
+      preview.style.display = 'block';
+    }
+  } catch(e) {
+    console.error('loadSplitSubsForAudio:', e);
+    select.innerHTML = '<option value="">-- 加载失败，可手动选择 --</option>';
+  }
+}
+
+function autoMatchSubtitle() {
+  if (!_splitVideoName || !_splitSubFiles.length) return;
+  var select = document.getElementById('split-sub-select');
+  var preview = document.getElementById('split-sub-preview');
+
+  // Normalize video base name for matching
+  var videoBase = _splitVideoName.replace(/\.[^.]+$/, '').toLowerCase();
+  // Also try extracting the common part (e.g. "[SubsPlease] Show - 01 (1080p)" -> "Show - 01")
+  var videoClean = videoBase
+    .replace(/\[.*?\]/g, '')   // remove [tags]
+    .replace(/\(.*?\)/g, '')   // remove (tags)
+    .replace(/{\s*}/g, '')     // remove {tags}
+    .replace(/1080p|720p|480p/gi, '')
+    .replace(/x264|x265|hevc|avc/gi, '')
+    .replace(/aac|flac|opus/gi, '')
+    .replace(/web-dl|bdrip|webrip/gi, '')
+    .trim();
+
+  // Score each subtitle file for match quality
+  var bestIdx = -1;
+  var bestScore = 0;
+  for (var i = 0; i < _splitSubFiles.length; i++) {
+    var subName = _splitSubFiles[i].name.toLowerCase();
+    var subPath = (_splitSubFiles[i].path || '').toLowerCase();
+    var score = 0;
+
+    // Full video base name match (best)
+    if (subName.indexOf(videoBase) >= 0 || videoBase.indexOf(subName.replace(/\.[^.]+$/, '')) >= 0) {
+      score += 100;
+    }
+    // Clean name match
+    if (videoClean && videoClean.length > 3) {
+      if (subName.indexOf(videoClean) >= 0 || videoClean.indexOf(subName.replace(/\.[^.]+$/, '')) >= 0) {
+        score += 80;
+      }
+    }
+    // Word-by-word match
+    if (videoClean) {
+      var words = videoClean.split(/[\s\-_]+/);
+      for (var w = 0; w < words.length; w++) {
+        if (words[w].length >= 2 && subName.indexOf(words[w]) >= 0) {
+          score += 10;
+        }
+      }
+    }
+    // Prefer Chinese subtitles
+    if (/chi|zho|zh|chs|sc|简|中/.test(subName)) {
+      score += 20;
+    }
+    // Prefer Simplified Chinese over Traditional
+    if (/hans|chs|sc|简|gb|cn/i.test(subName)) {
+      score += 10;
+    } else if (/hant|cht|tc|繁|big5|hk|tw/i.test(subName)) {
+      score -= 5;
+    }
+    // Prefer ASS/SSA over SRT (more features)
+    if (/\.(ass|ssa)$/i.test(subName)) {
+      score += 5;
+    }
+    // Prefer files from subtitles dir over downloads dir
+    if (subPath.indexOf('subtitles') >= 0) {
+      score += 3;
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestIdx = i;
+    }
+  }
+
+  if (bestIdx >= 0 && bestScore > 10) {
+    select.value = bestIdx;
+    preview.style.display = 'block';
+    preview.textContent = '自动匹配: ' + _splitSubFiles[bestIdx].path;
+  } else {
+    select.value = '';
+    preview.style.display = 'none';
+  }
+}
+
+function onSplitSubSelect() {
+  var idx = parseInt(document.getElementById('split-sub-select').value);
+  var preview = document.getElementById('split-sub-preview');
+  if (isNaN(idx) || idx < 0 || idx >= _splitSubFiles.length) {
+    preview.style.display = 'none';
+    return;
+  }
+  preview.style.display = 'block';
+  preview.textContent = '路径: ' + _splitSubFiles[idx].path;
+}
+
+function switchSplitMode(mode) {
+  _splitMode = mode;
+  var buttons = document.querySelectorAll('.split-mode-tabs button');
+  for (var i = 0; i < buttons.length; i++) {
+    buttons[i].classList.remove('active');
+    if (buttons[i].getAttribute('data-split-mode') === mode) {
+      buttons[i].classList.add('active');
+    }
+  }
+  document.getElementById('split-cfg-subtitle').style.display = (mode === 'subtitle') ? 'block' : 'none';
+  document.getElementById('split-cfg-duration').style.display = (mode === 'duration') ? 'block' : 'none';
+  document.getElementById('split-cfg-size').style.display = (mode === 'size') ? 'block' : 'none';
+  document.getElementById('split-cfg-trim').style.display = (mode === 'trim') ? 'block' : 'none';
+}
+
+function parseTimeInput(val) {
+  // Parse "90", "1:30", "1:30:00" to seconds
+  val = String(val).trim();
+  if (!val) return null;
+  if (/^\d+(\.\d+)?$/.test(val)) return parseFloat(val);
+  var parts = val.split(':');
+  if (parts.length === 2) {
+    return parseInt(parts[0]) * 60 + parseFloat(parts[1]);
+  }
+  if (parts.length === 3) {
+    return parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseFloat(parts[2]);
+  }
+  return null;
+}
+
+async function runSplit() {
+  if (!_splitVideoPath) {
+    toast('请先选择文件', 'error');
+    return;
+  }
+
+  var isAudio = (_splitFileExt === '.wav');
+
+  var payload = {
+    mode: _splitMode,
+    video_path: _splitVideoPath,
+  };
+  if (!isAudio) {
+    payload.hw_accel = document.getElementById('split-hw-accel').value;
+    payload.output_ext = document.getElementById('split-output-ext').value;
+  } else {
+    payload.output_ext = '.wav';
+  }
+
+  if (_splitMode === 'subtitle') {
+    var subIdx = parseInt(document.getElementById('split-sub-select').value);
+    if (isNaN(subIdx) || subIdx < 0 || subIdx >= _splitSubFiles.length) {
+      toast('请选择字幕文件', 'error');
+      return;
+    }
+    payload.subtitle_path = _splitSubFiles[subIdx].path;
+    payload.padding = parseFloat(document.getElementById('split-padding').value) || 0.1;
+    payload.group_count = parseInt(document.getElementById('split-group-count').value) || 1;
+    payload.deduplicate = document.getElementById('split-deduplicate').checked;
+  } else if (_splitMode === 'duration') {
+    var segDur = parseTimeInput(document.getElementById('split-seg-duration').value);
+    if (!segDur || segDur <= 0) {
+      toast('请输入有效的片段时长', 'error');
+      return;
+    }
+    payload.segment_duration = segDur;
+    var st = parseTimeInput(document.getElementById('split-start-time').value);
+    if (st !== null) payload.start_time = st;
+    var et = parseTimeInput(document.getElementById('split-end-time').value);
+    if (et !== null) payload.end_time = et;
+  } else if (_splitMode === 'size') {
+    var tsize = parseFloat(document.getElementById('split-target-size').value);
+    if (!tsize || tsize <= 0) {
+      toast('请输入有效的目标大小 (MB)', 'error');
+      return;
+    }
+    payload.target_size_mb = tsize;
+  } else if (_splitMode === 'trim') {
+    var trimStart = parseTimeInput(document.getElementById('split-trim-start').value);
+    var trimEnd = parseTimeInput(document.getElementById('split-trim-end').value);
+    if (trimStart === null || trimEnd === null) {
+      toast('请输入有效的开始和结束时间', 'error');
+      return;
+    }
+    if (trimEnd <= trimStart) {
+      toast('结束时间必须大于开始时间', 'error');
+      return;
+    }
+    payload.start_time = trimStart;
+    payload.end_time = trimEnd;
+  }
+
+  try {
+    document.getElementById('btn-split-run').style.display = 'none';
+    document.getElementById('btn-split-cancel').style.display = 'inline-block';
+    document.getElementById('split-status-text').textContent = '启动中...';
+    document.getElementById('split-progress-bar').style.display = 'block';
+    document.getElementById('split-progress-fill').style.width = '2%';
+    document.getElementById('split-progress-text').textContent = '提交任务...';
+
+    var resp = await fetch(API + '/api/split/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    var data = await resp.json();
+    _splitJobId = data.job_id;
+    document.getElementById('split-status-text').textContent = '任务 ' + _splitJobId + ' 运行中...';
+
+    // Start polling
+    startSplitPolling();
+  } catch(e) {
+    toast('启动失败: ' + e.message, 'error');
+    resetSplitUI();
+  }
+}
+
+function cancelSplit() {
+  if (!_splitJobId) return;
+  // Cancel queue if active
+  if (_splitQueue.length > 0) {
+    _splitQueue = [];
+    _splitQueueIndex = -1;
+    document.getElementById('split-queue-status').style.display = 'none';
+  }
+  fetch(API + '/api/jobs/' + _splitJobId + '/cancel', { method: 'POST' }).catch(function(){});
+  toast('正在取消...', 'info');
+}
+
+function startSplitPolling() {
+  stopSplitPolling();
+  _splitPollTimer = setInterval(pollSplitJob, 1000);
+}
+
+function stopSplitPolling() {
+  if (_splitPollTimer) { clearInterval(_splitPollTimer); _splitPollTimer = null; }
+}
+
+async function pollSplitJob() {
+  if (!_splitJobId) { stopSplitPolling(); return; }
+  try {
+    var resp = await fetch(API + '/api/jobs/' + _splitJobId);
+    if (!resp.ok) throw new Error(await resp.text());
+    var job = await resp.json();
+
+    var pct = job.progress || 0;
+    document.getElementById('split-progress-fill').style.width = pct + '%';
+    document.getElementById('split-progress-text').textContent =
+      (job.current_step || '') + ' ' + Math.round(pct) + '%';
+
+    if (job.status === 'completed') {
+      stopSplitPolling();
+      toast('切割完成! 共生成 ' + (job.clip_count || 0) + ' 个片段', 'success');
+      loadSplitClips();
+      loadSplitClipDirs();
+
+      // Queue continuation
+      if (_splitQueue.length > 0 && _splitQueueIndex < _splitQueue.length) {
+        _splitQueueIndex++;
+        processNextSplitInQueue();
+      } else {
+        resetSplitUI();
+      }
+    } else if (job.status === 'failed') {
+      stopSplitPolling();
+      var errMsg = '切割失败';
+      if (job.steps && job.steps.length) {
+        errMsg += ': ' + (job.steps[job.steps.length - 1].message || '');
+      }
+      toast(errMsg, 'error');
+
+      // Queue continuation (skip failed)
+      if (_splitQueue.length > 0 && _splitQueueIndex < _splitQueue.length) {
+        _splitQueueIndex++;
+        processNextSplitInQueue();
+      } else {
+        resetSplitUI();
+      }
+    } else if (job.status === 'cancelled') {
+      stopSplitPolling();
+      toast('已取消', 'info');
+      loadSplitClips();
+
+      // Cancel entire queue
+      if (_splitQueue.length > 0) {
+        _splitQueue = [];
+        _splitQueueIndex = -1;
+        document.getElementById('split-queue-status').style.display = 'none';
+        loadSplitFolderBrowser(_splitFolderPath, true);
+      }
+      resetSplitUI();
+    }
+  } catch(e) {
+    // Job may have been deleted
+  }
+}
+
+function resetSplitUI() {
+  document.getElementById('btn-split-run').style.display = 'inline-block';
+  document.getElementById('btn-split-cancel').style.display = 'none';
+  document.getElementById('split-progress-bar').style.display = 'none';
+  document.getElementById('split-status-text').textContent = '';
+  _splitJobId = null;
+}
+
+async function loadSplitClipDirs() {
+  var container = document.getElementById('split-clip-dirs');
+  try {
+    var resp = await fetch(API + '/api/split/clip-dirs');
+    if (!resp.ok) throw new Error(await resp.text());
+    var data = await resp.json();
+    var dirs = data.dirs || [];
+    if (!dirs.length) {
+      container.innerHTML = '<div class="empty-state"><p>暂无切片目录</p></div>';
+    } else {
+      var html = '';
+      for (var i = 0; i < dirs.length; i++) {
+        var d = dirs[i];
+        html += '<div class="split-clip-item" style="cursor:pointer;" ' +
+          'onclick="loadSplitClipsFor(\'' + escapeHtml(d.name).replace(/'/g, "\\'") + '\')">' +
+          '<span class="file-name">' + escapeHtml(d.name) + '</span>' +
+          '<span class="file-size">' + d.clip_count + ' 片段</span>' +
+          '<span style="font-size:10px;color:var(--text2);">' + d.total_size_mb + ' MB</span>' +
+          '</div>';
+      }
+      container.innerHTML = html;
+    }
+  } catch(e) {
+    container.innerHTML = '<div class="empty-state"><p>加载失败</p></div>';
+  }
+}
+
+function loadSplitClipsFor(videoName) {
+  _splitVideoName = videoName;
+  _splitVideoPath = '';  // not needed for loading results
+  document.getElementById('split-no-video').style.display = 'none';
+  document.getElementById('split-config-panel').style.display = 'none';
+  document.getElementById('split-results-section').style.display = 'block';
+  document.getElementById('split-results-title').textContent = '切片: ' + videoName;
+  loadSplitClips();
+}
+
+async function loadSplitClips() {
+  var container = document.getElementById('split-results-list');
+  var videoName = _splitVideoName.replace(/\.[^.]+$/, '');
+  if (!videoName) { return; }
+
+  try {
+    var resp = await fetch(API + '/api/split/clips/' + encodeURIComponent(videoName));
+    if (!resp.ok) throw new Error(await resp.text());
+    var data = await resp.json();
+    var clips = data.clips || [];
+    if (!clips.length) {
+      container.innerHTML = '<div class="empty-state"><p>暂无切割结果</p></div>';
+    } else {
+      var html = '';
+      for (var i = 0; i < clips.length; i++) {
+        var c = clips[i];
+        html += '<div class="split-clip-item">' +
+          '<span class="split-clip-name" title="' + escapeHtml(c.name) + '">' + escapeHtml(c.name) + '</span>' +
+          '<span class="file-size">' + c.size_mb + ' MB</span>' +
+          '<a class="btn btn-secondary" style="font-size:10px;padding:3px 8px;text-decoration:none;" ' +
+            'href="' + API + '/api/review/stream?path=' + encodeURIComponent(c.path) + '" target="_blank">预览</a>' +
+          '</div>';
+      }
+      container.innerHTML = html;
+    }
+  } catch(e) {
+    container.innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
+  }
+}
+
+// ============================================================
+// Settings
+// ============================================================
+var _settingsData = null;
+
+function loadSavedSettings() {
+  fetch(API + '/api/settings').then(function(r) { return r.json(); }).then(function(data) {
+    if (data.denoise_default_steps && data.denoise_default_steps.length) {
+      for (var k = 0; k < STEP_DEFAULTS.length; k++) {
+        STEP_DEFAULTS[k].enabled = data.denoise_default_steps.indexOf(STEP_DEFAULTS[k].key) >= 0;
+      }
+      _denoiseSteps = JSON.parse(JSON.stringify(STEP_DEFAULTS));
+    }
+    if (data.pv_default_steps && data.pv_default_steps.length) {
+      for (var k = 0; k < PV_STEP_DEFAULTS.length; k++) {
+        PV_STEP_DEFAULTS[k].enabled = data.pv_default_steps.indexOf(PV_STEP_DEFAULTS[k].key) >= 0;
+      }
+      _pvSteps = JSON.parse(JSON.stringify(PV_STEP_DEFAULTS));
+    }
+
+    // Apply saved ASR defaults to page fields (lazy-set after elements are populated)
+    var cfg = data.config || {};
+    _savedAsrConfig = cfg;
+
+    // Try to apply immediately; if model selects aren't populated yet,
+    // the loadAsrModels / loadCmpModels functions will apply them later.
+    setTimeout(function() {
+      applyAsrConfigToPage(cfg);
+    }, 800);
+  }).catch(function() {});
+}
+
+var _savedAsrConfig = null;
+
+function applyAsrConfigToPage(cfg) {
+  if (!cfg) cfg = _savedAsrConfig || {};
+  if (cfg.ASR_DEFAULT_MODEL) {
+    var s = document.getElementById('asr-model-select');
+    if (s && s.options.length > 1) { s.value = cfg.ASR_DEFAULT_MODEL; }
+  }
+  if (cfg.ASR_DEFAULT_LANGUAGE) {
+    var s = document.getElementById('asr-lang-select');
+    if (s) { s.value = cfg.ASR_DEFAULT_LANGUAGE; }
+  }
+  if (cfg.ASR_COMPARE_MODEL_A) {
+    var s = document.getElementById('cmp-model-a-select');
+    if (s && s.options.length > 1) { s.value = cfg.ASR_COMPARE_MODEL_A; }
+  }
+  if (cfg.ASR_COMPARE_MODEL_B) {
+    var s = document.getElementById('cmp-model-b-select');
+    if (s && s.options.length > 1) { s.value = cfg.ASR_COMPARE_MODEL_B; }
+  }
+}
+
+var SETTINGS_CATEGORIES = [
+  {title:'通用 — 下载与处理',keys:['DOWNLOAD_DIR','SUBTITLE_DIR','CLIPS_DIR','TEMP_DIR']},
+  {title:'通用 — 审核与输出',keys:['APPROVED_DIR','CLEANED_DIR','DENOISED_APPROVED_DIR','STITCHED_DIR']},
+  {title:'通用 — 其他',keys:['PIPELINE_VIDEO_DIR']},
+  {title:'降噪 — 已审核音频',keys:['APPROVED_DIR','CLEANED_DIR']},
+  {title:'降噪 — 未审核音频',keys:['CLEANED_UNREVIEWED_DIR','DENOISED_APPROVED_DIR']},
+  {title:'ASR 语音识别',keys:['ASR_DIR','ASR_AUDIO_DIR','ASR_SUBTITLE_DIR','HOTWORDS_DIR']},
+  {title:'ASR 对比',keys:['ASR_COMPARE_DIR','ASR_COMPARE_SUBTITLE_DIR','ASR_COMPARE_AUDIO_DIR','ASR_COMPARE_OUTPUT_DIR','ASR_COMPARE_DISCARD_DIR']},
+  {title:'情绪分类',keys:['EMOTION_DIR','EMOTION_DENOISE_DIR']}
+];
+
+var SETTINGS_PATH_LABELS = {
+  'DOWNLOAD_DIR':'下载目录','SUBTITLE_DIR':'字幕目录','CLIPS_DIR':'视频片段目录',
+  'TEMP_DIR':'临时文件目录','APPROVED_DIR':'审核通过目录','CLEANED_DIR':'已降噪目录',
+  'CLEANED_UNREVIEWED_DIR':'未审核降噪目录','DENOISED_APPROVED_DIR':'降噪审核通过',
+  'STITCHED_DIR':'音频拼接目录','PIPELINE_VIDEO_DIR':'上传视频目录',
+  'EMOTION_DIR':'情绪音频目录','EMOTION_DENOISE_DIR':'降噪情绪目录',
+  'ASR_DIR':'ASR 根目录','ASR_AUDIO_DIR':'ASR 音频目录','ASR_SUBTITLE_DIR':'ASR 字幕目录',
+  'ASR_COMPARE_DIR':'ASR 对比根目录','ASR_COMPARE_SUBTITLE_DIR':'ASR 对比字幕目录',
+  'ASR_COMPARE_AUDIO_DIR':'ASR 对比音频目录','ASR_COMPARE_OUTPUT_DIR':'ASR 对比输出目录',
+  'ASR_COMPARE_DISCARD_DIR':'ASR 对比丢弃目录',
+  'HOTWORDS_DIR':'热词配置目录'
+};
+
+function openSettings() {
+  document.getElementById('settings-overlay').classList.add('active');
+  fetch(API + '/api/settings').then(function(r) { return r.json(); }).then(function(data) {
+    _settingsData = data;
+    renderSettings();
+  }).catch(function(e) {
+    document.getElementById('settings-body').innerHTML = '<div class="empty-state"><p>加载设置失败: ' + escapeHtml(e.message) + '</p></div>';
+  });
+}
+
+function closeSettings() {
+  document.getElementById('settings-overlay').classList.remove('active');
+}
+
+function renderSettings() {
+  if (!_settingsData) return;
+  var paths = _settingsData.paths || {};
+  var steps = _settingsData.denoise_default_steps;
+  var seen = {};
+  var body = document.getElementById('settings-body');
+  var html = '';
+
+  // If server has no saved steps, fall back to current _denoiseSteps
+  if (!steps || !steps.length) {
+    steps = [];
+    for (var d = 0; d < _denoiseSteps.length; d++) {
+      if (_denoiseSteps[d].enabled) steps.push(_denoiseSteps[d].key);
+    }
+  }
+
+  for (var c = 0; c < SETTINGS_CATEGORIES.length; c++) {
+    var cat = SETTINGS_CATEGORIES[c];
+    html += '<div class="settings-section">';
+    html += '<div class="settings-section-title">' + cat.title + '</div>';
+    for (var k = 0; k < cat.keys.length; k++) {
+      var key = cat.keys[k];
+      if (seen[key]) continue;
+      seen[key] = true;
+      var val = paths[key] || '';
+      var label = SETTINGS_PATH_LABELS[key] || key;
+      html += '<div class="settings-row">';
+      html += '<span class="settings-label">' + label + '</span>';
+      html += '<input class="settings-path" data-settings-key="' + key + '" value="' + escapeHtmlAttr(val) + '" readonly onclick="this.select()">';
+      html += '<button class="btn btn-secondary" onclick="browseSettingsFolder(\'' + key + '\')">更改</button>';
+      html += '<button class="btn btn-secondary" onclick="openSettingsFolder(\'' + key + '\')">打开</button>';
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+
+  html += '<div class="settings-section">';
+  html += '<div class="settings-section-title">降噪 — 默认处理步骤</div>';
+  html += '<div style="font-size:11px;color:var(--text2);margin-bottom:6px;">勾选默认启用的步骤，此设置刷新页面后对新任务生效</div>';
+  html += '<div class="settings-steps">';
+  var stepSet = {};
+  if (steps && steps.length) {
+    for (var s = 0; s < steps.length; s++) stepSet[steps[s]] = true;
+  }
+  for (var s = 0; s < STEP_DEFAULTS.length; s++) {
+    var sk = STEP_DEFAULTS[s].key;
+    var checked = stepSet[sk] ? ' checked' : '';
+    html += '<label class="settings-step-item' + (checked ? '' : ' disabled') + '">';
+    html += '<input type="checkbox" data-setting-step="' + sk + '"' + checked + ' onchange="this.parentElement.classList.toggle(\'disabled\',!this.checked)">';
+    html += '<span>' + (STEP_DEFAULTS[s].label || sk) + '</span></label>';
+    if (s < STEP_DEFAULTS.length - 1) html += '<span style="color:var(--text2);font-size:10px;">→</span>';
+  }
+  html += '</div></div>';
+
+  // Pipeline video default steps
+  var pvSteps = _settingsData.pv_default_steps;
+  if (!pvSteps || !pvSteps.length) {
+    pvSteps = [];
+    for (var d = 0; d < _pvSteps.length; d++) {
+      if (_pvSteps[d].enabled) pvSteps.push(_pvSteps[d].key);
+    }
+  }
+  html += '<div class="settings-section">';
+  html += '<div class="settings-section-title">视频管线 — 默认处理步骤</div>';
+  html += '<div style="font-size:11px;color:var(--text2);margin-bottom:6px;">勾选默认启用的步骤，此设置刷新页面后对新任务生效</div>';
+  html += '<div class="settings-steps">';
+  var pvSet = {};
+  if (pvSteps && pvSteps.length) {
+    for (var s = 0; s < pvSteps.length; s++) pvSet[pvSteps[s]] = true;
+  }
+  for (var s = 0; s < PV_STEP_DEFAULTS.length; s++) {
+    var sk = PV_STEP_DEFAULTS[s].key;
+    var checked = pvSet[sk] ? ' checked' : '';
+    html += '<label class="settings-step-item' + (checked ? '' : ' disabled') + '">';
+    html += '<input type="checkbox" data-setting-pv-step="' + sk + '"' + checked + ' onchange="this.parentElement.classList.toggle(\'disabled\',!this.checked)">';
+    html += '<span>' + (PV_STEP_DEFAULTS[s].label || sk) + '</span></label>';
+    if (s < PV_STEP_DEFAULTS.length - 1) html += '<span style="color:var(--text2);font-size:10px;">→</span>';
+  }
+  html += '</div></div>';
+
+  // ASR config section
+  var cfg = _settingsData.config || {};
+  var asrModel = cfg.ASR_DEFAULT_MODEL || 'qwen3-asr';
+  var asrLang = cfg.ASR_DEFAULT_LANGUAGE || 'zh';
+  var cmpModelA = cfg.ASR_COMPARE_MODEL_A || 'qwen3-asr';
+  var cmpModelB = cfg.ASR_COMPARE_MODEL_B || 'cohere-transcribe';
+
+  html += '<div class="settings-section">';
+  html += '<div class="settings-section-title">ASR 提取 — 默认设置</div>';
+  html += '<div class="settings-row">';
+  html += '<span class="settings-label">默认模型</span>';
+  html += '<select data-setting-config="ASR_DEFAULT_MODEL" style="flex:1;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;" onchange="this.style.borderColor=this.value?\'var(--success)\':\'var(--border)\'">';
+  html += '<option value="">— 加载中 —</option></select>';
+  html += '</div>';
+  html += '<div class="settings-row">';
+  html += '<span class="settings-label">默认语言</span>';
+  html += '<select data-setting-config="ASR_DEFAULT_LANGUAGE" style="flex:1;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;">';
+  html += '<option value="ja"' + (asrLang==='ja'?' selected':'') + '>日本語</option>';
+  html += '<option value="auto"' + (asrLang==='auto'?' selected':'') + '>自动检测</option>';
+  html += '<option value="zh"' + (asrLang==='zh'?' selected':'') + '>中文</option>';
+  html += '<option value="en"' + (asrLang==='en'?' selected':'') + '>English</option>';
+  html += '<option value="ko"' + (asrLang==='ko'?' selected':'') + '>한국어</option>';
+  html += '</select>';
+  html += '</div>';
+  html += '</div>';
+
+  html += '<div class="settings-section">';
+  html += '<div class="settings-section-title">ASR 对比 — 默认设置</div>';
+  html += '<div class="settings-row">';
+  html += '<span class="settings-label">模型 A</span>';
+  html += '<select data-setting-config="ASR_COMPARE_MODEL_A" style="flex:1;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;">';
+  html += '<option value="">— 加载中 —</option></select>';
+  html += '</div>';
+  html += '<div class="settings-row">';
+  html += '<span class="settings-label">模型 B</span>';
+  html += '<select data-setting-config="ASR_COMPARE_MODEL_B" style="flex:1;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;">';
+  html += '<option value="">— 加载中 —</option></select>';
+  html += '</div>';
+  html += '</div>';
+
+  body.innerHTML = html;
+
+  // Populate ASR model dropdowns asynchronously
+  populateSettingsAsrModels(asrModel, cmpModelA, cmpModelB);
+}
+
+function browseSettingsFolder(key) {
+  var input = document.querySelector('[data-settings-key="' + key + '"]');
+  var currentVal = input ? input.value : '';
+  var title = '选择文件夹 — ' + (SETTINGS_PATH_LABELS[key] || key);
+  openFolderPicker(title, currentVal).then(function(path) {
+    if (path && input) input.value = path;
+  });
+}
+
+function openSettingsFolder(key) {
+  var input = document.querySelector('[data-settings-key="' + key + '"]');
+  if (!input || !input.value) return;
+  openFolderPath(input.value);
+}
+
+function populateSettingsAsrModels(asrModel, cmpModelA, cmpModelB) {
+  fetch(API + '/api/asr/models').then(function(r) { return r.json(); }).then(function(data) {
+    var models = data.models || [];
+    var opts = '';
+    for (var i = 0; i < models.length; i++) {
+      opts += '<option value="' + safeAttr(models[i].key) + '">' + escapeHtml(models[i].name) + '</option>';
+    }
+    // ASR extraction model
+    var sel1 = document.querySelector('[data-setting-config="ASR_DEFAULT_MODEL"]');
+    if (sel1) { sel1.innerHTML = opts; sel1.value = asrModel || 'qwen3-asr'; }
+    // Compare model A
+    var selA = document.querySelector('[data-setting-config="ASR_COMPARE_MODEL_A"]');
+    if (selA) { selA.innerHTML = opts; selA.value = cmpModelA || 'qwen3-asr'; }
+    // Compare model B
+    var selB = document.querySelector('[data-setting-config="ASR_COMPARE_MODEL_B"]');
+    if (selB) { selB.innerHTML = opts; selB.value = cmpModelB || 'cohere-transcribe'; }
+  }).catch(function() {});
+}
+
+function saveSettings() {
+  var paths = {};
+  var inputs = document.querySelectorAll('[data-settings-key]');
+  for (var i = 0; i < inputs.length; i++) {
+    paths[inputs[i].getAttribute('data-settings-key')] = inputs[i].value;
+  }
+
+  var stepChecks = document.querySelectorAll('[data-setting-step]');
+  var steps = [];
+  for (var j = 0; j < stepChecks.length; j++) {
+    if (stepChecks[j].checked) steps.push(stepChecks[j].getAttribute('data-setting-step'));
+  }
+
+  var pvStepChecks = document.querySelectorAll('[data-setting-pv-step]');
+  var pvSteps = [];
+  for (var j = 0; j < pvStepChecks.length; j++) {
+    if (pvStepChecks[j].checked) pvSteps.push(pvStepChecks[j].getAttribute('data-setting-pv-step'));
+  }
+
+  var configs = document.querySelectorAll('[data-setting-config]');
+  var configVals = {};
+  for (var j = 0; j < configs.length; j++) {
+    configVals[configs[j].getAttribute('data-setting-config')] = configs[j].value;
+  }
+
+  fetch(API + '/api/settings', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({paths: paths, denoise_default_steps: steps, pv_default_steps: pvSteps, config: configVals})
+  }).then(function(r) { return r.json(); }).then(function(data) {
+    if (data.status === 'ok') {
+      toast('设置已保存，刷新页面后生效', 'success');
+      closeSettings();
+      for (var k = 0; k < STEP_DEFAULTS.length; k++) {
+        STEP_DEFAULTS[k].enabled = steps.indexOf(STEP_DEFAULTS[k].key) >= 0;
+      }
+      _denoiseSteps = JSON.parse(JSON.stringify(STEP_DEFAULTS));
+      for (var k = 0; k < PV_STEP_DEFAULTS.length; k++) {
+        PV_STEP_DEFAULTS[k].enabled = pvSteps.indexOf(PV_STEP_DEFAULTS[k].key) >= 0;
+      }
+      _pvSteps = JSON.parse(JSON.stringify(PV_STEP_DEFAULTS));
+    } else {
+      toast('保存失败', 'error');
+    }
+  }).catch(function(e) {
+    toast('保存失败: ' + e.message, 'error');
+  });
+}
+
+// ============================================================
+// Hotword Configuration Management
+// ============================================================
+
+var _hotwordConfigs = [];
+
+function loadHotwordConfigs() {
+  fetch(API + '/api/hotwords/configs').then(function(r) { return r.json(); }).then(function(data) {
+    _hotwordConfigs = data.configs || [];
+    _hotwordDefaultId = data.default_id || null;
+    renderHotwordsPage();
+    populateHotwordDropdowns();
+    pvPopulateHotwordDropdown();
+  }).catch(function(e) {
+    console.error('Failed to load hotword configs:', e);
+  });
+}
+
+function renderHotwordsPage() {
+  var listEl = document.getElementById('hw-page-list');
+  if (!listEl) return;
+
+  if (!_hotwordConfigs.length) {
+    listEl.innerHTML = '<div style="text-align:center;padding:40px 20px;color:var(--text2);"><p style="font-size:24px;margin-bottom:8px;">🏷️</p><p>暂无热词配置，点击右上角「新建配置」开始</p></div>';
+    return;
+  }
+
+  var html = '';
+  for (var i = 0; i < _hotwordConfigs.length; i++) {
+    var c = _hotwordConfigs[i];
+    var encName = encodeURIComponent(c.name);
+    html += '<div style="padding:14px 18px;border-radius:8px;background:var(--bg2);border:1px solid var(--border);display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">';
+    html += '<div style="flex:1;min-width:0;">';
+    html += '<div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;">' + escapeHtml(c.name) + '</div>';
+    html += '<div style="font-size:12px;color:var(--text2);word-break:break-all;">' + escapeHtml(c.hotwords) + '</div>';
+    html += '</div>';
+    html += '<div style="display:flex;gap:6px;flex-shrink:0;">';
+    html += '<button class="btn btn-secondary" onclick="editHotwordConfig(\'' + encName + '\')" style="font-size:11px;padding:4px 10px;">编辑</button>';
+    html += '<button class="btn btn-secondary" onclick="deleteHotwordConfig(\'' + encName + '\')" style="font-size:11px;padding:4px 10px;color:var(--danger);">删除</button>';
+    html += '</div></div>';
+  }
+  listEl.innerHTML = html;
+}
+
+function populateHotwordDropdowns() {
+  var prefixList = ['asr', 'cmp'];
+  for (var p = 0; p < prefixList.length; p++) {
+    var sel = document.getElementById(prefixList[p] + '-hotwords-select');
+    if (!sel) continue;
+    var currentVal = sel.value;
+    var opts = '<option value="">不使用热词</option>';
+    for (var i = 0; i < _hotwordConfigs.length; i++) {
+      var c = _hotwordConfigs[i];
+      var selected = c.name === currentVal ? ' selected' : '';
+      opts += '<option value="' + safeAttr(c.name) + '"' + selected + '>' + escapeHtml(c.name) + '</option>';
+    }
+    opts += '<option value="__custom__">自定义输入</option>';
+    sel.innerHTML = opts;
+  }
+}
+
+function onHotwordSelect(prefix) {
+  var sel = document.getElementById(prefix + '-hotwords-select');
+  var input = document.getElementById(prefix + '-hotwords');
+  if (!sel || !input) return;
+
+  var val = sel.value;
+  if (val === '__custom__') {
+    input.value = '';
+    input.focus();
+    return;
+  }
+  if (!val) {
+    input.value = '';
+    return;
+  }
+  for (var i = 0; i < _hotwordConfigs.length; i++) {
+    if (_hotwordConfigs[i].name === val) {
+      input.value = _hotwordConfigs[i].hotwords;
+      break;
+    }
+  }
+}
+
+function addHotwordConfig() {
+  document.getElementById('hw-page-edit').style.display = 'block';
+  document.getElementById('hw-edit-name').value = '';
+  document.getElementById('hw-edit-hotwords').value = '';
+  document.getElementById('hw-edit-name').focus();
+}
+
+function editHotwordConfig(name) {
+  name = decodeURIComponent(name);
+  for (var i = 0; i < _hotwordConfigs.length; i++) {
+    if (_hotwordConfigs[i].name === name) {
+      document.getElementById('hw-page-edit').style.display = 'block';
+      document.getElementById('hw-edit-name').value = _hotwordConfigs[i].name;
+      document.getElementById('hw-edit-hotwords').value = _hotwordConfigs[i].hotwords;
+      document.getElementById('hw-edit-name').focus();
+      return;
+    }
+  }
+}
+
+function cancelEditHotword() {
+  document.getElementById('hw-page-edit').style.display = 'none';
+  document.getElementById('hw-edit-name').value = '';
+  document.getElementById('hw-edit-hotwords').value = '';
+}
+
+function saveHotwordConfig() {
+  var name = document.getElementById('hw-edit-name').value.trim();
+  var hotwords = document.getElementById('hw-edit-hotwords').value.trim();
+
+  if (!name) { toast('请输入配置名称', 'error'); return; }
+  if (!hotwords) { toast('请输入热词', 'error'); return; }
+
+  fetch(API + '/api/hotwords/configs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: name, hotwords: hotwords }),
+  }).then(function(r) { return r.json(); }).then(function(data) {
+    if (data.status === 'ok') {
+      toast('热词配置已保存', 'success');
+      cancelEditHotword();
+      loadHotwordConfigs();
+    } else {
+      toast('保存失败', 'error');
+    }
+  }).catch(function(e) {
+    toast('保存失败: ' + e.message, 'error');
+  });
+}
+
+function deleteHotwordConfig(name) {
+  name = decodeURIComponent(name);
+  if (!confirm('确定删除热词配置「' + name + '」吗？')) return;
+  fetch(API + '/api/hotwords/configs/' + encodeURIComponent(name), { method: 'DELETE' })
+    .then(function(r) { return r.json(); }).then(function(data) {
+      if (data.status === 'ok') {
+        toast('热词配置已删除', 'success');
+        loadHotwordConfigs();
+      } else {
+        toast('删除失败', 'error');
+      }
+    }).catch(function(e) {
+      toast('删除失败: ' + e.message, 'error');
+    });
+}
+
+// Pipeline Video (视频管线)
+// ============================================================
+var _pvQueue = [];        // [{job_id, folder_name, files, stepsConfig, outputDir, status, progress, created_at, expanded}]
+var _pvRestored = false;  // only restore from backend once per page load
+var _pvPollTimer = null;
+var _pvFiles = [];
+var _pvSelected = {};
+var _pvFolders = [];  // [{path: str, name: str}]
+var _pvCollapsed = {}; // {folderPath: true} — collapsed state for file sections
+
+// Step configuration
+var PV_STEP_DEFAULTS = [
+  {key: 'duration_split',   label: '时长切分',    enabled: true, config: {segment_duration: 600}},
+  {key: 'convert',          label: 'WAV转换',     enabled: true},
+  {key: 'music_separate',   label: 'BGM分离',     enabled: true},
+  {key: 'enhance',          label: '语音增强',    enabled: true},
+  {key: 'super_resolve',    label: '超分辨率',    enabled: false},
+  {key: 'asr',              label: 'ASR字幕识别', enabled: false},
+  {key: 'cut',              label: '字幕切割',    enabled: false},
+];
+var _pvSteps = JSON.parse(JSON.stringify(PV_STEP_DEFAULTS));
+
+function pvRenderStepConfig() {
+  var cont = document.getElementById('pv-step-list');
+  var html = '';
+  for (var i = 0; i < _pvSteps.length; i++) {
+    var s = _pvSteps[i];
+    html += '<div class="pv-step-item' + (s.enabled ? '' : ' pv-step-disabled') + '" draggable="true" data-pv-step-idx="' + i + '"';
+    html += ' style="display:flex;align-items:center;gap:4px;background:var(--bg3);border-radius:6px;padding:4px 8px;cursor:grab;transition:opacity 0.2s;';
+    if (!s.enabled) html += 'opacity:0.45;';
+    html += '">';
+    html += '<span style="cursor:grab;color:var(--text2);font-size:12px;" title="拖拽排序">⠀⠿</span>';
+    html += '<input type="checkbox" ' + (s.enabled ? 'checked' : '') + ' data-pv-step-toggle="' + s.key + '" style="cursor:pointer;">';
+    html += '<span style="font-size:11px;color:' + (s.enabled ? 'var(--text)' : 'var(--text2)') + ';white-space:nowrap;">' + s.label + '</span>';
+    html += '</div>';
+    if (i < _pvSteps.length - 1) {
+      html += '<span style="color:var(--text2);font-size:10px;">→</span>';
+    }
+  }
+  cont.innerHTML = html;
+
+  var toggles = cont.querySelectorAll('[data-pv-step-toggle]');
+  for (var t = 0; t < toggles.length; t++) {
+    toggles[t].onchange = function() {
+      var key = this.getAttribute('data-pv-step-toggle');
+      for (var s = 0; s < _pvSteps.length; s++) {
+        if (_pvSteps[s].key === key) {
+          _pvSteps[s].enabled = this.checked;
+          break;
+        }
+      }
+      _savePvSteps();
+      pvRenderStepConfig();
+    };
+  }
+
+  var items = cont.querySelectorAll('.pv-step-item');
+  var dragIdx = -1;
+  for (var d = 0; d < items.length; d++) {
+    items[d].addEventListener('dragstart', function(e) {
+      dragIdx = parseInt(this.getAttribute('data-pv-step-idx'));
+      this.style.opacity = '0.4';
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    items[d].addEventListener('dragend', function() {
+      this.style.opacity = '';
+      dragIdx = -1;
+    });
+    items[d].addEventListener('dragover', function(e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      this.style.borderLeft = '2px solid var(--accent)';
+    });
+    items[d].addEventListener('dragleave', function() {
+      this.style.borderLeft = '';
+    });
+    items[d].addEventListener('drop', function(e) {
+      e.preventDefault();
+      this.style.borderLeft = '';
+      var dropIdx = parseInt(this.getAttribute('data-pv-step-idx'));
+      if (dragIdx >= 0 && dragIdx !== dropIdx) {
+        var moved = _pvSteps.splice(dragIdx, 1)[0];
+        _pvSteps.splice(dropIdx, 0, moved);
+        _savePvSteps();
+        pvRenderStepConfig();
+      }
+    });
+  }
+
+  var durCfg = document.getElementById('pv-duration-config');
+  if (durCfg) {
+    var dsEnabled = false;
+    for (var k = 0; k < _pvSteps.length; k++) {
+      if (_pvSteps[k].key === 'duration_split' && _pvSteps[k].enabled) { dsEnabled = true; break; }
+    }
+    durCfg.style.display = dsEnabled ? 'flex' : 'none';
+  }
+
+  var asrCfg = document.getElementById('pv-asr-config');
+  if (asrCfg) {
+    var asrEnabled = false;
+    for (var k = 0; k < _pvSteps.length; k++) {
+      if (_pvSteps[k].key === 'asr' && _pvSteps[k].enabled) { asrEnabled = true; break; }
+    }
+    asrCfg.style.display = asrEnabled ? 'flex' : 'none';
+    if (asrEnabled) pvPopulateAsrConfig();
+  }
+}
+
+var _asrModelData = [];  // [{key, name, languages}]
+
+function pvPopulateAsrConfig() {
+  // Load ASR models if not already loaded
+  if (!_asrModelData.length) {
+    fetch(API + '/api/asr/models').then(function(r) { return r.json(); }).then(function(data) {
+      _asrModelData = data.models || [];
+      pvRenderAsrModelDropdown();
+      pvOnAsrModelChange();
+      pvPopulateHotwordDropdown();
+    }).catch(function() {});
+  } else {
+    pvRenderAsrModelDropdown();
+    pvOnAsrModelChange();
+    pvPopulateHotwordDropdown();
+  }
+}
+
+function pvRenderAsrModelDropdown() {
+  var sel = document.getElementById('pv-asr-model');
+  if (!sel) return;
+  var current = sel.getAttribute('data-selected') || 'qwen3-asr';
+  var opts = '';
+  for (var i = 0; i < _asrModelData.length; i++) {
+    var m = _asrModelData[i];
+    opts += '<option value="' + safeAttr(m.key) + '"' + (m.key === current ? ' selected' : '') + '>' + escapeHtml(m.name) + '</option>';
+  }
+  sel.innerHTML = opts;
+  sel.setAttribute('data-selected', current);
+}
+
+function pvOnAsrModelChange() {
+  var modelSel = document.getElementById('pv-asr-model');
+  var langSel = document.getElementById('pv-asr-lang');
+  if (!modelSel || !langSel) return;
+  var modelKey = modelSel.value;
+  modelSel.setAttribute('data-selected', modelKey);
+  // Find model and update language options
+  var langs = ['auto', 'zh', 'ja', 'en', 'ko'];
+  for (var i = 0; i < _asrModelData.length; i++) {
+    if (_asrModelData[i].key === modelKey) { langs = _asrModelData[i].languages || langs; break; }
+  }
+  var langLabels = { 'auto': '自动检测', 'zh': '中文', 'ja': '日本語', 'en': 'English', 'ko': '한국어', 'yue': '粤语', 'fr': 'Français', 'de': 'Deutsch' };
+  var currentLang = langSel.value || 'zh';
+  var opts = '';
+  for (var l = 0; l < langs.length; l++) {
+    opts += '<option value="' + safeAttr(langs[l]) + '"' + (langs[l] === currentLang ? ' selected' : '') + '>' + escapeHtml(langLabels[langs[l]] || langs[l]) + '</option>';
+  }
+  langSel.innerHTML = opts;
+}
+
+function pvPopulateHotwordDropdown() {
+  var sel = document.getElementById('pv-asr-hotword-select');
+  if (!sel) return;
+  var currentVal = sel.getAttribute('data-selected') || '';
+  var opts = '<option value="">不使用热词</option>';
+  for (var i = 0; i < _hotwordConfigs.length; i++) {
+    var c = _hotwordConfigs[i];
+    var selected = c.name === currentVal ? ' selected' : '';
+    opts += '<option value="' + safeAttr(c.name) + '"' + selected + '>' + escapeHtml(c.name) + '</option>';
+  }
+  sel.innerHTML = opts;
+  sel.setAttribute('data-selected', currentVal);
+
+  sel.onchange = function() {
+    var name = sel.value;
+    var preview = document.getElementById('pv-asr-hotword-preview');
+    if (!name) { preview.textContent = ''; return; }
+    for (var i = 0; i < _hotwordConfigs.length; i++) {
+      if (_hotwordConfigs[i].name === name) {
+        var hw = _hotwordConfigs[i].hotwords;
+        preview.textContent = hw.length > 50 ? hw.substring(0, 50) + '...' : hw;
+        sel.setAttribute('data-selected', name);
+        return;
+      }
+    }
+    preview.textContent = '';
+  };
+  if (sel.value) sel.onchange();
+}
+
+function pvGetEnabledSteps() {
+  var steps = [];
+  for (var i = 0; i < _pvSteps.length; i++) {
+    var s = _pvSteps[i];
+    var step = {key: s.key, enabled: s.enabled};
+    if (s.config) step.config = JSON.parse(JSON.stringify(s.config));
+    steps.push(step);
+  }
+  return steps;
+}
+
+function pvBrowseOutputDir() {
+  var current = document.getElementById('pv-output-dir').value || '';
+  openFolderPicker('选择输出目录', current).then(function(path) {
+    if (path) document.getElementById('pv-output-dir').value = path;
+  });
+}
+
+function _savePvSteps() {
+  try {
+    var map = {};
+    for (var i = 0; i < _pvSteps.length; i++) {
+      map[_pvSteps[i].key] = _pvSteps[i].enabled;
+    }
+    localStorage.setItem('pv_steps_enabled', JSON.stringify(map));
+    localStorage.setItem('pv_steps_order', JSON.stringify(_pvSteps.map(function(s) { return s.key; })));
+  } catch(e) {}
+}
+
+function pvResetSteps() {
+  _pvSteps = JSON.parse(JSON.stringify(PV_STEP_DEFAULTS));
+  _savePvSteps();
+  pvRenderStepConfig();
+}
+
+// ============================================================
+// Queue-based pipeline execution
+// ============================================================
+
+function pvStartPipeline() {
+  var selectedPaths = [];
+  for (var i = 0; i < _pvFiles.length; i++) {
+    if (_pvSelected[_pvFiles[i].path]) selectedPaths.push(_pvFiles[i].path);
+  }
+  if (!selectedPaths.length) { toast('请选择至少一个文件', 'info'); return; }
+
+  var folderName = _pvFolders.length > 0 ? _pvFolders[0].name : 'unknown';
+
+  for (var d = 0; d < _pvSteps.length; d++) {
+    if (_pvSteps[d].key === 'duration_split' && _pvSteps[d].enabled) {
+      _pvSteps[d].config = _pvSteps[d].config || {};
+      _pvSteps[d].config.segment_duration = parseInt(document.getElementById('pv-duration-sec').value) || 600;
+    }
+    if (_pvSteps[d].key === 'asr' && _pvSteps[d].enabled) {
+      _pvSteps[d].config = _pvSteps[d].config || {};
+      _pvSteps[d].config.model = document.getElementById('pv-asr-model').value || 'qwen3-asr';
+      _pvSteps[d].config.language = document.getElementById('pv-asr-lang').value || 'zh';
+      _pvSteps[d].config.hotword_config = document.getElementById('pv-asr-hotword-select').value || '';
+    }
+  }
+  var stepsConfig = pvGetEnabledSteps();
+  var outputDir = document.getElementById('pv-output-dir').value.trim();
+
+  var files = [];
+  for (var i = 0; i < selectedPaths.length; i++) {
+    files.push({
+      name: selectedPaths[i].replace(/\\/g, '/').split('/').pop(),
+      input_path: selectedPaths[i],
+      wav_path: '',
+      status: 'pending',
+      current_step: '',
+      progress: 0,
+      steps: [],
+      output_clips: [],
+      error: ''
+    });
+  }
+
+  var queueItem = {
+    job_id: 'pending_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+    folder_name: folderName,
+    files: files,
+    stepsConfig: stepsConfig,
+    outputDir: outputDir,
+    status: 'pending',
+    progress: 0,
+    created_at: Date.now() / 1000,
+    expanded: false
+  };
+  _pvQueue.push(queueItem);
+
+  pvRenderQueue();
+  _savePvQueue();
+
+  if (_pvQueue.length === 1) {
+    pvStartQueuedBackend(0);
+  } else {
+    toast('任务已加入队列（第 ' + _pvQueue.length + ' 位）', 'info');
+  }
+}
+
+function pvStartQueuedBackend(idx) {
+  if (idx >= _pvQueue.length) return;
+  var item = _pvQueue[idx];
+
+  fetch(API + '/api/pipeline-video/start', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      folder_path: item.folder_name,
+      file_paths: item.files.map(function(f) { return f.input_path; }),
+      steps: item.stepsConfig,
+      output_dir: item.outputDir
+    }),
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.status !== 'ok') { toast('启动失败', 'error'); pvRemoveFromQueue(idx); return; }
+    item.job_id = data.job_id;
+    item.status = 'running';
+    pvRenderQueue();
+    _savePvQueue();
+    startPvPolling();
+  })
+  .catch(function(e) {
+    toast('启动失败: ' + e.message, 'error');
+    pvRemoveFromQueue(idx);
+  });
+}
+
+function pvRemoveFromQueue(idx) {
+  _pvQueue.splice(idx, 1);
+  pvRenderQueue();
+  if (!_pvQueue.length) { stopPvPolling(); _clearPvQueueStorage(); }
+  else _savePvQueue();
+}
+
+function startPvPolling() {
+  if (_pvPollTimer) clearInterval(_pvPollTimer);
+  _pvPollTimer = setInterval(pollPvJobs, 1500);
+}
+
+function stopPvPolling() {
+  if (_pvPollTimer) { clearInterval(_pvPollTimer); _pvPollTimer = null; }
+  if (!_pvQueue.length || _pvQueue.every(function(q) { return q.status === 'completed' || q.status === 'cancelled'; })) {
+    document.getElementById('pv-queue-section').style.display = 'none';
+  }
+}
+
+var _pvQueueHash = '';
+
+function _pvQueueFingerprint() {
+  // Build a string that changes only when queue structure or item statuses change
+  var parts = [];
+  for (var i = 0; i < _pvQueue.length; i++) {
+    parts.push(_pvQueue[i].job_id + ':' + _pvQueue[i].status);
+  }
+  return parts.join('|');
+}
+
+function pollPvJobs() {
+  var hasRunning = false;
+  for (var i = 0; i < _pvQueue.length; i++) {
+    var item = _pvQueue[i];
+    if (item.status === 'running') {
+      hasRunning = true;
+      fetch(API + '/api/pipeline-video/job/' + item.job_id)
+        .then(function(resp) { return resp.json(); })
+        .then(function(job) {
+          for (var k = 0; k < _pvQueue.length; k++) {
+            if (_pvQueue[k].job_id === job.job_id) {
+              _pvQueue[k].status = job.status;
+              _pvQueue[k].progress = job.progress;
+              _pvQueue[k].files = job.files;
+              _pvQueue[k].folder_name = job.folder_name;
+              break;
+            }
+          }
+          // Only full re-render if queue structure or statuses changed
+          var fp = _pvQueueFingerprint();
+          if (fp !== _pvQueueHash) {
+            _pvQueueHash = fp;
+            pvRenderQueue();
+          } else {
+            pvUpdateQueueProgress();
+          }
+        }).catch(function() {});
+    }
+  }
+
+  if (!hasRunning && _pvQueue.length > 0) {
+    pvProcessNextInQueue();
+  }
+}
+
+function pvProcessNextInQueue() {
+  while (_pvQueue.length > 0 && (_pvQueue[0].status === 'completed' || _pvQueue[0].status === 'cancelled')) {
+    _pvQueue.shift();
+  }
+  if (_pvQueue.length > 0 && _pvQueue[0].status === 'pending') {
+    pvStartQueuedBackend(0);
+  }
+  pvRenderQueue();
+  if (!_pvQueue.length) _clearPvQueueStorage(); else _savePvQueue();
+}
+
+// ============================================================
+// Queue UI rendering
+// ============================================================
+
+function pvRenderQueue() {
+  var section = document.getElementById('pv-queue-section');
+  var container = document.getElementById('pv-queue-list');
+  if (!section || !container) return;
+
+  if (!_pvQueue.length) {
+    section.style.display = 'none';
+    return;
+  }
+
+  // Save scroll positions to prevent jank during polling updates
+  var scrollTop = container.scrollTop;
+  var detailScrollTops = {};
+  var cards = container.querySelectorAll('.pv-queue-card');
+  for (var ci = 0; ci < cards.length; ci++) {
+    var cardIdx = cards[ci].getAttribute('data-queue-idx');
+    if (cardIdx !== null) {
+      var detail = cards[ci].querySelector('.pv-queue-detail');
+      if (detail && detail.offsetParent !== null) {
+        detailScrollTops[cardIdx] = detail.scrollTop;
+      }
+    }
+  }
+
+  section.style.display = 'block';
+  var html = '';
+
+  for (var i = 0; i < _pvQueue.length; i++) {
+    var item = _pvQueue[i];
+    var isRunning = item.status === 'running';
+    var isCompleted = item.status === 'completed';
+    var isCancelled = item.status === 'cancelled';
+    var isPending = item.status === 'pending';
+
+    var cardBorder = isRunning ? 'var(--accent)' : (isCompleted ? 'var(--success)' : (isCancelled ? 'var(--danger)' : 'var(--border)'));
+    var statusLabel = isRunning ? '处理中' : (isCompleted ? '完成' : (isCancelled ? '已取消' : '排队中'));
+    var statusColor = isRunning ? 'var(--accent)' : (isCompleted ? 'var(--success)' : (isCancelled ? 'var(--danger)' : 'var(--text2)'));
+
+    var completedCount = 0;
+    for (var j = 0; j < item.files.length; j++) {
+      if (item.files[j].status === 'completed') completedCount++;
+    }
+
+    var draggable = isPending ? ' draggable="true"' : '';
+    html += '<div class="pv-queue-card" data-queue-idx="' + i + '"' + draggable + ' style="border:1px solid ' + cardBorder + ';border-radius:8px;overflow:hidden;background:var(--bg2);">';
+
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;cursor:pointer;" onclick="pvToggleQueueItem(' + i + ')">';
+    html += '<div style="flex:1;min-width:0;">';
+    html += '<div style="display:flex;align-items:center;gap:8px;">';
+    if (isPending) html += '<span class="pv-drag-handle" style="cursor:grab;color:var(--text2);font-size:14px;" title="拖拽排序">⠿</span>';
+    html += '<span style="font-size:12px;color:var(--text2);">' + (item.expanded ? '▾' : '▸') + '</span>';
+    html += '<span style="font-size:13px;font-weight:600;color:var(--text);">#' + (i + 1) + ' ' + escapeHtml(item.folder_name) + '</span>';
+    html += '<span class="pv-queue-status" style="font-size:11px;color:' + statusColor + ';padding:1px 8px;border-radius:10px;background:var(--bg);">' + statusLabel + '</span>';
+    html += '<span style="font-size:11px;color:var(--text2);">' + item.files.length + ' 文件</span>';
+    if (completedCount > 0) {
+      html += '<span style="font-size:11px;color:var(--text2);">已完成 ' + completedCount + '/' + item.files.length + '</span>';
+    }
+    html += '</div>';
+    if (isRunning) {
+      html += '<div class="progress-bar" style="margin-top:6px;"><div class="progress-fill" style="width:' + Math.round(item.progress) + '%;"></div></div>';
+    }
+    html += '</div>';
+
+    html += '<div style="display:flex;gap:4px;flex-shrink:0;" onclick="event.stopPropagation();">';
+    if (isRunning) {
+      html += '<button class="btn btn-secondary" onclick="pvCancelQueuedJob(' + i + ')" style="font-size:10px;padding:2px 8px;background:var(--danger);color:#fff;">中止</button>';
+    }
+    if (isPending) {
+      html += '<button class="btn btn-secondary" onclick="pvDeleteQueuedJob(' + i + ')" style="font-size:10px;padding:2px 8px;color:var(--danger);">删除</button>';
+    }
+    if (isCompleted || isCancelled) {
+      html += '<button class="btn btn-secondary" onclick="pvRemoveFromQueue(' + i + ');pvRenderQueue();" style="font-size:10px;padding:2px 8px;">移除</button>';
+    }
+    html += '</div></div>';
+
+    if (item.expanded) {
+      html += '<div class="pv-queue-detail" style="border-top:1px solid var(--border);padding:12px 14px;max-height:400px;overflow-y:auto;">';
+      html += '<div style="margin-bottom:8px;display:flex;gap:4px;flex-wrap:wrap;">';
+      for (var s = 0; s < item.stepsConfig.length; s++) {
+        var st = item.stepsConfig[s];
+        if (st.enabled) {
+          html += '<span class="pv-step-label active">' + escapeHtml(st.key) + '</span>';
+        }
+      }
+      html += '</div>';
+      for (var f = 0; f < item.files.length; f++) {
+        var file = item.files[f];
+        var stepLabels = pvRenderStepLabels(file);
+        html += '<div class="pv-progress-card ' + file.status + '" style="margin-bottom:4px;">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+        html += '<span class="file-name" style="font-size:12px;">' + escapeHtml(file.name) + '</span>';
+        html += '<span class="job-status status-' + file.status + '" style="font-size:10px;">' + pvStatusText(file) + '</span>';
+        html += '</div>';
+        if (file.status === 'running' || file.status === 'converting') {
+          html += '<div class="progress-bar" style="margin:4px 0;"><div class="progress-fill" style="width:' + Math.round(file.progress) + '%;"></div></div>';
+        }
+        html += '<div class="pv-step-labels" style="display:flex;gap:3px;flex-wrap:wrap;margin-top:3px;">' + stepLabels + '</div>';
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+
+    html += '</div>';
+  }
+
+  container.innerHTML = html;
+  container.scrollTop = scrollTop;
+  _pvQueueHash = _pvQueueFingerprint();
+  for (var di in detailScrollTops) {
+    var card = container.querySelector('.pv-queue-card[data-queue-idx="' + di + '"]');
+    if (card) {
+      var detail = card.querySelector('.pv-queue-detail');
+      if (detail) detail.scrollTop = detailScrollTops[di];
+    }
+  }
+
+  // Drag-and-drop reordering for pending queue items
+  var dragSrcIdx = -1;
+  var dragCards = container.querySelectorAll('.pv-queue-card[draggable="true"]');
+  for (var dc = 0; dc < dragCards.length; dc++) {
+    dragCards[dc].addEventListener('dragstart', function(e) {
+      dragSrcIdx = parseInt(this.getAttribute('data-queue-idx'));
+      this.style.opacity = '0.4';
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    dragCards[dc].addEventListener('dragend', function(e) {
+      this.style.opacity = '';
+      dragSrcIdx = -1;
+    });
+    dragCards[dc].addEventListener('dragover', function(e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      this.style.borderTop = '2px solid var(--accent)';
+    });
+    dragCards[dc].addEventListener('dragleave', function(e) {
+      this.style.borderTop = '';
+    });
+    dragCards[dc].addEventListener('drop', function(e) {
+      e.preventDefault();
+      this.style.borderTop = '';
+      var dropIdx = parseInt(this.getAttribute('data-queue-idx'));
+      if (dragSrcIdx >= 0 && dragSrcIdx !== dropIdx) {
+        var moved = _pvQueue.splice(dragSrcIdx, 1)[0];
+        _pvQueue.splice(dropIdx, 0, moved);
+        _savePvQueue();
+        _pvQueueHash = '';
+        pvRenderQueue();
+      }
+    });
+  }
+}
+
+// Lightweight progress-only update — no DOM rebuild, no scroll jank
+function pvUpdateQueueProgress() {
+  var cards = document.querySelectorAll('#pv-queue-list .pv-queue-card');
+  for (var ci = 0; ci < cards.length; ci++) {
+    var card = cards[ci];
+    var idx = parseInt(card.getAttribute('data-queue-idx'));
+    if (isNaN(idx) || idx >= _pvQueue.length) continue;
+    var item = _pvQueue[idx];
+
+    // Update progress bar
+    var fill = card.querySelector('.progress-fill');
+    if (fill) fill.style.width = Math.round(item.progress) + '%';
+
+    // Update status label and border
+    var statusSpan = card.querySelector('.pv-queue-status');
+    var isRunning = item.status === 'running';
+    var isCompleted = item.status === 'completed';
+    var isCancelled = item.status === 'cancelled';
+    if (statusSpan) {
+      statusSpan.textContent = isRunning ? '处理中' : (isCompleted ? '完成' : (isCancelled ? '已取消' : '排队中'));
+      statusSpan.style.color = isRunning ? 'var(--accent)' : (isCompleted ? 'var(--success)' : (isCancelled ? 'var(--danger)' : 'var(--text2)'));
+    }
+    card.style.borderColor = isRunning ? 'var(--accent)' : (isCompleted ? 'var(--success)' : (isCancelled ? 'var(--danger)' : 'var(--border)'));
+
+    // Update file cards inside expanded detail
+    var detail = card.querySelector('.pv-queue-detail');
+    if (detail) {
+      var fileCards = detail.querySelectorAll('.pv-progress-card');
+      for (var fi = 0; fi < fileCards.length && fi < item.files.length; fi++) {
+        var fc = fileCards[fi];
+        var file = item.files[fi];
+
+        // Update status class
+        fc.className = 'pv-progress-card ' + file.status;
+
+        // Update status text
+        var st = fc.querySelector('.job-status');
+        if (st) {
+          st.textContent = pvStatusText(file);
+          st.className = 'job-status status-' + file.status;
+        }
+
+        // Update file progress bar
+        var ff = fc.querySelector('.progress-fill');
+        if (ff) {
+          if (file.status === 'running' || file.status === 'converting') {
+            ff.style.width = Math.round(file.progress) + '%';
+            ff.parentElement.style.display = '';
+          } else {
+            ff.parentElement.style.display = 'none';
+          }
+        }
+
+        // Update step labels
+        var slContainer = fc.querySelector('.pv-step-labels');
+        if (slContainer) {
+          slContainer.innerHTML = pvRenderStepLabels(file);
+        }
+      }
+    }
+  }
+}
+
+function pvToggleQueueItem(idx) {
+  if (idx >= _pvQueue.length) return;
+  _pvQueue[idx].expanded = !_pvQueue[idx].expanded;
+  pvRenderQueue();
+}
+
+function pvCancelQueuedJob(idx) {
+  if (idx >= _pvQueue.length) return;
+  var item = _pvQueue[idx];
+  if (!confirm('确定中止任务 #' + (idx + 1) + ' (' + item.folder_name + ') 吗？')) return;
+
+  fetch(API + '/api/pipeline-video/job/' + item.job_id + '/cancel', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.status === 'ok') {
+        item.status = 'cancelled';
+        toast('任务已中止', 'info');
+        pvRenderQueue();
+        _savePvQueue();
+      } else {
+        toast('中止失败', 'error');
+      }
+    }).catch(function(e) {
+      toast('中止失败: ' + e.message, 'error');
+    });
+}
+
+function pvDeleteQueuedJob(idx) {
+  if (idx >= _pvQueue.length) return;
+  var item = _pvQueue[idx];
+  if (!confirm('确定删除队列中的任务 #' + (idx + 1) + ' (' + item.folder_name + ') 吗？')) return;
+
+  var jobId = item.job_id;
+  var isRealJob = jobId && !jobId.startsWith('pending_');
+
+  var doRemove = function() {
+    _pvQueue.splice(idx, 1);
+    pvRenderQueue();
+    if (!_pvQueue.length) { stopPvPolling(); _clearPvQueueStorage(); }
+    else _savePvQueue();
+    toast('任务已删除', 'info');
+  };
+
+  if (isRealJob) {
+    fetch(API + '/api/pipeline-video/job/' + jobId, { method: 'DELETE' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.status === 'ok') doRemove();
+        else toast('删除失败', 'error');
+      }).catch(function() { doRemove(); });
+  } else {
+    doRemove();
+  }
+}
+
+function pvPromoteJob(idx) {
+  if (idx <= 0 || idx >= _pvQueue.length) return;
+  var item = _pvQueue.splice(idx, 1)[0];
+  _pvQueue.splice(1, 0, item);
+  pvRenderQueue();
+  _savePvQueue();
+  toast('已提前到队列第 2 位', 'info');
+}
+
+// ============================================================
+// UI helpers (shared)
+// ============================================================
+
+function pvUpdateUI(job) {
+  document.getElementById('pv-progress-fill').style.width = Math.round(job.progress) + '%';
+  document.getElementById('pv-progress-text').textContent = job.status === 'running' ? '处理中...' : '准备中...';
+  document.getElementById('pv-progress-pct').textContent = Math.round(job.progress) + '%';
+
+  var container = document.getElementById('pv-file-progress-list');
+  var html = '';
+  for (var i = 0; i < job.files.length; i++) {
+    var f = job.files[i];
+    var stepLabels = pvRenderStepLabels(f);
+    var progressBar = '';
+    if (f.status === 'running' || f.status === 'converting') {
+      progressBar = '<div class="progress-bar" style="margin:4px 0;"><div class="progress-fill" style="width:' + Math.round(f.progress) + '%;"></div></div>';
+    }
+    html += '<div class="pv-progress-card ' + f.status + '">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+        '<span class="file-name" style="font-size:13px;">' + escapeHtml(f.name) + '</span>' +
+        '<span class="job-status status-' + f.status + '" style="font-size:11px;">' + pvStatusText(f) + '</span>' +
+      '</div>' +
+      progressBar +
+      '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;">' + stepLabels + '</div>' +
+      (f.error ? '<div style="font-size:11px;color:var(--danger);margin-top:4px;">' + escapeHtml(f.error) + '</div>' : '') +
+    '</div>';
+  }
+  container.innerHTML = html;
+}
+
+function pvRenderStepLabels(f) {
+  var stepNames = { 'music_separate': 'BGM分离', 'convert': 'WAV转换', 'enhance': '语音增强', 'super_resolve': '超分辨率', 'asr': 'ASR识别', 'cut': '音频切割', 'duration_split': '时长切分' };
+  var steps = ['duration_split', 'convert', 'music_separate', 'enhance', 'super_resolve', 'asr', 'cut'];
+  var html = '';
+  for (var i = 0; i < steps.length; i++) {
+    var s = steps[i];
+    var cls = '';
+    var found = null;
+    for (var j = 0; j < (f.steps || []).length; j++) {
+      if (f.steps[j].step === s) { found = f.steps[j]; break; }
+    }
+    if (found) {
+      if (found.status === 'completed' || found.status === 'passed') cls = 'done';
+      else if (found.status === 'error' || found.status === 'discarded') cls = 'fail';
+      else if (found.status === 'skipped') cls = 'skip';
+      else if (found.status === 'running') cls = 'active';
+    } else if (f.current_step === s) {
+      cls = 'active';
+    }
+    html += '<span class="pv-step-label ' + cls + '">' + (stepNames[s] || s) + '</span>';
+  }
+  return html;
+}
+
+function pvStatusText(f) {
+  var map = {
+    'pending': '等待中', 'converting': '转换中', 'running': '处理中',
+    'completed': '完成', 'error': '出错', 'skipped': '已跳过',
+  };
+  return map[f.status] || f.status;
+}
+
+function pvOnComplete(job) {
+  document.getElementById('pv-progress-section').style.display = 'none';
+  document.getElementById('pv-results-section').style.display = 'block';
+
+  var allClips = [];
+  for (var i = 0; i < job.files.length; i++) {
+    var f = job.files[i];
+    for (var j = 0; j < (f.output_clips || []).length; j++) {
+      var clipPath = f.output_clips[j];
+      var clipName = clipPath.replace(/\\/g, '/').split('/').pop();
+      allClips.push({ name: clipName, path: clipPath, source: f.name });
+    }
+  }
+
+  document.getElementById('pv-results-summary').textContent =
+    '共处理 ' + job.files.length + ' 个文件，生成 ' + allClips.length + ' 个音频片段。输出目录: data/pipelinevideo/' + (job.folder_name || '') + '/';
+
+  var container = document.getElementById('pv-results-files');
+  if (allClips.length === 0) {
+    container.innerHTML = '<div class="empty-state"><p>没有生成任何音频片段</p></div>';
+    return;
+  }
+  var html = '';
+  for (var k = 0; k < allClips.length; k++) {
+    var clip = allClips[k];
+    var streamUrl = API + '/api/pipeline-video/stream?path=' + encodeURIComponent(clip.path);
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;">';
+    html += '<div style="flex:1;min-width:0;"><div style="font-size:12px;color:var(--text);word-break:break-all;">' + escapeHtml(clip.name) + '</div>';
+    html += '<div style="font-size:10px;color:var(--text2);">来源: ' + escapeHtml(clip.source) + '</div></div>';
+    html += '<audio controls preload="none" style="width:280px;height:28px;" src="' + streamUrl + '"></audio></div>';
+  }
+  container.innerHTML = html;
+  toast('视频管线处理完成！共生成 ' + allClips.length + ' 个音频片段', 'success');
+}
+
+// ============================================================
+// Job restore (page load / tab switch)
+// ============================================================
+
+function _savePvQueue() {
+  // Save pending items to localStorage so they survive page refresh.
+  // Running items get their file data from the backend; only save metadata.
+  var save = [];
+  for (var i = 0; i < _pvQueue.length; i++) {
+    var q = _pvQueue[i];
+    save.push({
+      job_id: q.job_id,
+      folder_name: q.folder_name,
+      stepsConfig: q.stepsConfig,
+      outputDir: q.outputDir,
+      status: q.status,
+      progress: q.progress,
+      created_at: q.created_at,
+      files: q.status === 'pending' ? q.files : q.files.map(function(f) {
+        return { name: f.name, input_path: f.input_path, status: f.status, progress: f.progress, steps: f.steps, error: f.error, current_step: f.current_step, output_clips: f.output_clips };
+      })
+    });
+  }
+  try { localStorage.setItem('pv_queue', JSON.stringify(save)); } catch(e) {}
+}
+
+function _loadPvQueueFromStorage() {
+  try {
+    var raw = localStorage.getItem('pv_queue');
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch(e) { return null; }
+}
+
+function _clearPvQueueStorage() {
+  try { localStorage.removeItem('pv_queue'); } catch(e) {}
+  _pvRestored = false;
+}
+
+function pvRestoreJobs() {
+  var stored = _loadPvQueueFromStorage();
+
+  fetch(API + '/api/pipeline-video/jobs')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var backendJobs = data.jobs || [];
+      var running = null, interrupted = null, lastCompleted = null;
+      for (var i = 0; i < backendJobs.length; i++) {
+        var j = backendJobs[i];
+        if (j.status === 'running' && !running) running = j;
+        if (j.status === 'interrupted' && !interrupted) interrupted = j;
+        if (j.status === 'completed' && !lastCompleted) lastCompleted = j;
+      }
+
+      if (running) {
+        // Rebuild queue: running from backend + pending from localStorage
+        _pvQueue = [{
+          job_id: running.job_id,
+          folder_name: running.folder_name,
+          files: running.files,
+          stepsConfig: [],
+          outputDir: '',
+          status: running.status,
+          progress: running.progress,
+          created_at: running.created_at || Date.now() / 1000,
+          expanded: false
+        }];
+
+        // Append pending items saved in localStorage (that haven't been started yet)
+        if (stored) {
+          var runningId = running.job_id;
+          for (var s = 0; s < stored.length; s++) {
+            var si = stored[s];
+            // Skip the running item itself and any completed/cancelled items
+            if (si.job_id === runningId) continue;
+            if (si.status === 'completed' || si.status === 'cancelled') continue;
+            // Reset any previously running items other than the current one to pending
+            if (si.status === 'running') si.status = 'pending';
+            _pvQueue.push(si);
+          }
+        }
+
+        _pvQueueHash = '';
+        document.getElementById('pv-queue-section').style.display = 'block';
+        pvRenderQueue();
+        startPvPolling();
+      } else if (interrupted) {
+        document.getElementById('pv-interrupted-section').style.display = 'block';
+        pvRenderInterrupted(interrupted);
+        _clearPvQueueStorage();
+      } else if (lastCompleted) {
+        document.getElementById('pv-results-section').style.display = 'block';
+        document.getElementById('pv-interrupted-section').style.display = 'none';
+        pvOnComplete(lastCompleted);
+        // Check if there are still pending items in localStorage
+        if (stored && stored.length > 0) {
+          var stillRunning = false;
+          _pvQueue = [];
+          for (var s2 = 0; s2 < stored.length; s2++) {
+            var si2 = stored[s2];
+            if (si2.status === 'completed' || si2.status === 'cancelled') continue;
+            if (si2.status === 'running') { stillRunning = true; _pvQueue.push(si2); continue; }
+            _pvQueue.push(si2);
+          }
+          if (_pvQueue.length > 0) {
+            _pvQueueHash = '';
+            document.getElementById('pv-queue-section').style.display = 'block';
+            document.getElementById('pv-results-section').style.display = 'none';
+            pvRenderQueue();
+            startPvPolling();
+          }
+        } else {
+          _clearPvQueueStorage();
+        }
+      } else {
+        // No backend jobs, but maybe there are pending items from localStorage
+        if (stored && stored.length > 0) {
+          _pvQueue = [];
+          for (var s3 = 0; s3 < stored.length; s3++) {
+            var si3 = stored[s3];
+            if (si3.status === 'completed' || si3.status === 'cancelled') continue;
+            if (si3.status === 'running') si3.status = 'pending';
+            _pvQueue.push(si3);
+          }
+          if (_pvQueue.length > 0) {
+            _pvQueueHash = '';
+            document.getElementById('pv-queue-section').style.display = 'block';
+            pvRenderQueue();
+            startPvPolling();
+          }
+        }
+      }
+    }).catch(function() {});
+}
+
+function pvRenderInterrupted(job) {
+  var completed = 0, pending = 0;
+  for (var i = 0; i < job.files.length; i++) {
+    if (job.files[i].status === 'completed') completed++;
+    else pending++;
+  }
+  var html = '<div style="background:var(--bg2);border:1px solid #ff6b6b;border-radius:8px;padding:16px;margin-bottom:12px;">';
+  html += '<div style="font-size:16px;font-weight:bold;color:#ff6b6b;margin-bottom:8px;">任务因服务器重启中断</div>';
+  html += '<div style="font-size:13px;color:var(--text2);margin-bottom:4px;">文件夹: ' + escapeHtml(job.folder_name) + '</div>';
+  html += '<div style="font-size:13px;color:var(--text2);margin-bottom:4px;">总文件数: ' + job.files.length + ' | 已完成: ' + completed + ' | 待处理: ' + pending + '</div>';
+  html += '<div style="font-size:13px;color:var(--text2);margin-bottom:12px;">进度: ' + (job.progress || 0).toFixed(0) + '%</div>';
+  html += '<div style="display:flex;gap:8px;">';
+  html += '<button class="btn btn-success" onclick="pvResumeInterrupted(\'' + job.job_id + '\')" style="background:var(--success);color:#000;">继续执行 (跳过已完成)</button>';
+  html += '<button class="btn btn-secondary" onclick="pvDiscardInterrupted(\'' + job.job_id + '\')" style="background:var(--danger);color:#fff;">丢弃任务</button>';
+  html += '</div></div>';
+  document.getElementById('pv-interrupted-section').innerHTML = html;
+}
+
+async function pvResumeInterrupted(jobId) {
+  if (!confirm('确定恢复此任务？将跳过已完成的文件继续处理。')) return;
+  try {
+    var resp = await fetch(API + '/api/pipeline-video/job/' + jobId + '/resume', { method: 'POST' });
+    var data = await resp.json();
+    if (resp.ok) {
+      toast('任务已恢复执行', 'success');
+      document.getElementById('pv-interrupted-section').style.display = 'none';
+      var queueItem = {job_id: jobId, folder_name: '', files: [], stepsConfig: [], outputDir: '', status: 'running', progress: 0, created_at: Date.now() / 1000, expanded: false};
+      _pvQueue = [queueItem];
+      pvRenderQueue();
+      document.getElementById('pv-queue-section').style.display = 'block';
+      startPvPolling();
+    } else { toast('恢复失败: ' + (data.detail || ''), 'error'); }
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function pvDiscardInterrupted(jobId) {
+  if (!confirm('确定丢弃此中断的任务？')) return;
+  try {
+    var resp = await fetch(API + '/api/pipeline-video/job/' + jobId + '/discard', { method: 'POST' });
+    var data = await resp.json();
+    if (resp.ok) {
+      toast('已丢弃', 'info');
+      document.getElementById('pv-interrupted-section').style.display = 'none';
+    } else { toast('丢弃失败: ' + (data.detail || ''), 'error'); }
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+}
+
+// ============================================================
+// Pipeline Video — folder/file browsing
+// ============================================================
+
+function pvBrowseFolder() {
+  var btn = document.querySelector('#tab-pipelinevideo button[onclick="pvBrowseFolder()"]');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 选择中...'; }
+  function resetBtn() { if (btn) { btn.disabled = false; btn.textContent = '📁 添加文件夹'; } }
+
+  openFolderPicker('添加文件夹', '/mnt/nas/Persons/jiangyichen/videodownload').then(function(path) {
+    if (!path) { resetBtn(); return; }
+    for (var i = 0; i < _pvFolders.length; i++) {
+      if (_pvFolders[i].path === path) { resetBtn(); return; }
+    }
+    var name = path.replace(/\\/g, '/').split('/').pop() || path;
+    _pvFolders.push({ path: path, name: name });
+    pvRenderFolderList();
+    resetBtn();
+  });
+}
+
+function pvRenderFolderList() {
+  var container = document.getElementById('pv-folder-list');
+  var hint = document.getElementById('pv-folder-hint');
+  var scanBtn = document.getElementById('btn-pv-scan');
+  scanBtn.disabled = _pvFolders.length === 0;
+
+  if (_pvFolders.length === 0) {
+    hint.style.display = '';
+    container.innerHTML = '';
+    _pvFiles = [];
+    _pvSelected = {};
+    _pvCollapsed = {};
+    document.getElementById('pv-file-section').style.display = 'none';
+    return;
+  }
+  hint.style.display = 'none';
+  var html = '';
+  for (var i = 0; i < _pvFolders.length; i++) {
+    html += '<span class="pv-folder-chip" data-pv-folder-idx="' + i + '" style="display:inline-flex;align-items:center;gap:6px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:6px 12px;font-size:13px;">' +
+      '📁 ' + escapeHtml(_pvFolders[i].name) +
+      ' <span class="pv-folder-remove" data-pv-folder-idx="' + i + '" style="cursor:pointer;color:var(--text2);font-size:16px;line-height:1;padding:2px 4px;border-radius:4px;" title="移除此文件夹">✕</span>' +
+    '</span>';
+  }
+  container.innerHTML = html;
+
+  container.onclick = function(e) {
+    var target = e.target;
+    if (target.classList.contains('pv-folder-remove')) {
+      var idx = parseInt(target.getAttribute('data-pv-folder-idx'));
+      if (!isNaN(idx) && idx >= 0 && idx < _pvFolders.length) {
+        pvRemoveFolder(idx);
+      }
+    }
+  };
+}
+
+function pvRemoveFolder(idx) {
+  var folderPath = _pvFolders[idx].path;
+  _pvFolders.splice(idx, 1);
+  delete _pvCollapsed[folderPath];
+  _pvFiles = _pvFiles.filter(function(f) { return f.folder !== folderPath; });
+  pvCleanSelected();
+  pvRenderFolderList();
+}
+
+function pvScanFolders() {
+  if (!_pvFolders.length) { toast('请先添加文件夹', 'info'); return; }
+
+  var scanBtn = document.getElementById('btn-pv-scan');
+  if (scanBtn._scanning) return;
+  scanBtn._scanning = true;
+  scanBtn.disabled = true;
+  scanBtn.textContent = '⏳ 扫描中...';
+
+  document.getElementById('pv-file-section').style.display = 'block';
+  document.getElementById('pv-progress-section').style.display = 'none';
+  document.getElementById('pv-results-section').style.display = 'none';
+  document.getElementById('pv-player-bar').style.display = 'none';
+  document.getElementById('pv-file-list').innerHTML = '<div class="empty-state"><p>⏳ 正在扫描文件夹...</p></div>';
+
+  var paths = _pvFolders.map(function(f) { return f.path; });
+
+  fetch(API + '/api/pipeline-video/scan-folders', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ folder_paths: paths }),
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      _pvFiles = data.files || [];
+      _pvSelected = {};
+      for (var i = 0; i < _pvFiles.length; i++) {
+        _pvSelected[_pvFiles[i].path] = true;
+      }
+      pvRenderStepConfig();
+      pvRenderFileList();
+      if (_pvFiles.length === 0) {
+        toast('所选文件夹中未找到视频或音频文件', 'info');
+      } else {
+        toast('扫描完成，找到 ' + _pvFiles.length + ' 个文件', 'success');
+      }
+      scanBtn._scanning = false;
+      scanBtn.disabled = false;
+      scanBtn.textContent = '🔍 扫描';
+    })
+    .catch(function(e) {
+      toast('扫描失败: ' + e.message, 'error');
+      document.getElementById('pv-file-section').style.display = 'none';
+      scanBtn._scanning = false;
+      scanBtn.disabled = false;
+      scanBtn.textContent = '🔍 扫描';
+    });
+}
+
+function pvRefreshScan() { pvScanFolders(); }
+
+function pvRenderFileList() {
+  var container = document.getElementById('pv-file-list');
+  var selectedCount = 0;
+
+  var grouped = {};
+  var folderOrder = [];
+  for (var i = 0; i < _pvFiles.length; i++) {
+    var f = _pvFiles[i];
+    if (_pvSelected[f.path]) selectedCount++;
+    var fp = f.folder || '';
+    if (!grouped[fp]) { grouped[fp] = []; folderOrder.push(fp); }
+    grouped[fp].push(f);
+  }
+
+  var html = '';
+
+  if (folderOrder.length === 0) {
+    html = '<div class="empty-state"><p>未找到媒体文件</p></div>';
+  } else {
+    for (var gi = 0; gi < folderOrder.length; gi++) {
+      var folderPath = folderOrder[gi];
+      var folderFiles = grouped[folderPath];
+      var folderName = folderPath.replace(/\\/g, '/').split('/').pop() || folderPath;
+
+      var folderSelCount = 0;
+      for (var fi = 0; fi < folderFiles.length; fi++) {
+        if (_pvSelected[folderFiles[fi].path]) folderSelCount++;
+      }
+      var allChecked = folderSelCount === folderFiles.length && folderFiles.length > 0;
+
+      var collapsed = !!_pvCollapsed[folderPath];
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:' +
+        (collapsed ? '6px' : '6px 6px 0 0') + ';' + (gi > 0 ? 'margin-top:12px;' : '') + '">';
+      html += '<span class="pv-folder-toggle" data-pv-folder-toggle="' + gi + '" data-pv-folder-path="' + escapeHtmlAttr(folderPath) +
+        '" style="cursor:pointer;font-size:12px;line-height:1;padding:2px 4px;border-radius:4px;user-select:none;" title="折叠/展开">' +
+        (collapsed ? '▶' : '▼') + '</span>';
+      html += '<label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;">';
+      html += '<input type="checkbox" class="pv-folder-cb" ' + (allChecked ? 'checked' : '') +
+        ' data-pv-folder="' + escapeHtmlAttr(folderPath) + '" onchange="pvToggleFolder(this)" style="cursor:pointer;">';
+      html += '<span style="font-weight:600;color:var(--text);">📁 ' + escapeHtml(folderName) + '</span>';
+      html += '</label>';
+      html += '<span style="font-size:11px;color:var(--text2);">' + folderFiles.length + ' 个文件</span>';
+      html += '<span class="pv-folder-sec-remove" data-pv-folder-path="' + escapeHtmlAttr(folderPath) +
+        '" style="cursor:pointer;color:var(--text2);font-size:14px;line-height:1;padding:2px 6px;border-radius:4px;margin-left:auto;" title="移除此文件夹的全部文件">✕</span>';
+      html += '</div>';
+
+      html += '<div class="pv-folder-body" data-pv-folder-body="' + gi +
+        '" style="border:1px solid var(--border);border-top:none;border-radius:0 0 6px 6px;margin-bottom:2px;' +
+        (collapsed ? 'display:none;' : '') + '">';
+      for (var fi = 0; fi < folderFiles.length; fi++) {
+        var f = folderFiles[fi];
+        var checked = _pvSelected[f.path] ? 'checked' : '';
+        var isVideo = ['.mp4','.mkv','.avi','.mov','.wmv','.webm','.flv'].indexOf(f.ext) >= 0;
+        var icon = isVideo ? '🎬' : '🎵';
+        var durStr = f.duration_s > 0 ? pvFormatDuration(f.duration_s) : '';
+        html += '<div class="pv-file-item" style="padding-left:22px;">' +
+          '<input type="checkbox" class="pv-item-cb" ' + checked + ' onchange="pvToggleItem(this)" data-path="' + escapeHtmlAttr(f.path) + '">' +
+          '<span>' + icon + '</span>' +
+          '<span class="file-name" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(f.name) + '</span>' +
+          '<span class="file-size" style="font-size:12px;color:var(--text2);white-space:nowrap;">' + (f.size_mb || 0).toFixed(1) + ' MB</span>' +
+          '<span class="file-size" style="font-size:12px;color:var(--text2);white-space:nowrap;">' + (durStr || '') + '</span>' +
+          (isVideo ? '<button class="btn btn-secondary" style="font-size:10px;padding:2px 8px;white-space:nowrap;" onclick="pvPreviewFile(event, \'' + escapeHtmlAttr(f.path) + '\')">预览</button>' : '') +
+          ' <span class="pv-file-remove" data-pv-file-path="' + escapeHtmlAttr(f.path) +
+          '" style="cursor:pointer;color:var(--text2);font-size:16px;line-height:1;padding:2px 4px;border-radius:4px;flex-shrink:0;" title="从列表中移除">✕</span>' +
+        '</div>';
+      }
+      html += '</div>';
+    }
+  }
+
+  container.innerHTML = html;
+
+  container.onclick = function(e) {
+    var target = e.target;
+    if (target.classList.contains('pv-folder-toggle') || target.closest('.pv-folder-toggle')) {
+      var tog = target.classList.contains('pv-folder-toggle') ? target : target.closest('.pv-folder-toggle');
+      var fpath = tog.getAttribute('data-pv-folder-path');
+      if (_pvCollapsed[fpath]) { delete _pvCollapsed[fpath]; }
+      else { _pvCollapsed[fpath] = true; }
+      pvRenderFileList();
+      return;
+    }
+    if (target.classList.contains('pv-file-remove')) {
+      var filePath = target.getAttribute('data-pv-file-path');
+      if (filePath) {
+        _pvFiles = _pvFiles.filter(function(f) { return f.path !== filePath; });
+        delete _pvSelected[filePath];
+        pvRenderFileList();
+      }
+      return;
+    }
+    if (target.classList.contains('pv-folder-sec-remove')) {
+      var fPath = target.getAttribute('data-pv-folder-path');
+      if (fPath) {
+        _pvFiles = _pvFiles.filter(function(f) { return f.folder !== fPath; });
+        pvCleanSelected();
+        pvRenderFileList();
+      }
+      return;
+    }
+  };
+
+  document.getElementById('pv-selected-count').textContent = '已选 ' + selectedCount + ' 个';
+  document.getElementById('pv-total-files').textContent = '共 ' + _pvFiles.length + ' 个文件';
+  document.getElementById('pv-select-all-cb').checked = selectedCount === _pvFiles.length && _pvFiles.length > 0;
+  document.getElementById('btn-pv-start').disabled = selectedCount === 0;
+}
+
+function pvCleanSelected() {
+  var keep = {};
+  for (var i = 0; i < _pvFiles.length; i++) {
+    if (_pvSelected[_pvFiles[i].path]) keep[_pvFiles[i].path] = true;
+  }
+  _pvSelected = keep;
+}
+
+function pvToggleFolder(cb) {
+  var folderPath = cb.getAttribute('data-pv-folder');
+  var checked = cb.checked;
+  for (var i = 0; i < _pvFiles.length; i++) {
+    if (_pvFiles[i].folder === folderPath) {
+      if (checked) { _pvSelected[_pvFiles[i].path] = true; }
+      else { delete _pvSelected[_pvFiles[i].path]; }
+    }
+  }
+  pvRenderFileList();
+}
+
+function escapeHtmlAttr(str) {
+  return str.replace(/&/g, '&amp;').replace(/'/g, '&#39;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function pvFormatDuration(sec) {
+  var m = Math.floor(sec / 60);
+  var s = Math.floor(sec % 60);
+  if (m > 0) return m + '分' + s + '秒';
+  return s + '秒';
+}
+
+function pvToggleItem(cb) {
+  var path = cb.getAttribute('data-path');
+  if (cb.checked) _pvSelected[path] = true;
+  else delete _pvSelected[path];
+  pvRenderFileList();
+}
+
+function pvToggleSelectAll() {
+  var checked = document.getElementById('pv-select-all-cb').checked;
+  if (checked) {
+    for (var i = 0; i < _pvFiles.length; i++) { _pvSelected[_pvFiles[i].path] = true; }
+  } else {
+    _pvSelected = {};
+  }
+  pvRenderFileList();
+}
+
+function pvPreviewFile(event, path) {
+  event.stopPropagation();
+  var player = document.getElementById('pv-video-player');
+  var bar = document.getElementById('pv-player-bar');
+  bar.style.display = 'block';
+  player.src = API + '/api/pipeline-video/stream?path=' + encodeURIComponent(path);
+  player.load();
+}
+
+// MFA Japanese Aligner
+// ============================================================
+var _mfaJobId = null;
+var _mfaPollTimer = null;
+
+// -- Pipeline auto-sync ---
+var _mfaSyncing = false;
+function mfaSyncPipeline() {
+  if (_mfaSyncing) return;
+  _mfaSyncing = true;
+  var $ = function(id) { return document.getElementById(id); };
+  var gv = function(id, fallback) { var v = $(id).value.trim(); return v || (fallback || ''); };
+
+  // Step 1 output → Step 3 wav_dir, Step 4 wav_dir
+  var s1out = gv('mfa-trim-output');
+  if (s1out) {
+    if (!gv('mfa-align-wav-dir')) $('mfa-align-wav-dir').value = s1out;
+    if (!gv('mfa-post-wav-dir')) $('mfa-post-wav-dir').value = s1out;
+  }
+
+  // JSONL: SRT import → Step 2 → Step 4
+  if (_mfaSrtSelected && _mfaSrtSelectedName) {
+    var srtStem = _mfaSrtSelectedName.replace(/\.srt$/i, '');
+    var srtJsonl = 'data/mfa/jsonl/' + srtStem + '.jsonl';
+    if (!gv('mfa-gen-jsonl')) $('mfa-gen-jsonl').value = srtJsonl;
+  }
+  var jsonl = gv('mfa-gen-jsonl');
+  if (jsonl && !gv('mfa-post-jsonl')) $('mfa-post-jsonl').value = jsonl;
+
+  // Step 2 output → Step 3 txt_dir, validate txt_dir, Step 4 txt_dir
+  var s2out = gv('mfa-gen-output');
+  if (s2out) {
+    if (!gv('mfa-align-txt-dir')) $('mfa-align-txt-dir').value = s2out;
+    if (!gv('mfa-val-txt-dir')) $('mfa-val-txt-dir').value = s2out;
+    if (!gv('mfa-post-txt-dir')) $('mfa-post-txt-dir').value = s2out;
+  }
+
+  // Step 3 align output → Step 4 textgrid_dir, post output, filtered
+  var s3out = gv('mfa-align-output');
+  if (s3out) {
+    if (!gv('mfa-post-textgrid-dir')) $('mfa-post-textgrid-dir').value = s3out;
+    if (!gv('mfa-post-output')) $('mfa-post-output').value = s3out + '_post';
+    if (!gv('mfa-post-filtered')) $('mfa-post-filtered').value = s3out + '_filtered';
+  }
+
+  // Step 1 input → suggest Step 1 output
+  var s1in = gv('mfa-trim-input');
+  if (s1in && !gv('mfa-trim-output')) {
+    $('mfa-trim-output').value = s1in.replace(/raw_wav$/, 'wav');
+  }
+
+  _mfaSyncing = false;
+}
+
+// Wire oninput auto-sync to key fields
+function mfaWireAutoSync() {
+  var keys = ['mfa-trim-input', 'mfa-trim-output', 'mfa-gen-jsonl', 'mfa-gen-output',
+              'mfa-align-output', 'mfa-align-txt-dir'];
+  for (var i = 0; i < keys.length; i++) {
+    var el = document.getElementById(keys[i]);
+    if (el) { el.addEventListener('input', mfaSyncPipeline); el.addEventListener('change', mfaSyncPipeline); }
+  }
+}
+
+// -- SRT Import (directory browser) ---
+var _mfaSrtDir = '';
+var _mfaSrtSelected = '';
+var _mfaSrtSelectedName = '';
+
+async function mfaSrtLoadDir(path) {
+  var container = document.getElementById('mfa-srt-file-list');
+  container.innerHTML = '<div class="empty-state" style="padding:30px;"><p>加载中...</p></div>';
+  try {
+    var resp = await fetch(API + '/api/mfa/browse-dir?path=' + encodeURIComponent(path || ''));
+    var data = await resp.json();
+    _mfaSrtDir = data.path;
+
+    // Breadcrumb
+    var bread = document.getElementById('mfa-srt-breadcrumb');
+    var parts = data.path.split('/').filter(function(p) { return p; });
+    var bc = '';
+    var cum = '';
+    for (var i = 0; i < parts.length; i++) {
+      cum += '/' + parts[i];
+      if (i > 0) bc += ' / ';
+      bc += '<span style="cursor:pointer;color:var(--accent);" onclick="mfaSrtNavigate(\'' + cum.replace(/'/g, "\\'") + '\')">' + escapeHtml(parts[i]) + '</span>';
+    }
+    bread.innerHTML = bc || '/';
+
+    // Back button
+    document.getElementById('mfa-srt-back').disabled = !data.parent;
+
+    // Render folders + files
+    var html = '';
+    var entries = data.folders || [];
+    for (var j = 0; j < entries.length; j++) {
+      var e = entries[j];
+      html += '<div class="mfa-browser-item dir" onclick="mfaSrtNavigate(\'' + e.path.replace(/'/g, "\\'") + '\')">' +
+        '<span class="mfa-folder-icon">📁</span>' +
+        '<span class="mfa-item-name">' + escapeHtml(e.name) + '</span>' +
+      '</div>';
+    }
+    var files = data.files || [];
+    for (var k = 0; k < files.length; k++) {
+      var f = files[k];
+      var selClass = (_mfaSrtSelected === f.path) ? ' selected' : '';
+      html += '<div class="mfa-browser-item file' + selClass + '" onclick="mfaSrtSelectFile(\'' + f.path.replace(/'/g, "\\'") + '\', \'' + escapeHtml(f.name).replace(/'/g, "\\'") + '\')">' +
+        '<span class="mfa-file-icon">📄</span>' +
+        '<span class="mfa-item-name">' + escapeHtml(f.name) + '</span>' +
+        '<span class="mfa-item-size">' + f.size_kb + ' KB</span>' +
+      '</div>';
+    }
+    if (!html) html = '<div class="empty-state" style="padding:20px;"><p>此目录下没有 SRT 文件</p></div>';
+    container.innerHTML = html;
+  } catch(e) {
+    container.innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
+  }
+}
+
+function mfaSrtNavigate(path) {
+  if (path === '..') {
+    // Go to parent
+    mfaSrtLoadDir('');
+    return;
+  }
+  // Reset selection when navigating
+  _mfaSrtSelected = '';
+  _mfaSrtSelectedName = '';
+  mfaSrtUpdateSelectionUI();
+  mfaSrtLoadDir(path);
+}
+
+function mfaSrtSelectFile(path, name) {
+  _mfaSrtSelected = path;
+  _mfaSrtSelectedName = name;
+  mfaSrtUpdateSelectionUI();
+  // Auto-fill WAV filename and JSONL path from SRT stem
+  var stem = name.replace(/\.srt$/i, '');
+  document.getElementById('mfa-srt-wav-file').value = stem + '.wav';
+  document.getElementById('mfa-srt-jsonl-path').value = 'data/mfa/jsonl/' + stem + '.jsonl';
+  // Re-render to highlight
+  mfaSrtLoadDir(_mfaSrtDir);
+}
+
+function mfaSrtClearSelection() {
+  _mfaSrtSelected = '';
+  _mfaSrtSelectedName = '';
+  mfaSrtUpdateSelectionUI();
+  mfaSrtLoadDir(_mfaSrtDir);
+}
+
+function mfaSrtUpdateSelectionUI() {
+  var selDiv = document.getElementById('mfa-srt-selected');
+  var selName = document.getElementById('mfa-srt-selected-name');
+  var importBtn = document.getElementById('btn-mfa-srt-import');
+  if (_mfaSrtSelected) {
+    selDiv.style.display = 'block';
+    selName.textContent = _mfaSrtSelectedName || _mfaSrtSelected;
+    importBtn.disabled = false;
+    importBtn.style.opacity = '1';
+  } else {
+    selDiv.style.display = 'none';
+    importBtn.disabled = true;
+    importBtn.style.opacity = '0.5';
+  }
+}
+
+async function mfaSrtBrowseOther() {
+  var current = _mfaSrtDir || '/mnt/project/ComicCut/anime-pipeline/data/asr/folder_output/';
+  var path = await openFolderPicker('选择目录', current);
+  if (path) {
+    _mfaSrtSelected = '';
+    _mfaSrtSelectedName = '';
+    mfaSrtUpdateSelectionUI();
+    mfaSrtLoadDir(path);
+  }
+}
+
+async function mfaSrtImport() {
+  if (!_mfaSrtSelected) { toast('请先选择一个 SRT 文件', 'info'); return; }
+  var wavFile = document.getElementById('mfa-srt-wav-file').value.trim();
+  if (!wavFile) { toast('请输入 WAV 文件名', 'info'); return; }
+  var jsonlPath = document.getElementById('mfa-srt-jsonl-path').value.trim();
+
+  var url = API + '/api/mfa/srt-to-jsonl?' +
+    'srt_path=' + encodeURIComponent(_mfaSrtSelected) +
+    '&wav_file=' + encodeURIComponent(wavFile) +
+    '&output_jsonl=' + encodeURIComponent(jsonlPath);
+
+  var btn = document.getElementById('btn-mfa-srt-import');
+  btn.disabled = true;
+  btn.textContent = '导入中...';
+  document.getElementById('mfa-srt-status').textContent = '';
+
+  try {
+    var resp = await fetch(url, { method: 'POST' });
+    var data = await resp.json();
+    if (!resp.ok) { toast('导入失败: ' + (data.detail || resp.status), 'error'); return; }
+
+    document.getElementById('mfa-srt-preview').style.display = 'block';
+    document.getElementById('mfa-srt-preview-text').textContent = data.text_preview || '';
+    document.getElementById('mfa-srt-jsonl-out').textContent = data.jsonl_path || '';
+    document.getElementById('mfa-srt-jsonl-count').textContent = data.jsonl_total_entries || 0;
+    document.getElementById('mfa-srt-status').textContent = '导入成功! ' + data.text_lines + ' 行文本 → ' + data.jsonl_total_entries + ' 条记录';
+
+    var genJsonl = document.getElementById('mfa-gen-jsonl');
+    if (!genJsonl.value && data.jsonl_path) genJsonl.value = data.jsonl_path;
+
+    toast('SRT 导入成功，JSONL 已有 ' + data.jsonl_total_entries + ' 条记录', 'success');
+    mfaSyncPipeline();
+  } catch(e) {
+    toast('导入失败: ' + e.message, 'error');
+  } finally {
+    mfaSrtUpdateSelectionUI();
+    btn.textContent = '导入到 JSONL';
+  }
+}
+
+function mfaToggleTrimEdges() {
+  var on = document.getElementById('mfa-trim-normalize-edges').checked;
+  var ids = ['mfa-trim-target-edge', 'mfa-trim-edge-threshold', 'mfa-trim-edge-frame'];
+  for (var i = 0; i < ids.length; i++) {
+    var el = document.getElementById(ids[i]);
+    if (el) el.disabled = !on;
+  }
+}
+
+async function mfaPickFolder(inputId) {
+  var el = document.getElementById(inputId);
+  var current = el.value || '/mnt/project/ComicCut/anime-pipeline/data/';
+  var path = await openFolderPicker('选择目录', current);
+  if (path) el.value = path;
+}
+
+function mfaSwitchMfaSub(sub) {
+  document.getElementById('mfa-subtab-align').className = sub === 'align' ? 'btn btn-primary' : 'btn btn-secondary';
+  document.getElementById('mfa-subtab-validate').className = sub === 'validate' ? 'btn btn-primary' : 'btn btn-secondary';
+  document.getElementById('mfa-align-panel').style.display = sub === 'align' ? 'block' : 'none';
+  document.getElementById('mfa-validate-panel').style.display = sub === 'validate' ? 'block' : 'none';
+}
+
+async function mfaRunStep(step) {
+  var params = new URLSearchParams();
+  var label = '';
+  var url = '';
+
+  if (step === 'trim') {
+    url = API + '/api/mfa/trim-silence';
+    params.set('input_dir', document.getElementById('mfa-trim-input').value);
+    params.set('output_dir', document.getElementById('mfa-trim-output').value);
+    params.set('max_silence_sec', document.getElementById('mfa-trim-max-silence').value || '1.0');
+    params.set('sil_vol_threshold', document.getElementById('mfa-trim-sil-vol').value || '0.001');
+    params.set('sil_len_threshold', document.getElementById('mfa-trim-sil-len').value || '0.08');
+    params.set('normalize_edges', document.getElementById('mfa-trim-normalize-edges').checked ? 'true' : 'false');
+    params.set('target_edge_silence_sec', document.getElementById('mfa-trim-target-edge').value || '0.5');
+    params.set('edge_silence_threshold', document.getElementById('mfa-trim-edge-threshold').value || '0.001');
+    params.set('edge_frame_length', document.getElementById('mfa-trim-edge-frame').value || '1024');
+    params.set('workers', document.getElementById('mfa-trim-workers').value || '8');
+    label = '步骤 1: 裁剪静音';
+  } else if (step === 'generate') {
+    url = API + '/api/mfa/generate-txt';
+    params.set('jsonl_path', document.getElementById('mfa-gen-jsonl').value);
+    params.set('output_dir', document.getElementById('mfa-gen-output').value);
+    params.set('text_key', document.getElementById('mfa-gen-text-key').value || 'text');
+    params.set('wav_key', document.getElementById('mfa-gen-wav-key').value || 'wav_file');
+    params.set('mode', document.getElementById('mfa-gen-mode').value || 'A');
+    params.set('overwrite', document.getElementById('mfa-gen-overwrite').checked ? 'true' : 'false');
+    params.set('max_merge_tokens', document.getElementById('mfa-gen-max-merge').value || '5');
+    if (document.getElementById('mfa-gen-dict').value) params.set('dict_path', document.getElementById('mfa-gen-dict').value);
+    if (document.getElementById('mfa-gen-oov').value) params.set('oov_report', document.getElementById('mfa-gen-oov').value);
+    label = '步骤 2: 生成TXT';
+  } else if (step === 'align') {
+    url = API + '/api/mfa/align';
+    params.set('txt_dir', document.getElementById('mfa-align-txt-dir').value);
+    params.set('output_dir', document.getElementById('mfa-align-output').value);
+    params.set('dictionary', document.getElementById('mfa-align-dict').value || 'japanese_mfa');
+    params.set('acoustic_model', document.getElementById('mfa-align-acoustic').value || 'japanese_mfa');
+    if (document.getElementById('mfa-align-wav-dir').value) params.set('wav_dir', document.getElementById('mfa-align-wav-dir').value);
+    if (document.getElementById('mfa-align-temp').value) params.set('temp_dir', document.getElementById('mfa-align-temp').value);
+    params.set('num_jobs', document.getElementById('mfa-align-jobs').value || '8');
+    params.set('clean', document.getElementById('mfa-align-clean').checked ? 'true' : 'false');
+    params.set('overwrite', document.getElementById('mfa-align-overwrite').checked ? 'true' : 'false');
+    params.set('output_format', document.getElementById('mfa-align-format').value);
+    params.set('no_tokenization', document.getElementById('mfa-align-no-tokenization').checked ? 'true' : 'false');
+    params.set('no_textgrid_cleanup', document.getElementById('mfa-align-no-cleanup').checked ? 'true' : 'false');
+    label = '步骤 3: MFA Align';
+  } else if (step === 'validate') {
+    url = API + '/api/mfa/validate';
+    params.set('txt_dir', document.getElementById('mfa-val-txt-dir').value);
+    params.set('output_dir', document.getElementById('mfa-val-output').value);
+    params.set('acoustic_model', document.getElementById('mfa-val-acoustic').value || 'japanese_mfa');
+    params.set('dictionary', document.getElementById('mfa-val-dict').value || 'japanese_mfa');
+    if (document.getElementById('mfa-val-wav-dir').value) params.set('wav_dir', document.getElementById('mfa-val-wav-dir').value);
+    if (document.getElementById('mfa-val-temp').value) params.set('temp_dir', document.getElementById('mfa-val-temp').value);
+    params.set('num_jobs', document.getElementById('mfa-val-jobs').value || '8');
+    params.set('clean', document.getElementById('mfa-val-clean').checked ? 'true' : 'false');
+    params.set('overwrite', document.getElementById('mfa-val-overwrite').checked ? 'true' : 'false');
+    label = '步骤 3: MFA Validate';
+  } else if (step === 'postprocess') {
+    url = API + '/api/mfa/postprocess';
+    params.set('jsonl_path', document.getElementById('mfa-post-jsonl').value);
+    params.set('txt_dir', document.getElementById('mfa-post-txt-dir').value);
+    params.set('textgrid_dir', document.getElementById('mfa-post-textgrid-dir').value);
+    params.set('output_dir', document.getElementById('mfa-post-output').value);
+    params.set('filtered_dir', document.getElementById('mfa-post-filtered').value);
+    if (document.getElementById('mfa-post-wav-dir').value) params.set('wav_dir', document.getElementById('mfa-post-wav-dir').value);
+    params.set('text_key', document.getElementById('mfa-post-text-key').value || 'text');
+    params.set('wav_key', document.getElementById('mfa-post-wav-key').value || 'wav_file');
+    params.set('overwrite', document.getElementById('mfa-post-overwrite').checked ? 'true' : 'false');
+    params.set('fix_short_multi_unit', document.getElementById('mfa-post-fix-short').checked ? 'true' : 'false');
+    params.set('filter_suspicious_alignment', document.getElementById('mfa-post-filter-suspicious').checked ? 'true' : 'false');
+    params.set('copy_errors', document.getElementById('mfa-post-copy-errors').checked ? 'true' : 'false');
+    label = '步骤 4: 后处理';
+  }
+
+  if (!url) return;
+
+  try {
+    var resp = await fetch(url + '?' + params.toString(), { method: 'POST' });
+    var data = await resp.json();
+    if (data.status !== 'ok') { toast('启动失败', 'error'); return; }
+    _mfaJobId = data.job_id;
+    document.getElementById('mfa-progress-panel').style.display = 'block';
+    document.getElementById('mfa-progress-title').textContent = label;
+    document.getElementById('mfa-progress-status').textContent = '启动中...';
+    document.getElementById('mfa-progress-pct').textContent = '0%';
+    document.getElementById('mfa-progress-fill').style.width = '0%';
+    startMfaPolling();
+    toast(label + ' 已启动', 'info');
+  } catch(e) { toast('启动失败: ' + e.message, 'error'); }
+}
+
+async function mfaRunAll() {
+  var payload = {
+    trim_input_dir: document.getElementById('mfa-trim-input').value,
+    trim_output_dir: document.getElementById('mfa-trim-output').value,
+    trim_max_silence_sec: parseFloat(document.getElementById('mfa-trim-max-silence').value) || 1.0,
+    trim_sil_vol_threshold: parseFloat(document.getElementById('mfa-trim-sil-vol').value) || 0.001,
+    trim_sil_len_threshold: parseFloat(document.getElementById('mfa-trim-sil-len').value) || 0.08,
+    trim_workers: parseInt(document.getElementById('mfa-trim-workers').value) || 8,
+    trim_normalize_edges: document.getElementById('mfa-trim-normalize-edges').checked,
+    trim_target_edge_silence_sec: parseFloat(document.getElementById('mfa-trim-target-edge').value) || 0.5,
+    trim_edge_silence_threshold: parseFloat(document.getElementById('mfa-trim-edge-threshold').value) || 0.001,
+    trim_edge_frame_length: parseInt(document.getElementById('mfa-trim-edge-frame').value) || 1024,
+
+    gen_jsonl_path: document.getElementById('mfa-gen-jsonl').value,
+    gen_output_dir: document.getElementById('mfa-gen-output').value,
+    gen_text_key: document.getElementById('mfa-gen-text-key').value || 'text',
+    gen_wav_key: document.getElementById('mfa-gen-wav-key').value || 'wav_file',
+    gen_mode: document.getElementById('mfa-gen-mode').value || 'A',
+    gen_overwrite: document.getElementById('mfa-gen-overwrite').checked,
+    gen_dict_path: document.getElementById('mfa-gen-dict').value,
+    gen_max_merge_tokens: parseInt(document.getElementById('mfa-gen-max-merge').value) || 5,
+    gen_oov_report: document.getElementById('mfa-gen-oov').value,
+
+    align_txt_dir: document.getElementById('mfa-align-txt-dir').value,
+    align_wav_dir: document.getElementById('mfa-align-wav-dir').value,
+    align_output_dir: document.getElementById('mfa-align-output').value,
+    align_acoustic_model: document.getElementById('mfa-align-acoustic').value || 'japanese_mfa',
+    align_dictionary: document.getElementById('mfa-align-dict').value || 'japanese_mfa',
+    align_temp_dir: document.getElementById('mfa-align-temp').value,
+    align_num_jobs: parseInt(document.getElementById('mfa-align-jobs').value) || 8,
+    align_clean: document.getElementById('mfa-align-clean').checked,
+    align_overwrite: document.getElementById('mfa-align-overwrite').checked,
+    align_output_format: document.getElementById('mfa-align-format').value,
+    align_no_tokenization: document.getElementById('mfa-align-no-tokenization').checked,
+    align_no_textgrid_cleanup: document.getElementById('mfa-align-no-cleanup').checked,
+
+    post_jsonl_path: document.getElementById('mfa-post-jsonl').value,
+    post_txt_dir: document.getElementById('mfa-post-txt-dir').value,
+    post_textgrid_dir: document.getElementById('mfa-post-textgrid-dir').value,
+    post_output_dir: document.getElementById('mfa-post-output').value,
+    post_filtered_dir: document.getElementById('mfa-post-filtered').value,
+    post_wav_dir: document.getElementById('mfa-post-wav-dir').value,
+    post_text_key: document.getElementById('mfa-post-text-key').value || 'text',
+    post_wav_key: document.getElementById('mfa-post-wav-key').value || 'wav_file',
+    post_overwrite: document.getElementById('mfa-post-overwrite').checked,
+    post_fix_short_multi_unit: document.getElementById('mfa-post-fix-short').checked,
+    post_filter_suspicious_alignment: document.getElementById('mfa-post-filter-suspicious').checked,
+    post_copy_errors: document.getElementById('mfa-post-copy-errors').checked,
+  };
+
+  try {
+    var resp = await fetch(API + '/api/mfa/run-all', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    var data = await resp.json();
+    if (data.status !== 'ok') { toast('启动失败', 'error'); return; }
+    _mfaJobId = data.job_id;
+    document.getElementById('mfa-progress-panel').style.display = 'block';
+    document.getElementById('mfa-progress-title').textContent = '完整管线';
+    document.getElementById('mfa-progress-status').textContent = '启动中...';
+    document.getElementById('mfa-progress-pct').textContent = '0%';
+    document.getElementById('mfa-progress-fill').style.width = '0%';
+    startMfaPolling();
+    toast('完整管线已启动', 'info');
+  } catch(e) { toast('启动失败: ' + e.message, 'error'); }
+}
+
+function startMfaPolling() {
+  stopMfaPolling();
+  _mfaPollTimer = setInterval(pollMfaJob, 2000);
+  pollMfaJob();
+}
+
+function stopMfaPolling() {
+  if (_mfaPollTimer) { clearInterval(_mfaPollTimer); _mfaPollTimer = null; }
+}
+
+async function pollMfaJob() {
+  if (!_mfaJobId) { stopMfaPolling(); return; }
+  try {
+    var resp = await fetch(API + '/api/mfa/job/' + _mfaJobId);
+    if (!resp.ok) { stopMfaPolling(); return; }
+    var job = await resp.json();
+    var pct = job.progress || 0;
+    document.getElementById('mfa-progress-fill').style.width = pct + '%';
+    document.getElementById('mfa-progress-pct').textContent = pct + '%';
+    document.getElementById('mfa-progress-status').textContent = job.current_step || '';
+    document.getElementById('mfa-progress-title').textContent = (job.type || 'MFA任务') + ' - ' + job.status;
+    var stdout = document.getElementById('mfa-stdout');
+    if (stdout && job.stdout) stdout.textContent = job.stdout;
+    if (job.status === 'completed') { stopMfaPolling(); toast('MFA 任务完成', 'success'); loadMfaJobs(); }
+    else if (job.status === 'failed') { stopMfaPolling(); toast('MFA 任务失败', 'error'); loadMfaJobs(); }
+    else if (job.status === 'cancelled') { stopMfaPolling(); toast('任务已取消', 'info'); loadMfaJobs(); }
+  } catch(e) { console.error(e); }
+}
+
+async function loadMfaJobs() {
+  try {
+    var resp = await fetch(API + '/api/mfa/jobs');
+    var data = await resp.json();
+    var jobs = data.jobs || [];
+    var container = document.getElementById('mfa-jobs-list');
+    if (!jobs.length) { container.innerHTML = '<div class="empty-state"><p>暂无任务</p></div>'; return; }
+    var html = '';
+    for (var i = 0; i < jobs.length; i++) {
+      var j = jobs[i];
+      var statusClass = 'status-pending';
+      if (j.status === 'completed') statusClass = 'status-completed';
+      else if (j.status === 'running') statusClass = 'status-running';
+      else if (j.status === 'failed') statusClass = 'status-failed';
+      else if (j.status === 'cancelled' || j.status === 'interrupted') statusClass = 'status-cancelled';
+      html += '<div class="job-card" style="padding:10px 14px;">' +
+        '<div class="job-header">' +
+          '<div><span class="job-title" style="font-size:13px;">' + escapeHtml(j.type || 'MFA') + '</span>' +
+          '<span style="font-size:11px;color:var(--text2);margin-left:8px;">' + escapeHtml(j.job_id) + '</span></div>' +
+          '<div style="display:flex;gap:4px;align-items:center;">' +
+            '<span class="job-status ' + statusClass + '">' + escapeHtml(j.status) + '</span>';
+      if (j.status === 'running' || j.status === 'pending') {
+        html += '<button class="btn btn-secondary" style="font-size:10px;padding:2px 8px;" onclick="mfaCancelJob(\'' + j.job_id + '\')">取消</button>';
+      }
+      html += '</div></div>';
+      html += '<div style="font-size:12px;color:var(--text2);">' + escapeHtml(j.current_step || '') + '</div>';
+      if (j.error) html += '<div style="font-size:11px;color:var(--danger);margin-top:4px;">' + escapeHtml(String(j.error).substring(0, 200)) + '</div>';
+      html += '<div class="progress-bar" style="margin-top:6px;"><div class="progress-fill" style="width:' + (j.progress || 0) + '%;"></div></div>';
+      html += '</div>';
+    }
+    container.innerHTML = html;
+  } catch(e) { console.error(e); }
+}
+
+async function mfaCancelJob(jobId) {
+  try {
+    var resp = await fetch(API + '/api/mfa/job/' + jobId, { method: 'DELETE' });
+    var data = await resp.json();
+    if (data.status === 'ok') { toast('任务已取消', 'info'); loadMfaJobs(); }
+  } catch(e) { toast('取消失败: ' + e.message, 'error'); }
+}
+
+// ============================================================
+// TextGrid Viewer — waveform + tier timeline + audio sync
+// ============================================================
+var _mfaViewerDir = '';
+var _mfaViewerTgPath = '';
+var _mfaViewerWavPath = '';
+var _mfaViewerTgData = null;
+var _mfaViewerAudio = null;
+var _mfaViewerAudioCtx = null;
+var _mfaViewerAnimId = null;
+
+function _mfaViewerGetColorClass(text) {
+  if (!text) return 'sil0';
+  var t = text.trim().toLowerCase();
+  if (t === '' || t === '<eps>' || t === '<sil>' || t === 'sil') return 'sil0';
+  if (t === '<sp0>' || t === 'sp0') return 'sil0';
+  if (t === '<sp1>' || t === 'sp1') return 'sil1';
+  if (t === '<sp2>' || t === 'sp2') return 'sil2';
+  if (t === '<sp3>' || t === 'sp3' || t === 'spn') return 'sil3';
+  if (t === '?') return 'question';
+  return '';
+}
+
+function _mfaViewerGetTierClass(name) {
+  var n = (name || '').toLowerCase();
+  if (n === 'raw_text') return 'raw';
+  if (n === 'tokenized_text') return 'token';
+  if (n === 'words') return 'word';
+  if (n === 'romaji') return 'romaji';
+  if (n === 'phones') return 'phone';
+  return '';
+}
+
+// --- Directory browser for TextGrid files ---
+async function mfaViewerLoadDir(path) {
+  var container = document.getElementById('mfa-viewer-file-list');
+  container.innerHTML = '<div class="empty-state" style="padding:20px;"><p>加载中...</p></div>';
+  try {
+    var resp = await fetch(API + '/api/mfa/browse-dir?path=' + encodeURIComponent(path || ''));
+    var data = await resp.json();
+    _mfaViewerDir = data.path;
+
+    var bread = document.getElementById('mfa-viewer-breadcrumb');
+    var parts = data.path.split('/').filter(function(p){return p;});
+    var bc = '', cum = '';
+    for (var i = 0; i < parts.length; i++) {
+      cum += '/' + parts[i];
+      if (i > 0) bc += ' / ';
+      bc += '<span style="cursor:pointer;color:var(--accent);" onclick="mfaViewerNavigate(\'' + cum.replace(/'/g, "\\'") + '\')">' + escapeHtml(parts[i]) + '</span>';
+    }
+    bread.innerHTML = bc || '/';
+    document.getElementById('mfa-viewer-back').disabled = !data.parent;
+
+    // Also accept .TextGrid files (not just .srt)
+    var tgFiles = [];
+    var allFiles = data.files || [];
+    for (var j = 0; j < allFiles.length; j++) {
+      if (allFiles[j].name.toLowerCase().endsWith('.textgrid')) tgFiles.push(allFiles[j]);
+    }
+
+    var html = '';
+    var folders = data.folders || [];
+    for (var k = 0; k < folders.length; k++) {
+      var f = folders[k];
+      html += '<div class="mfa-browser-item dir" onclick="mfaViewerNavigate(\'' + f.path.replace(/'/g, "\\'") + '\')">' +
+        '<span class="mfa-folder-icon">📁</span><span class="mfa-item-name">' + escapeHtml(f.name) + '</span></div>';
+    }
+    for (var m = 0; m < tgFiles.length; m++) {
+      var tg = tgFiles[m];
+      var sel = (_mfaViewerTgPath === tg.path) ? ' selected' : '';
+      html += '<div class="mfa-browser-item file' + sel + '" onclick="mfaViewerSelectTg(\'' + tg.path.replace(/'/g, "\\'") + '\', \'' + escapeHtml(tg.name).replace(/'/g, "\\'") + '\')">' +
+        '<span class="mfa-file-icon">📄</span><span class="mfa-item-name">' + escapeHtml(tg.name) + '</span></div>';
+    }
+    if (!html) html = '<div class="empty-state" style="padding:20px;"><p>此目录下没有 TextGrid 文件</p></div>';
+    container.innerHTML = html;
+  } catch(e) {
+    container.innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
+  }
+}
+
+function mfaViewerNavigate(path) {
+  if (path === '..') { mfaViewerLoadDir(''); return; }
+  mfaViewerLoadDir(path);
+}
+
+async function mfaViewerBrowseOther() {
+  var current = _mfaViewerDir || '/mnt/project/ComicCut/anime-pipeline/data/mfa/';
+  var path = await openFolderPicker('选择目录', current);
+  if (path) mfaViewerLoadDir(path);
+}
+
+// --- Select & render ---
+async function mfaViewerSelectTg(path, name) {
+  _mfaViewerTgPath = path;
+  mfaViewerLoadDir(_mfaViewerDir);
+  document.getElementById('mfa-viewer-empty').style.display = 'none';
+
+  try {
+    // Parse TextGrid
+    var tgResp = await fetch(API + '/api/mfa/parse-textgrid?path=' + encodeURIComponent(path));
+    if (!tgResp.ok) { toast('解析失败', 'error'); return; }
+    _mfaViewerTgData = await tgResp.json();
+
+    // Find matching WAV
+    var wavResp = await fetch(API + '/api/mfa/find-wav?textgrid_path=' + encodeURIComponent(path));
+    var wavData = await wavResp.json();
+    if (wavData.wav_path) {
+      _mfaViewerWavPath = wavData.wav_path;
+      document.getElementById('mfa-viewer-wav-name').textContent = wavData.stem + '.wav';
+    } else {
+      _mfaViewerWavPath = '';
+      document.getElementById('mfa-viewer-wav-name').textContent = '(未找到 WAV)';
+    }
+
+    mfaViewerRender();
+  } catch(e) { toast('加载失败: ' + e.message, 'error'); }
+}
+
+function mfaViewerRender() {
+  var data = _mfaViewerTgData;
+  if (!data || !data.tiers) return;
+  document.getElementById('mfa-viewer-main').style.display = 'block';
+  document.getElementById('mfa-viewer-empty').style.display = 'none';
+
+  var totalDur = data.xmax || data.xmin || 1;
+  if (totalDur < 0.01) totalDur = 1;
+
+  // Seek bar max
+  var seek = document.getElementById('mfa-viewer-seek');
+  seek.max = Math.round(totalDur * 1000);
+  seek.value = 0;
+  document.getElementById('mfa-viewer-time').textContent = '0.00s / ' + totalDur.toFixed(2) + 's';
+
+  // Render tiers
+  var tiersHtml = '';
+  for (var i = 0; i < data.tiers.length; i++) {
+    var tier = data.tiers[i];
+    var barClass = _mfaViewerGetTierClass(tier.name);
+    tiersHtml += '<div class="mfa-tier-row">' +
+      '<div class="mfa-tier-label">' + escapeHtml(tier.name) + '</div>' +
+      '<div class="mfa-tier-bars" style="position:relative;height:22px;">';
+
+    for (var j = 0; j < tier.intervals.length; j++) {
+      var iv = tier.intervals[j];
+      var leftPct = (iv.xmin / totalDur * 100).toFixed(3);
+      var wPct = ((iv.xmax - iv.xmin) / totalDur * 100).toFixed(3);
+      if (wPct < 0.1) wPct = '0.1';
+      var segClass = _mfaViewerGetColorClass(iv.text) || barClass || 'raw';
+      var displayText = iv.text || '';
+      if (displayText.length > 12) displayText = displayText.substring(0, 11) + '…';
+      tiersHtml += '<div class="mfa-tier-seg ' + segClass + '" ' +
+        'style="left:' + leftPct + '%;width:' + wPct + '%;" ' +
+        'data-xmin="' + iv.xmin + '" data-xmax="' + iv.xmax + '" ' +
+        'title="' + escapeHtmlAttr(iv.text) + ' ' + iv.xmin.toFixed(3) + '-' + iv.xmax.toFixed(3) + 's" ' +
+        'onclick="mfaViewerPlaySegment(' + iv.xmin + ',' + iv.xmax + ')">' +
+        escapeHtml(displayText) + '</div>';
+    }
+    tiersHtml += '</div></div>';
+  }
+  document.getElementById('mfa-viewer-tiers').innerHTML = tiersHtml;
+
+  // Draw waveform if WAV available
+  if (_mfaViewerWavPath) mfaViewerDrawWaveform(_mfaViewerWavPath);
+  else {
+    var canvas = document.getElementById('mfa-waveform-canvas');
+    var ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#333'; ctx.font = '14px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('未找到对应 WAV 文件', canvas.width/2, canvas.height/2);
+  }
+}
+
+// --- Waveform rendering ---
+function mfaViewerDrawWaveform(wavUrl) {
+  var canvas = document.getElementById('mfa-waveform-canvas');
+  var ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#333'; ctx.font = '14px monospace'; ctx.textAlign = 'center';
+  ctx.fillText('加载波形中...', canvas.width/2, canvas.height/2);
+
+  // Decode audio via Web Audio API
+  var url = API + '/api/mfa/stream?path=' + encodeURIComponent(wavUrl);
+  if (_mfaViewerAudioCtx) _mfaViewerAudioCtx.close();
+  try {
+    _mfaViewerAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  } catch(e) { ctx.fillText('浏览器不支持音频', canvas.width/2, canvas.height/2); return; }
+
+  fetch(url).then(function(r) { return r.arrayBuffer(); }).then(function(buf) {
+    return _mfaViewerAudioCtx.decodeAudioData(buf);
+  }).then(function(audioBuffer) {
+    // Setup audio element for playback
+    _mfaViewerSetupAudio(url);
+    // Draw
+    var data = audioBuffer.getChannelData(0);
+    var step = Math.max(1, Math.floor(data.length / canvas.width));
+    var ampMax = 0;
+    var peaks = [];
+    for (var i = 0; i < canvas.width; i++) {
+      var start = i * step;
+      var end = Math.min(start + step, data.length);
+      var max = 0;
+      for (var j = start; j < end; j++) {
+        var abs = Math.abs(data[j]);
+        if (abs > max) max = abs;
+      }
+      peaks.push(max);
+      if (max > ampMax) ampMax = max;
+    }
+    if (ampMax < 0.001) ampMax = 1;
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    var mid = canvas.height / 2;
+    for (var k = 0; k < peaks.length; k++) {
+      var h = (peaks[k] / ampMax) * (canvas.height * 0.45);
+      var alpha = 0.3 + (peaks[k] / ampMax) * 0.7;
+      ctx.fillStyle = 'rgba(78, 204, 163, ' + alpha.toFixed(2) + ')';
+      ctx.fillRect(k, mid - h, 1, h * 2);
+    }
+    // Playhead line
+    ctx.strokeStyle = 'rgba(233, 69, 96, 0.5)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(canvas.width, mid); ctx.stroke();
+  }).catch(function(e) {
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#633'; ctx.font = '12px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('WAV 加载失败', canvas.width/2, canvas.height/2);
+  });
+}
+
+function _mfaViewerSetupAudio(url) {
+  if (_mfaViewerAudio) { _mfaViewerAudio.pause(); _mfaViewerAudio = null; }
+  var audio = new Audio(url);
+  audio.addEventListener('timeupdate', _mfaViewerOnTimeUpdate);
+  audio.addEventListener('loadedmetadata', function() {
+    document.getElementById('mfa-viewer-seek').max = Math.round(audio.duration * 1000);
+  });
+  audio.addEventListener('ended', function() {
+    document.getElementById('mfa-viewer-play').textContent = '▶ 播放';
+  });
+  _mfaViewerAudio = audio;
+}
+
+function _mfaViewerOnTimeUpdate() {
+  if (!_mfaViewerAudio) return;
+  var t = _mfaViewerAudio.currentTime;
+  var dur = _mfaViewerAudio.duration || 0;
+  document.getElementById('mfa-viewer-time').textContent = t.toFixed(2) + 's / ' + dur.toFixed(2) + 's';
+  document.getElementById('mfa-viewer-seek').value = Math.round(t * 1000);
+  _mfaViewerDrawPlayhead(t);
+}
+
+function _mfaViewerDrawPlayhead(t) {
+  if (!_mfaViewerTgData) return;
+  var totalDur = _mfaViewerTgData.xmax || 1;
+  var canvas = document.getElementById('mfa-waveform-canvas');
+  var ctx = canvas.getContext('2d');
+  var x = (t / totalDur) * canvas.width;
+  // Simple redraw approach: just draw a vertical line overlay
+  // We do this by showing/hiding a positioned div since redrawing canvas is expensive
+  var existing = document.getElementById('mfa-playhead');
+  if (!existing) {
+    existing = document.createElement('div');
+    existing.id = 'mfa-playhead';
+    existing.style.cssText = 'position:absolute;top:0;bottom:0;width:1px;background:#e94560;pointer-events:none;z-index:5;';
+    canvas.parentNode.style.position = 'relative';
+    canvas.parentNode.appendChild(existing);
+  }
+  var pct = (t / totalDur * 100).toFixed(2);
+  existing.style.left = pct + '%';
+  existing.style.display = 'block';
+  // Highlight current tier segments
+  _mfaViewerHighlightSegments(t);
+}
+
+function _mfaViewerHighlightSegments(t) {
+  var segs = document.querySelectorAll('#mfa-viewer-tiers .mfa-tier-seg');
+  for (var i = 0; i < segs.length; i++) {
+    var el = segs[i];
+    var xmin = parseFloat(el.getAttribute('data-xmin') || '0');
+    var xmax = parseFloat(el.getAttribute('data-xmax') || '0');
+    if (t >= xmin && t < xmax) {
+      el.style.boxShadow = '0 0 6px rgba(233,69,96,0.8)';
+      el.style.zIndex = '3';
+    } else {
+      el.style.boxShadow = '';
+      el.style.zIndex = '';
+    }
+  }
+}
+
+function mfaViewerTogglePlay() {
+  if (!_mfaViewerAudio) return;
+  var btn = document.getElementById('mfa-viewer-play');
+  if (_mfaViewerAudio.paused) {
+    _mfaViewerAudio.play();
+    btn.textContent = '⏸ 暂停';
+  } else {
+    _mfaViewerAudio.pause();
+    btn.textContent = '▶ 播放';
+  }
+}
+
+function mfaViewerSeek(value) {
+  var t = parseInt(value) / 1000;
+  if (_mfaViewerAudio) _mfaViewerAudio.currentTime = t;
+  _mfaViewerDrawPlayhead(t);
+}
+
+function mfaViewerPlaySegment(xmin, xmax) {
+  if (_mfaViewerAudio) {
+    _mfaViewerAudio.currentTime = xmin;
+    _mfaViewerAudio.play();
+    document.getElementById('mfa-viewer-play').textContent = '⏸ 暂停';
+    // Stop after segment
+    var stopAt = xmax;
+    var check = setInterval(function() {
+      if (!_mfaViewerAudio || _mfaViewerAudio.currentTime >= stopAt) {
+        if (_mfaViewerAudio) _mfaViewerAudio.pause();
+        clearInterval(check);
+        document.getElementById('mfa-viewer-play').textContent = '▶ 播放';
+      }
+    }, 50);
+  }
+}
+
