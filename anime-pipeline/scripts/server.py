@@ -97,6 +97,11 @@ def _save_denoise_jobs():
         tmp = _DENOISE_JOBS_FILE + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
+        if os.path.exists(_DENOISE_JOBS_FILE) and os.path.getsize(_DENOISE_JOBS_FILE) > 2:
+            try:
+                os.replace(_DENOISE_JOBS_FILE, _DENOISE_JOBS_FILE + ".bak")
+            except Exception:
+                pass
         os.replace(tmp, _DENOISE_JOBS_FILE)
     except Exception as e:
         print(f"[denoise] Failed to save jobs: {e}")
@@ -109,7 +114,13 @@ def _load_denoise_jobs():
     try:
         with open(_DENOISE_JOBS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-        for job_id, jd in data.items():
+    except Exception as e:
+        print(f"[startup] Failed to read denoise jobs file: {e}")
+        return
+
+    restored = 0
+    for job_id, jd in data.items():
+        try:
             files = []
             for fd in jd.get("files", []):
                 files.append(DenoiseFileItem(
@@ -128,13 +139,14 @@ def _load_denoise_jobs():
                 current_file=jd.get("current_file", ""),
                 created_at=jd.get("created_at", time.time()),
             )
-            if job.status == "running":
+            if job.status in ("running", "pending"):
                 job.status = "interrupted"
                 job.current_file = "服务器重启中断"
             _denoise_jobs[job_id] = job
-        print(f"[startup] Restored {len(_denoise_jobs)} denoise jobs from disk")
-    except Exception as e:
-        print(f"[startup] Failed to load denoise jobs: {e}")
+            restored += 1
+        except Exception as e:
+            print(f"[startup] Failed to restore denoise job {job_id}: {e}")
+    print(f"[startup] Restored {restored} denoise jobs from disk")
 
 
 # ============================================================
@@ -157,26 +169,38 @@ def _save_asr_jobs():
         tmp = _ASR_JOBS_FILE + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
+        if os.path.exists(_ASR_JOBS_FILE) and os.path.getsize(_ASR_JOBS_FILE) > 2:
+            try:
+                os.replace(_ASR_JOBS_FILE, _ASR_JOBS_FILE + ".bak")
+            except Exception:
+                pass
         os.replace(tmp, _ASR_JOBS_FILE)
     except Exception as e:
         print(f"[asr] Failed to save jobs: {e}")
 
 
 def _load_asr_jobs():
-    """Restore ASR jobs from disk on startup. Mark running jobs as interrupted."""
+    """Restore ASR jobs from disk on startup. Mark running/pending jobs as interrupted."""
     if not os.path.exists(_ASR_JOBS_FILE):
         return
     try:
         with open(_ASR_JOBS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-        for job_id, jd in data.items():
-            if jd.get("status") == "running":
+    except Exception as e:
+        print(f"[startup] Failed to read ASR jobs file: {e}")
+        return
+
+    restored = 0
+    for job_id, jd in data.items():
+        try:
+            if jd.get("status") in ("running", "pending"):
                 jd["status"] = "interrupted"
                 jd["current_step"] = "服务器重启中断"
             _asr_jobs[job_id] = jd
-        print(f"[startup] Restored {len(_asr_jobs)} ASR jobs from disk")
-    except Exception as e:
-        print(f"[startup] Failed to load ASR jobs: {e}")
+            restored += 1
+        except Exception as e:
+            print(f"[startup] Failed to restore ASR job {job_id}: {e}")
+    print(f"[startup] Restored {restored} ASR jobs from disk")
 
 
 # ============================================================
@@ -242,6 +266,12 @@ def _save_pv_jobs():
         tmp = _PV_JOBS_FILE + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
+        # Atomic replace: keep .bak as recovery fallback
+        if os.path.exists(_PV_JOBS_FILE) and os.path.getsize(_PV_JOBS_FILE) > 2:
+            try:
+                os.replace(_PV_JOBS_FILE, _PV_JOBS_FILE + ".bak")
+            except Exception:
+                pass
         os.replace(tmp, _PV_JOBS_FILE)
     except Exception as e:
         print(f"[pv] Failed to save jobs: {e}")
@@ -254,7 +284,13 @@ def _load_pv_jobs():
     try:
         with open(_PV_JOBS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-        for job_id, jd in data.items():
+    except Exception as e:
+        print(f"[startup] Failed to read pipeline video jobs file: {e}")
+        return
+
+    restored = 0
+    for job_id, jd in data.items():
+        try:
             files = []
             for fd in jd.get("files", []):
                 files.append(PipelineVideoFileItem(
@@ -278,16 +314,16 @@ def _load_pv_jobs():
                 created_at=jd.get("created_at", time.time()),
             )
             # Only keep running/pending jobs; discard completed/cancelled/error
-            if job.status == "running":
+            if job.status in ("running", "pending"):
                 job.status = "interrupted"
+                job.current_step = "interrupted (服务器重启中断)"
                 _pipeline_video_jobs[job_id] = job
-            elif job.status == "pending":
-                _pipeline_video_jobs[job_id] = job
+                restored += 1
             # completed/cancelled/error are discarded
-        _save_pv_jobs()  # persist the cleaned state
-        print(f"[startup] Restored {len(_pipeline_video_jobs)} pipeline video jobs from disk")
-    except Exception as e:
-        print(f"[startup] Failed to load pipeline video jobs: {e}")
+        except Exception as e:
+            print(f"[startup] Failed to restore pipeline video job {job_id}: {e}")
+    _save_pv_jobs()  # persist the cleaned state
+    print(f"[startup] Restored {restored} pipeline video jobs from disk")
 
 
 def _update_pipeline_job_progress(job: PipelineVideoJob):
@@ -2117,8 +2153,8 @@ def denoise_discard_job(job_id: str):
         job = _denoise_jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    if job.status != "interrupted":
-        raise HTTPException(status_code=400, detail=f"Job is {job.status}, not interrupted")
+    if job.status not in ("interrupted", "pending"):
+        raise HTTPException(status_code=400, detail=f"Job is {job.status}, not interrupted/pending")
     job.status = "cancelled"
     _save_denoise_jobs()
     return {"status": "ok", "message": "已丢弃中断的任务"}
@@ -2126,13 +2162,13 @@ def denoise_discard_job(job_id: str):
 
 @app.post("/api/denoise/job/{job_id}/resume")
 def denoise_resume_job(job_id: str):
-    """Resume an interrupted denoise job, skipping completed files."""
+    """Resume an interrupted or pending denoise job, skipping completed files."""
     with _denoise_lock:
         job = _denoise_jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    if job.status != "interrupted":
-        raise HTTPException(status_code=400, detail=f"Job is {job.status}, not interrupted")
+    if job.status not in ("interrupted", "pending"):
+        raise HTTPException(status_code=400, detail=f"Job is {job.status}, not interrupted/pending")
     job.status = "running"
     _save_denoise_jobs()
     threading.Thread(target=_run_denoise_resume, args=(job_id,), daemon=True).start()
@@ -4872,6 +4908,7 @@ def run_asr_compare_all(
     model_a: str = Query("qwen3-asr"),
     model_b: str = Query("qwen3-asr"),
     hotwords: str = Query("", description="Context/ proper nouns for recognition"),
+    filter_english: str = Query("1", description="1=force 0% match if English detected"),
     payload: dict = Body(default={}),
 ):
     """Queue audio files from a browsed folder and process sequentially.
@@ -4880,6 +4917,7 @@ def run_asr_compare_all(
     Falls back to query-param dirs for backward compatibility.
     """
     from asr_pipeline import compare_asr_pipeline, ASR_MODELS
+    _filter_english = filter_english == "1"
 
     all_files = []
     # Priority 1: JSON body with folder_path + selected_files
@@ -5034,6 +5072,7 @@ def run_asr_compare_all(
                     model_b=model_b,
                     hotwords=hotwords,
                     cancel_check=_cancel_check,
+                    filter_english=_filter_english,
                 )
                 result["source_dir"] = f["source_dir"]
 
@@ -5272,6 +5311,7 @@ def asr_compare_resume_job(job_id: str):
                         progress_callback=on_progress, source_dir=f["source_dir"],
                         model_a=model_a, model_b=model_b, hotwords=hotwords,
                         cancel_check=_cancel_check,
+                        filter_english=_filter_english,
                     )
                 result["source_dir"] = f["source_dir"]
 
@@ -5332,7 +5372,7 @@ def list_asr_compare_results():
     with _asr_compare_lock:
         results = list(_asr_compare_results.values())
 
-    # Also pull from latest completed job
+    # Also pull from latest completed job (skip deleted/discarded)
     with _asr_compare_lock:
         for j in _asr_compare_jobs.values():
             if j.get("status") == "completed":
@@ -5340,7 +5380,8 @@ def list_asr_compare_results():
                     if path not in _asr_compare_results:
                         _asr_compare_results[path] = result
 
-    results = list(_asr_compare_results.values())
+    results = [r for r in _asr_compare_results.values()
+               if r.get("user_action") not in ("deleted", "discarded")]
     results.sort(key=lambda r: r.get("source_dir", "") + r.get("audio_name", ""))
     return {"results": results}
 
@@ -5473,11 +5514,13 @@ def run_asr_compare_segmented(
     model_a: str = Query("qwen3-asr"),
     model_b: str = Query("cohere-transcribe"),
     hotwords: str = Query("", description="Context/ proper nouns for recognition"),
+    filter_english: str = Query("1", description="1=force 0% match if English detected"),
     segment_min_s: float = Query(9.0),
     segment_max_s: float = Query(16.0),
     payload: dict = Body(default={}),
 ):
     """VAD-split each audio into 10-15s segments, run two models on each, compare."""
+    _filter_english = filter_english == "1"
     from asr_pipeline import segment_and_compare_pipeline, ASR_MODELS
 
     folder_path = payload.get("folder_path", "").strip() if payload else ""
@@ -6098,13 +6141,13 @@ def pv_discard_job(job_id: str):
 
 @app.post("/api/pipeline-video/job/{job_id}/resume")
 def pv_resume_job(job_id: str):
-    """Resume an interrupted pipeline video job, skipping completed files."""
+    """Resume an interrupted or pending pipeline video job, skipping completed files."""
     with _pipeline_video_lock:
         job = _pipeline_video_jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    if job.status != "interrupted":
-        raise HTTPException(status_code=400, detail=f"Job is {job.status}, not interrupted")
+    if job.status not in ("interrupted", "pending"):
+        raise HTTPException(status_code=400, detail=f"Job is {job.status}, not interrupted/pending")
     job.status = "running"
     job.cancelled = False
     _update_pipeline_job_progress(job)
@@ -7470,8 +7513,22 @@ def _run_mfa_subprocess(job_id: str, cmd: list[str], env_extra: dict = None,
 
     try:
         process_env = os.environ.copy()
+        # Ensure conda bin is in PATH (for mfa, fstcompile, etc.)
+        for _p in [os.path.expanduser("~/miniconda3/bin"), os.path.expanduser("~/anaconda3/bin")]:
+            if os.path.isdir(_p) and _p not in process_env.get("PATH", ""):
+                process_env["PATH"] = _p + os.pathsep + process_env.get("PATH", "")
         if env_extra:
             process_env.update(env_extra)
+
+        # Log the command for debugging
+        cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
+        stdout_lines = [
+            "=" * 60 + "\n",
+            f"MFA 任务: {job.get('type', 'unknown')}\n",
+            f"步骤: {step_label}\n",
+            f"命令: {cmd_str}\n",
+            "=" * 60 + "\n\n",
+        ]
 
         process = subprocess.Popen(
             cmd,
@@ -7484,7 +7541,6 @@ def _run_mfa_subprocess(job_id: str, cmd: list[str], env_extra: dict = None,
             errors='replace',
         )
 
-        stdout_lines = []
         # Progress parsing patterns
         re_progress = _mfa_re.compile(r'\[(\d+)/(\d+)\]')  # [N/total]
         re_found = _mfa_re.compile(r'Found (\d+) wav files')
@@ -7606,14 +7662,85 @@ def mfa_trim_silence(
     return {"status": "ok", "job_id": job_id}
 
 
+def _tokenize_chinese_to_pinyin(text: str) -> str:
+    """Convert Chinese text to space-separated pinyin syllables with tone numbers.
+
+    "大家好" → "da4 jia1 hao3"
+    Non-CJK characters (Latin, digits, punctuation) are kept as-is.
+
+    Tries pypinyin in-process first; falls back to a subprocess using MFA_PYTHON
+    so the conversion works even when the server's own Python lacks pypinyin.
+    """
+    try:
+        from pypinyin import lazy_pinyin, Style
+        tokens = []
+        for ch in text:
+            if '一' <= ch <= '鿿' or '㐀' <= ch <= '䶿':
+                py = lazy_pinyin(ch, style=Style.TONE3, errors='ignore')
+                tokens.append(py[0] if py else ch)
+            elif ch.strip():
+                tokens.append(ch)
+        result = " ".join(tokens)
+        if result.strip():
+            return result
+    except ImportError:
+        pass
+
+    # In-process pypinyin not available — try subprocess with MFA_PYTHON
+    import sys as _sys
+    python_exe = _get_mfa_config("MFA_PYTHON", _sys.executable)
+    script = (
+        "import sys, json\n"
+        "text = sys.stdin.read()\n"
+        "from pypinyin import lazy_pinyin, Style\n"
+        "tokens = []\n"
+        "for ch in text:\n"
+        "    if '\\u4e00' <= ch <= '\\u9fff' or '\\u3400' <= ch <= '\\u4dbf':\n"
+        "        py = lazy_pinyin(ch, style=Style.TONE3, errors='ignore')\n"
+        "        tokens.append(py[0] if py else ch)\n"
+        "    elif ch.strip():\n"
+        "        tokens.append(ch)\n"
+        "print(' '.join(tokens))\n"
+    )
+    try:
+        result = subprocess.run(
+            [python_exe, "-c", script],
+            input=text, capture_output=True, text=True, timeout=30,
+            cwd=PROJECT_ROOT,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+
+    # Last resort: character-level split (won't match pronunciation dict well)
+    return " ".join(ch for ch in text if ch.strip())
+
+
 # Step 2: Generate TXT
-@app.post("/api/mfa/generate-txt")
-def _zh_tokenize_script(jsonl_path, output_dir, text_key, wav_key, dict_path, overwrite):
-    """Return a Python one-liner script for Chinese tokenization + TXT generation."""
+def _zh_tokenize_script(jsonl_path, output_dir, text_key, wav_key, dict_path, overwrite, wav_link_dir=None):
+    """Return a Python one-liner script for Chinese tokenization + TXT generation.
+
+    Converts Chinese text to space-separated pinyin syllables with tone numbers
+    (e.g. "你好世界" → "ni3 hao3 shi4 jie4") so MFA can look them up in the
+    fullpinyin_enword pronunciation dictionary.
+
+    If wav_link_dir is provided, each source WAV is hardlinked (or copied) into
+    that directory so MFA align can find it by stem without requiring the user
+    to manually copy files around.
+    """
+    wav_link_repr = repr(str(wav_link_dir)) if wav_link_dir else ''
     return (
-        "import json, os, sys\n"
+        "import json, os, sys, re, shutil\n"
         "os.makedirs(" + repr(str(output_dir)) + ", exist_ok=True)\n"
-        "try: import jieba\nexcept ImportError: jieba = None\n"
+        "_wav_link_dir = " + (repr(str(wav_link_dir)) if wav_link_dir else 'None') + "\n"
+        "if _wav_link_dir: os.makedirs(_wav_link_dir, exist_ok=True)\n"
+        "# --- pypinyin: Chinese char → pinyin with tone number (ni3, hao3) ---\n"
+        "try:\n"
+        "  from pypinyin import lazy_pinyin, Style\n"
+        "except ImportError:\n"
+        "  lazy_pinyin = None\n"
+        "# --- dict_words: load dictionary keys for OOV checking ---\n"
         "dict_words = set()\n"
         "if " + repr(bool(dict_path)) + ":\n"
         "  with open(" + repr(str(dict_path)) + ", 'r', encoding='utf-8-sig') as f:\n"
@@ -7624,6 +7751,7 @@ def _zh_tokenize_script(jsonl_path, output_dir, text_key, wav_key, dict_path, ov
         "        if w: dict_words.add(w)\n"
         "oovs = {}\n"
         "written = 0\n"
+        "linked = 0\n"
         "with open(" + repr(str(jsonl_path)) + ", 'r', encoding='utf-8') as f:\n"
         "  for line in f:\n"
         "    line = line.strip()\n"
@@ -7634,11 +7762,36 @@ def _zh_tokenize_script(jsonl_path, output_dir, text_key, wav_key, dict_path, ov
         "    if not text or not wav: continue\n"
         "    stem = os.path.splitext(os.path.basename(wav))[0]\n"
         "    out = os.path.join(" + repr(str(output_dir)) + ", stem + '.txt')\n"
+        "    # Link WAV into wav_link_dir so MFA finds it without manual copy\n"
+        "    if _wav_link_dir:\n"
+        "      _wav_src = wav if os.path.isabs(wav) else os.path.join(os.getcwd(), wav)\n"
+        "      _wav_dst = os.path.join(_wav_link_dir, stem + '.wav')\n"
+        "      if os.path.exists(_wav_src) and not os.path.exists(_wav_dst):\n"
+        "        try:\n"
+        "          os.link(_wav_src, _wav_dst)\n"  # hardlink, fast & no space cost
+        "          linked += 1\n"
+        "        except OSError:\n"
+        "          shutil.copy2(_wav_src, _wav_dst)\n"
+        "          linked += 1\n"
         "    if os.path.exists(out) and not " + repr(overwrite) + ": continue\n"
-        "    if jieba:\n"
-        "      tokens = [w.strip() for w in jieba.cut(text) if w.strip()]\n"
+        "    if lazy_pinyin:\n"
+        "      # Convert each CJK char to pinyin tone3; keep non-CJK tokens as-is.\n"
+        "      tokens = []\n"
+        "      for ch in text:\n"
+        "        if '\\u4e00' <= ch <= '\\u9fff' or '\\u3400' <= ch <= '\\u4dbf':\n"
+        "          # CJK character → pinyin syllable\n"
+        "          py = lazy_pinyin(ch, style=Style.TONE3, errors='ignore')\n"
+        "          tokens.append(py[0] if py else ch)\n"
+        "        elif ch.strip():\n"
+        "          # Non-CJK (Latin, digits, punctuation) — keep as-is, skip spaces\n"
+        "          tokens.append(ch)\n"
         "    else:\n"
-        "      tokens = list(text)\n"
+        "      # Fallback: split on whitespace / char-level (won't match dict)\n"
+        "      try:\n"
+        "        import jieba\n"
+        "        tokens = [w.strip() for w in jieba.cut(text) if w.strip()]\n"
+        "      except ImportError:\n"
+        "        tokens = list(text)\n"
         "    # Check OOV against dictionary\n"
         "    if dict_words:\n"
         "      for t in tokens:\n"
@@ -7647,7 +7800,7 @@ def _zh_tokenize_script(jsonl_path, output_dir, text_key, wav_key, dict_path, ov
         "    with open(out, 'w', encoding='utf-8') as of:\n"
         "      of.write(' '.join(tokens) + '\\n')\n"
         "    written += 1\n"
-        "print(f'Done. written={written}')\n"
+        "print(f'Done. written={written} linked={linked}')\n"
         "if oovs:\n"
         "  oov_path = os.path.join(os.path.dirname(" + repr(str(output_dir)) + "), os.path.basename(" + repr(str(output_dir)) + ") + '_final_oovs.txt')\n"
         "  with open(oov_path, 'w', encoding='utf-8') as of:\n"
@@ -7669,10 +7822,13 @@ def mfa_generate_txt(
     max_merge_tokens: int = Query(5),
     oov_report: str = Query("", description="Optional custom OOV report path"),
     language: str = Query("zh", description="Language: jp or zh"),
+    wav_link_dir: str = Query("", description="Auto-link source WAVs into this dir so MFA finds them without manual copy"),
 ):
     """Step 2: Generate MFA TXT transcript files from JSONL."""
     job_id = uuid.uuid4().hex[:12]
     python_exe = _get_mfa_config("MFA_PYTHON", "python")
+
+    _wav_link = wav_link_dir or MFA_WAV_DIR
 
     if language == "jp":
         script = os.path.join(MFA_SCRIPTS_DIR, "generate_wav_txt.py")
@@ -7682,11 +7838,12 @@ def mfa_generate_txt(
         if overwrite: cmd.append("--overwrite")
         if dict_path: cmd.extend(["--dict-path", dict_path])
         if oov_report: cmd.extend(["--oov-report", oov_report])
+        if _wav_link: cmd.extend(["--wav-link-dir", _wav_link])
         step_label = "SudachiPy 分词中..."
     else:
-        # Chinese: use internal tokenizer (jieba)
-        step_label = "jieba 中文分词中..."
-        cmd = [python_exe, "-c", _zh_tokenize_script(jsonl_path, output_dir, text_key, wav_key, dict_path, overwrite)]
+        # Chinese: use internal tokenizer (pypinyin)
+        step_label = "pypinyin 中文分词+拼音转换中..."
+        cmd = [python_exe, "-c", _zh_tokenize_script(jsonl_path, output_dir, text_key, wav_key, dict_path, overwrite, _wav_link)]
 
     with _mfa_lock:
         _mfa_jobs[job_id] = {
@@ -7718,16 +7875,22 @@ def mfa_validate(
     overwrite: bool = Query(True),
 ):
     """Step 3a: Run MFA validate to check data readiness."""
+    import tempfile as _tmp
     job_id = uuid.uuid4().hex[:12]
     models_root = _get_mfa_config("MFA_MODELS_DIR", MFA_MODELS_DIR)
-    temp = temp_dir or _get_mfa_config("MFA_TEMP_DIR", MFA_TEMP_DIR)
+    temp = _tmp.mkdtemp(prefix="mfa_val_")
     mfa_exe = _get_mfa_config("MFA_EXECUTABLE", "mfa")
+
+    dict_path = os.path.join(models_root, "pretrained_models", "dictionary", dictionary + ".dict")
+    acoustic_path = os.path.join(models_root, "pretrained_models", "acoustic", acoustic_model, acoustic_model)
+    if not os.path.isdir(acoustic_path):
+        acoustic_path = os.path.join(models_root, "pretrained_models", "acoustic", acoustic_model)
 
     cmd = [
         mfa_exe, "validate",
         txt_dir,
-        dictionary,
-        "--acoustic_model_path", acoustic_model,
+        dict_path,
+        "--acoustic_model_path", acoustic_path,
         "--output_directory", output_dir,
         "--temporary_directory", temp,
         "--num_jobs", str(num_jobs),
@@ -7744,7 +7907,7 @@ def mfa_validate(
             "job_id": job_id, "type": "mfa-validate", "status": "pending",
             "progress": 0, "current_step": "等待开始", "stdout": "", "error": None,
             "created_at": time.time(),
-            "params": {"txt_dir": txt_dir, "output_dir": output_dir},
+            "params": {"txt_dir": txt_dir, "output_dir": output_dir, "wav_dir": wav_dir},
         }
         _save_mfa_jobs()
 
@@ -7773,16 +7936,49 @@ def mfa_align(
     no_textgrid_cleanup: bool = Query(True),
 ):
     """Step 3b: Run MFA align to produce TextGrid files."""
+    import tempfile as _tmp, shutil as _shutil
     job_id = uuid.uuid4().hex[:12]
     models_root = _get_mfa_config("MFA_MODELS_DIR", MFA_MODELS_DIR)
-    temp = temp_dir or _get_mfa_config("MFA_TEMP_DIR", MFA_TEMP_DIR)
+    temp = _tmp.mkdtemp(prefix="mfa_align_")
     mfa_exe = _get_mfa_config("MFA_EXECUTABLE", "mfa")
+
+    # Resolve relative paths to absolute (MFA needs absolute paths)
+    if not os.path.isabs(txt_dir):
+        txt_dir = os.path.normpath(os.path.join(PROJECT_ROOT, txt_dir))
+    if not os.path.isabs(output_dir):
+        output_dir = os.path.normpath(os.path.join(PROJECT_ROOT, output_dir))
+    if wav_dir and not os.path.isabs(wav_dir):
+        wav_dir = os.path.normpath(os.path.join(PROJECT_ROOT, wav_dir))
+
+    # Resolve model names to full paths
+    dict_path = os.path.join(models_root, "pretrained_models", "dictionary", dictionary + ".dict")
+    if not os.path.exists(dict_path):
+        dict_path = _get_mfa_config("MFA_DICT_PATH_ZH" if "pinyin" in dictionary or "enword" in dictionary else "MFA_DICT_PATH", dictionary)
+    acoustic_path = os.path.join(models_root, "pretrained_models", "acoustic", acoustic_model, acoustic_model)
+    if not os.path.isdir(acoustic_path):
+        acoustic_path = os.path.join(models_root, "pretrained_models", "acoustic", acoustic_model)
+
+    # Normalize TXT filenames: strip _qwen3/_firered suffixes so stems match WAV
+    import re as _mfa_re
+    corpus_dir = txt_dir
+    if os.path.isdir(txt_dir):
+        needs_fix = False
+        for _fn in os.listdir(txt_dir):
+            if _fn.lower().endswith(".txt") and _mfa_re.search(r'_(qwen3|firered|sensevoice)', _fn.lower()):
+                needs_fix = True; break
+        if needs_fix:
+            norm_dir = _tmp.mkdtemp(prefix="mfa_corpus_")
+            for _fn in os.listdir(txt_dir):
+                if _fn.lower().endswith(".txt"):
+                    _new = _mfa_re.sub(r'_(qwen3|firered|sensevoice)', '', _fn, flags=_mfa_re.IGNORECASE)
+                    _shutil.copy2(os.path.join(txt_dir, _fn), os.path.join(norm_dir, _new))
+            corpus_dir = norm_dir
 
     cmd = [
         mfa_exe, "align",
-        txt_dir,
-        dictionary,
-        acoustic_model,
+        corpus_dir,
+        dict_path,
+        acoustic_path,
         output_dir,
         "--output_format", output_format,
         "--temporary_directory", temp,
@@ -7804,7 +8000,7 @@ def mfa_align(
             "job_id": job_id, "type": "mfa-align", "status": "pending",
             "progress": 0, "current_step": "等待开始", "stdout": "", "error": None,
             "created_at": time.time(),
-            "params": {"txt_dir": txt_dir, "output_dir": output_dir},
+            "params": {"txt_dir": txt_dir, "output_dir": output_dir, "wav_dir": wav_dir},
         }
         _save_mfa_jobs()
 
@@ -7831,6 +8027,7 @@ def mfa_postprocess(
     fix_short_multi_unit: bool = Query(True),
     filter_suspicious_alignment: bool = Query(True),
     copy_errors: bool = Query(False),
+    language: str = Query("jp", description="Language: zh (Chinese pinyin) or jp (Japanese romaji)"),
 ):
     """Step 4: Post-process MFA TextGrid output (add tiers, fix alignment, filter)."""
     job_id = uuid.uuid4().hex[:12]
@@ -7861,13 +8058,14 @@ def mfa_postprocess(
         cmd.append("--no-filter-suspicious-alignment")
     if copy_errors:
         cmd.append("--copy-errors")
+    cmd.extend(["--language", language])
 
     with _mfa_lock:
         _mfa_jobs[job_id] = {
             "job_id": job_id, "type": "mfa-postprocess", "status": "pending",
             "progress": 0, "current_step": "等待开始", "stdout": "", "error": None,
             "created_at": time.time(),
-            "params": {"textgrid_dir": textgrid_dir, "output_dir": output_dir},
+            "params": {"txt_dir": txt_dir, "textgrid_dir": textgrid_dir, "output_dir": output_dir, "wav_dir": wav_dir},
         }
         _save_mfa_jobs()
 
@@ -7958,6 +8156,9 @@ def mfa_run_all(payload: dict = Body(...)):
                 cmd = step_info["build_cmd"]()
                 env = step_info.get("env", None)
                 process_env = os.environ.copy()
+                for _p in [os.path.expanduser("~/miniconda3/bin"), os.path.expanduser("~/anaconda3/bin")]:
+                    if os.path.isdir(_p) and _p not in process_env.get("PATH", ""):
+                        process_env["PATH"] = _p + os.pathsep + process_env.get("PATH", "")
                 if env:
                     process_env.update(env)
 
@@ -8046,6 +8247,7 @@ def _build_trim_cmd(python_exe, payload):
 
 def _build_generate_cmd(python_exe, payload):
     lang = payload.get("language", "zh")
+    _wav_link = payload.get("gen_wav_link_dir", "") or MFA_WAV_DIR
     if lang == "jp":
         script = os.path.join(MFA_SCRIPTS_DIR, "generate_wav_txt.py")
         cmd = [python_exe, script, "--jsonl", payload.get("gen_jsonl_path", ""),
@@ -8057,17 +8259,18 @@ def _build_generate_cmd(python_exe, payload):
         if payload.get("gen_overwrite", True): cmd.append("--overwrite")
         if payload.get("gen_dict_path"): cmd.extend(["--dict-path", payload["gen_dict_path"]])
         if payload.get("gen_oov_report"): cmd.extend(["--oov-report", payload["gen_oov_report"]])
+        cmd.extend(["--wav-link-dir", _wav_link])
     else:
         cmd = [python_exe, "-c", _zh_tokenize_script(
             payload.get("gen_jsonl_path", ""), payload.get("gen_output_dir", ""),
             payload.get("gen_text_key", "text"), payload.get("gen_wav_key", "wav_file"),
-            payload.get("gen_dict_path", ""), payload.get("gen_overwrite", True))]
+            payload.get("gen_dict_path", ""), payload.get("gen_overwrite", True),
+            _wav_link)]
     return cmd
 
 
 def _build_align_cmd(payload):
     wav_dir = payload.get("align_wav_dir", "")
-    temp = payload.get("align_temp_dir", "") or _get_mfa_config("MFA_TEMP_DIR", MFA_TEMP_DIR)
     output_format = payload.get("align_output_format", "long_textgrid")
     num_jobs = int(payload.get("align_num_jobs", 8))
     clean = payload.get("align_clean", True)
@@ -8075,12 +8278,37 @@ def _build_align_cmd(payload):
     no_tokenization = payload.get("align_no_tokenization", True)
     no_textgrid_cleanup = payload.get("align_no_textgrid_cleanup", True)
     mfa_exe = _get_mfa_config("MFA_EXECUTABLE", "mfa")
+    model_root = _get_mfa_config("MFA_MODELS_DIR", MFA_MODELS_DIR)
+    dictionary = payload.get("align_dictionary", "fullpinyin_enword")
+    acoustic = payload.get("align_acoustic_model", "corp4EPL_sat2")
+
+    dict_path = os.path.join(model_root, "pretrained_models", "dictionary", dictionary + ".dict")
+    acoustic_path = os.path.join(model_root, "pretrained_models", "acoustic", acoustic, acoustic)
+    if not os.path.isdir(acoustic_path):
+        acoustic_path = os.path.join(model_root, "pretrained_models", "acoustic", acoustic)
+
+    # Normalize TXT filenames: strip _qwen3/_firered suffixes
+    import re as _mfa_re2, shutil as _shutil2, tempfile as _tmp2
+    txt_dir = payload.get("align_txt_dir", "")
+    corpus_dir = txt_dir
+    if os.path.isdir(txt_dir):
+        needs_fix = False
+        for _fn in os.listdir(txt_dir):
+            if _fn.lower().endswith(".txt") and _mfa_re2.search(r'_(qwen3|firered|sensevoice)', _fn.lower()):
+                needs_fix = True; break
+        if needs_fix:
+            norm_dir = _tmp2.mkdtemp(prefix="mfa_alld_")
+            for _fn in os.listdir(txt_dir):
+                if _fn.lower().endswith(".txt"):
+                    _new = _mfa_re2.sub(r'_(qwen3|firered|sensevoice)', '', _fn, flags=_mfa_re2.IGNORECASE)
+                    _shutil2.copy2(os.path.join(txt_dir, _fn), os.path.join(norm_dir, _new))
+            corpus_dir = norm_dir
 
     cmd = [
         mfa_exe, "align",
-        payload.get("align_txt_dir", ""),
-        payload.get("align_dictionary", "japanese_mfa"),
-        payload.get("align_acoustic_model", "japanese_mfa"),
+        corpus_dir,
+        dict_path,
+        acoustic_path,
         payload.get("align_output_dir", ""),
         "--output_format", output_format,
         "--temporary_directory", temp,
@@ -8242,27 +8470,88 @@ def mfa_parse_textgrid(path: str = Query(..., description="Path to TextGrid file
 
 
 @app.get("/api/mfa/find-wav")
-def mfa_find_wav(textgrid_path: str = Query(..., description="TextGrid file path, finds matching WAV by stem")):
-    """Given a TextGrid path, try to find the corresponding WAV file."""
+def mfa_find_wav(textgrid_path: str = Query(..., description="TextGrid file path, finds matching WAV by stem"),
+                 wav_dir: str = Query("", description="Optional WAV search directory")):
+    """Given a TextGrid path, find the corresponding WAV by stem matching.
+
+    Step 3 align: TextGrid in output_dir, WAV in wav_dir (or tg_dir or MFA_WAV_DIR).
+    Strategy: strip known segment suffixes from TG stem, then match against WAV stems.
+    """
+    import re as _fw_re
     if not os.path.exists(textgrid_path):
         raise HTTPException(status_code=404, detail="TextGrid not found")
 
-    stem = os.path.splitext(os.path.basename(textgrid_path))[0]
+    tg_stem = os.path.splitext(os.path.basename(textgrid_path))[0]
     tg_dir = os.path.dirname(textgrid_path)
 
-    # Search strategy:
-    # 1. Same directory
-    # 2. Parent directory / mfa/wav / <stem>.wav
-    # 3. Walk up to find <stem>.wav
-    candidates = [
-        os.path.join(tg_dir, stem + ".wav"),
-        os.path.join(MFA_WAV_DIR, stem + ".wav"),
-        os.path.join(MFA_POST_DIR, "..", stem + ".wav"),
-    ]
-    for c in candidates:
-        if os.path.exists(c):
-            return {"wav_path": os.path.normpath(c).replace("\\", "/"), "stem": stem, "source": "match"}
-    return {"wav_path": "", "stem": stem, "source": "not_found", "hint": "将 WAV 文件放到 data/mfa/wav/ 下可自动匹配"}
+    # Build search dirs: wav_dir (step 3 input) first, then tg_dir, then defaults
+    search_dirs = []
+    if wav_dir and os.path.isdir(wav_dir):
+        search_dirs.append(wav_dir)
+    if tg_dir not in search_dirs:
+        search_dirs.append(tg_dir)
+    if os.path.isdir(MFA_WAV_DIR) and MFA_WAV_DIR not in search_dirs:
+        search_dirs.append(MFA_WAV_DIR)
+
+    # Collect all WAV stems from search dirs
+    all_wavs = []  # (stem, full_path)
+    for sd in search_dirs:
+        try:
+            for name in sorted(os.listdir(sd)):
+                nl = name.lower()
+                if nl.endswith('.wav') or nl.endswith('.mp3') or nl.endswith('.flac'):
+                    all_wavs.append((os.path.splitext(name)[0], os.path.join(sd, name)))
+        except OSError:
+            continue
+
+    if not all_wavs:
+        return {"wav_path": "", "stem": tg_stem, "source": "not_found",
+                "hint": f"搜索目录中无 WAV 文件: {search_dirs}"}
+
+    # Generate candidate stems from the TextGrid stem by progressively stripping suffixes
+    # e.g. "锈湖_seg001_separated_seg002" → "锈湖_seg001_separated" → "锈湖"
+    candidate_stems = [tg_stem]
+    stripped = tg_stem
+    while True:
+        new_stem = _fw_re.sub(r'_seg\d+$|_part\d+$|_chunk\d+$|_clip\d+$|_separated$|_[0-9a-f]{8,}$', '', stripped)
+        if new_stem == stripped:
+            break
+        candidate_stems.append(new_stem)
+        stripped = new_stem
+
+    # Try each candidate stem: exact match first, then prefix/suffix match
+    for cs in candidate_stems:
+        for wav_stem, wav_path in all_wavs:
+            if cs.lower() == wav_stem.lower():
+                return {"wav_path": os.path.normpath(wav_path).replace("\\", "/"),
+                        "stem": wav_stem, "source": "exact" if cs == tg_stem else "fuzzy"}
+
+    # Best-effort: find WAV whose stem shares the longest common prefix with any candidate
+    best = None
+    best_len = 0
+    for cs in candidate_stems:
+        cs_lower = cs.lower()
+        for wav_stem, wav_path in all_wavs:
+            w_lower = wav_stem.lower()
+            # Longest common prefix
+            lcp = 0
+            for a, b in zip(cs_lower, w_lower):
+                if a == b: lcp += 1
+                else: break
+            if lcp > best_len:
+                best_len = lcp
+                best = (wav_stem, wav_path)
+
+    if best and best_len > 5:  # require at least 5 chars of overlap
+        return {"wav_path": os.path.normpath(best[1]).replace("\\", "/"),
+                "stem": best[0], "source": "similarity", "common_prefix_len": best_len}
+
+    return {"wav_path": "", "stem": tg_stem, "source": "not_found",
+            "candidates": candidate_stems,
+            "search_dirs": [d.replace("\\", "/") for d in search_dirs],
+            "wav_count": len(all_wavs),
+            "sample_wavs": [w[0] for w in all_wavs[:5]],
+            "hint": "将匹配的 WAV 放入 wav 目录"}
 
 
 @app.get("/api/mfa/stream")
@@ -8321,6 +8610,53 @@ def mfa_waveform(path: str = Query(..., description="Path to WAV file"),
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read waveform: {e}")
+
+
+# Tokenize a TXT file directly (skip JSONL)
+@app.post("/api/mfa/tokenize-txt")
+def mfa_tokenize_txt(
+    txt_path: str = Query(..., description="Path to the TXT file with raw text"),
+    wav_file: str = Query(..., description="Matching WAV filename"),
+    output_dir: str = Query(..., description="Output directory for tokenized TXT"),
+    language: str = Query("zh", description="zh or jp"),
+):
+    """Read a TXT, tokenize with jieba (zh) or SudachiPy (jp), write result."""
+    if not os.path.isfile(txt_path):
+        raise HTTPException(status_code=404, detail="TXT file not found")
+    with open(txt_path, "r", encoding="utf-8") as f:
+        text = f.read().strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="TXT file is empty")
+
+    # Resolve to absolute path relative to PROJECT_ROOT
+    out_dir = Path(output_dir)
+    if not out_dir.is_absolute():
+        out_dir = Path(PROJECT_ROOT) / out_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = Path(wav_file).stem
+    out_path = out_dir / (stem + ".txt")
+
+    if language == "jp":
+        python_exe = _get_mfa_config("MFA_PYTHON", "python")
+        import tempfile as _tmp3
+        with _tmp3.NamedTemporaryFile(mode="w", suffix=".jsonl", encoding="utf-8", delete=False) as tmp:
+            json.dump({"text": text, "wav_file": Path(wav_file).name}, tmp, ensure_ascii=False)
+            tmp.write("\n"); tmp_jsonl = tmp.name
+        script = os.path.join(MFA_SCRIPTS_DIR, "generate_wav_txt.py")
+        subprocess.run([python_exe, script, "--jsonl", tmp_jsonl, "--output-dir", str(out_dir),
+                        "--mode", "A", "--overwrite"], capture_output=True, cwd=PROJECT_ROOT, timeout=120)
+        try: os.unlink(tmp_jsonl)
+        except: pass
+    else:
+        tokenized = _tokenize_chinese_to_pinyin(text)
+        out_path.write_text(tokenized + "\n", encoding="utf-8")
+
+    result_text = ""
+    if out_path.exists():
+        with open(str(out_path), "r", encoding="utf-8") as f:
+            result_text = f.read()[:300]
+    return {"status": "ok", "output_path": str(out_path), "output_dir": str(out_dir),
+            "token_count": len(result_text.split()), "preview": result_text}
 
 
 # Auto-find TXT transcript for an audio file
@@ -8429,6 +8765,11 @@ def mfa_find_txt(audio_path: str = Query(..., description="Path to audio file"))
             "hint": f"TXT not found, searched: {txt_dir}, {fb_dir}"}
 
 
+# Simple TTL cache for browse-dir results (helps with NAS/large dirs)
+_browse_cache: dict[str, tuple[float, dict]] = {}
+_BROWSE_CACHE_TTL = 10.0  # seconds
+
+
 # MFA directory browser — shows folders + SRT files
 @app.get("/api/mfa/browse-dir")
 def mfa_browse_dir(path: str = Query("", description="Absolute directory path"),
@@ -8441,8 +8782,17 @@ def mfa_browse_dir(path: str = Query("", description="Absolute directory path"),
     if not path or not os.path.isdir(path):
         # Choose default based on file type
         audio_exts = {".wav", ".mp3", ".flac", ".m4a", ".ogg", ".opus", ".aac"}
+        textgrid_exts = {".textgrid"}
         if set(exts) & audio_exts:
             path = PIPELINE_VIDEO_DIR
+        elif set(exts) & textgrid_exts:
+            # For TextGrid files, prefer MFA post dir, then aligned, then MFA root
+            if os.path.isdir(MFA_POST_DIR):
+                path = MFA_POST_DIR
+            elif os.path.isdir(MFA_ALIGNED_DIR):
+                path = MFA_ALIGNED_DIR
+            else:
+                path = MFA_WAV_DIR
         else:
             path = os.path.join(DATA_DIR, "asr", "folder_output")
         if not os.path.isdir(path):
@@ -8452,35 +8802,68 @@ def mfa_browse_dir(path: str = Query("", description="Absolute directory path"),
         os.makedirs(path, exist_ok=True)
 
     path = os.path.normpath(path)
+
+    # Check cache (keyed by path + sorted exts), skip if _ bypass param present
+    cache_key = path + "|" + ",".join(sorted(exts))
+    now = time.time()
+    if "_" not in request.query_params:
+        cached = _browse_cache.get(cache_key)
+        if cached and now - cached[0] < _BROWSE_CACHE_TTL:
+            return cached[1]
+
     folders = []
     files = []
     try:
-        # Use scandir — DirEntry caches stat from the directory listing,
-        # avoiding a separate syscall per file (big win on NAS / large dirs).
         with os.scandir(path) as it:
-            for entry in sorted(it, key=lambda e: e.name):
+            for entry in it:
                 if entry.is_dir() and not entry.name.startswith("."):
                     folders.append({"name": entry.name, "path": entry.path.replace("\\", "/"), "type": "dir"})
                 elif entry.is_file() and entry.name.lower().endswith(exts):
-                    try:
-                        size_kb = round(entry.stat().st_size / 1024, 1)
-                    except OSError:
-                        size_kb = 0.0
                     ft = os.path.splitext(entry.name)[1].lower().lstrip(".")
-                    files.append({"name": entry.name, "path": entry.path.replace("\\", "/"), "type": ft, "size_kb": size_kb})
+                    files.append({"name": entry.name, "path": entry.path.replace("\\", "/"), "type": ft, "size_kb": 0})
+
+        folders.sort(key=lambda e: e["name"])
+        files.sort(key=lambda e: e["name"])
 
         parent = os.path.dirname(path)
         if parent == path or not os.path.isdir(parent):
             parent = None
 
-        return {
+        result = {
             "path": path.replace("\\", "/"),
             "parent": parent.replace("\\", "/") if parent else None,
             "folders": folders,
             "files": files,
         }
+        # Store in cache with TTL
+        _browse_cache[cache_key] = (now, result)
+        # Limit cache size
+        if len(_browse_cache) > 50:
+            oldest = min(_browse_cache, key=lambda k: _browse_cache[k][0])
+            del _browse_cache[oldest]
+        return result
     except PermissionError:
         raise HTTPException(status_code=403, detail="Permission denied")
+
+
+# MFA read text file — for viewing logs and text content
+@app.get("/api/mfa/read-text")
+def mfa_read_text(path: str = Query(..., description="Path to text/log file")):
+    """Read a text file and return its content (truncated to 50KB for UI display)."""
+    import mimetypes
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File not found")
+    ext = os.path.splitext(path)[1].lower()
+    # Allow text-like extensions and common log/vocab files
+    allowed = {".txt", ".log", ".csv", ".json", ".out", ".dict", ".yaml", ".yml", ".textgrid", ".TextGrid"}
+    if ext not in allowed:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}")
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read(51200)  # 50KB limit
+        return {"path": os.path.normpath(path).replace("\\", "/"), "content": content, "size": len(content)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # MFA text file matching — fuzzy search text files by audio stem fields
@@ -8531,11 +8914,13 @@ def mfa_copy_text_for_align(
     text_path: str = Query(..., description="Source text file path"),
     audio_stem: str = Query(..., description="Target audio stem for naming"),
     output_dir: str = Query(..., description="MFA TXT output directory"),
+    language: str = Query("zh", description="Language: jp or zh"),
+    dict_path: str = Query("", description="Optional MFA dictionary path for OOV checking"),
 ):
-    """Copy text file content to the MFA TXT directory, renamed to match audio stem.
+    """Tokenize an external text file and save to the MFA TXT directory.
 
-    This allows using an external text file directly as the MFA alignment corpus
-    without going through Step 2 (TXT generation from JSONL).
+    Unlike the old behaviour, this runs tokenization (jieba for zh, SudachiPy for jp)
+    so the output is ready for MFA alignment without Step 2.
     """
     if not os.path.exists(text_path):
         raise HTTPException(status_code=404, detail=f"Text file not found: {text_path}")
@@ -8552,15 +8937,51 @@ def mfa_copy_text_for_align(
     os.makedirs(output_dir, exist_ok=True)
     out_path = os.path.join(output_dir, audio_stem + ".txt")
 
-    with open(out_path, "w", encoding="utf-8") as f:
-        f.write(content)
+    if language == "jp":
+        # Japanese: tokenize via SudachiPy (inline subprocess to isolate deps)
+        python_exe = _get_mfa_config("MFA_PYTHON", sys.executable)
+        tokenize_script = (
+            "import sys, os\n"
+            "text = sys.stdin.read()\n"
+            "try:\n"
+            "    from sudachipy import dictionary, tokenizer\n"
+            "    tk = dictionary.Dictionary().create()\n"
+            "    mode = tokenizer.Tokenizer.SplitMode." + {"A": "A", "B": "B", "C": "C"}.get(
+                _get_mfa_config("MFA_DEFAULT_TOKENIZE_MODE", "A"), "A") + "\n"
+            "    tokens = [m.surface() for m in tk.tokenize(text, mode)]\n"
+            "except ImportError:\n"
+            "    # Fallback: just split by common delimiters\n"
+            "    import re\n"
+            "    tokens = [t for t in re.split(r'[\\s。、，！？…「」『』（）\\(\\)]+', text) if t]\n"
+            "print(' '.join(tokens))\n"
+        )
+        try:
+            result = subprocess.run(
+                [python_exe, "-c", tokenize_script],
+                input=content, capture_output=True, text=True, timeout=60,
+                cwd=PROJECT_ROOT,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr or "SudachiPy tokenization failed")
+            tokenized = result.stdout.strip()
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Japanese tokenization failed: {e}")
+    else:
+        # Chinese: convert to pinyin for fullpinyin_enword dictionary
+        tokenized = _tokenize_chinese_to_pinyin(content)
 
-    preview = content[:500] if len(content) > 500 else content
+    # Write tokenized result
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(tokenized + "\n")
+
+    preview = tokenized[:500] if len(tokenized) > 500 else tokenized
     return {
         "status": "ok",
         "output_path": out_path.replace("\\", "/"),
         "content_preview": preview,
-        "content_length": len(content),
+        "content_length": len(tokenized),
+        "language": language,
+        "tokenized": True,
     }
 
 
@@ -8725,16 +9146,10 @@ def mfa_srt_to_txt(
             try: os.unlink(tmp_jsonl)
             except Exception: pass
     else:
-        # Chinese: use jieba if available, otherwise character-level split
-        try:
-            import jieba
-            words = list(jieba.cut(full_text))
-        except ImportError:
-            # Fallback: character-level for Chinese, MFA can use G2P
-            words = list(full_text)
-        tokenized = " ".join(w for w in words if w.strip())
+        # Chinese: convert to pinyin for fullpinyin_enword dictionary
+        tokenized = _tokenize_chinese_to_pinyin(full_text)
         txt_path.write_text(tokenized + "\n", encoding="utf-8")
-        stdout = f"Chinese tokenized: {len(words)} tokens → {txt_path}"
+        stdout = f"Chinese pinyin: {len(tokenized.split())} syllables → {txt_path}"
 
     txt_exists = txt_path.exists()
     txt_content = ""

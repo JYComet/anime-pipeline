@@ -72,6 +72,14 @@ except ModuleNotFoundError as exc:
     ) from exc
 
 try:
+    from pypinyin import pinyin as _pypinyin, Style as _PinyinStyle
+    _HAS_PYPINYIN = True
+except ModuleNotFoundError:
+    _HAS_PYPINYIN = False
+    _pypinyin = None
+    _PinyinStyle = None
+
+try:
     from tqdm import tqdm
 except ModuleNotFoundError:
     def tqdm(iterable, **_kwargs):
@@ -370,6 +378,34 @@ def make_romaji_tier(words_tier: Tier, kakasi_converter) -> Tier:
             )
         )
     return Tier("romaji", words_tier.xmin, words_tier.xmax, intervals)
+
+
+def token_to_pinyin(token: str) -> str:
+    """Convert a Chinese token to pinyin using pypinyin (tone marks)."""
+    if token in QUESTION_MARKS:
+        return QUESTION_MARK
+    if is_silence_mark(token):
+        return token
+    base = strip_punctuation(token)
+    if not base:
+        return token
+    if not _HAS_PYPINYIN:
+        return base
+    result = _pypinyin(base, style=_PinyinStyle.TONE)
+    return "".join(item[0] for item in result) or base
+
+
+def make_pinyin_tier(words_tier: Tier) -> Tier:
+    intervals = []
+    for interval in words_tier.intervals:
+        intervals.append(
+            Interval(
+                interval.xmin,
+                interval.xmax,
+                token_to_pinyin(interval.text),
+            )
+        )
+    return Tier("pinyin", words_tier.xmin, words_tier.xmax, intervals)
 
 
 def locate_question_tokens(raw_text: str, words: list[str]) -> tuple[list[dict], list[str]]:
@@ -714,7 +750,7 @@ def fix_short_multi_unit_before_silence(
         return textgrid, fixes, ["short_multi_unit fix skipped: missing wav"]
 
     words = tier_by_name(textgrid, "words")
-    romaji = tier_by_name(textgrid, "romaji")
+    pron = tier_by_name(textgrid, "romaji") or tier_by_name(textgrid, "pinyin")
     phones = tier_by_name(textgrid, "phones")
     if words is None or phones is None:
         return textgrid, fixes, ["short_multi_unit fix skipped: missing words/phones"]
@@ -781,9 +817,9 @@ def fix_short_multi_unit_before_silence(
         old_word_xmax = word.xmax
         word.xmax = speech_end
         silence.xmin = speech_end
-        if romaji is not None and len(romaji.intervals) == len(words.intervals):
-            romaji.intervals[word_index].xmax = speech_end
-            romaji.intervals[word_index + 1].xmin = speech_end
+        if pron is not None and len(pron.intervals) == len(words.intervals):
+            pron.intervals[word_index].xmax = speech_end
+            pron.intervals[word_index + 1].xmin = speech_end
 
         p1.xmin = old_p1_xmin
         p1.xmax = t_end
@@ -973,6 +1009,7 @@ def process_one(
     filtered_dir: Path,
     kakasi_converter,
     args,
+    language: str = "jp",
 ) -> dict:
     stem = textgrid_path.stem
     report = {"stem": stem, "status": "ok", "warnings": []}
@@ -1007,7 +1044,10 @@ def process_one(
     )
     report["warnings"].extend(q_warnings)
     report.update(q_stats)
-    romaji_tier = make_romaji_tier(words_with_questions, kakasi_converter)
+    if language == "zh":
+        pronunciation_tier = make_pinyin_tier(words_with_questions)
+    else:
+        pronunciation_tier = make_romaji_tier(words_with_questions, kakasi_converter)
 
     raw_tier = Tier(
         "raw_text",
@@ -1028,7 +1068,7 @@ def process_one(
             raw_tier,
             tokenized_tier,
             words_with_questions,
-            romaji_tier,
+            pronunciation_tier,
             phones_with_questions,
         ],
     )
@@ -1146,6 +1186,12 @@ def main() -> int:
         action="store_true",
         help="Copy files with processing errors to the filtered directory.",
     )
+    parser.add_argument(
+        "--language",
+        choices=["zh", "jp"],
+        default="jp",
+        help="Language for pronunciation tier: zh (pinyin) or jp (romaji). Default: jp",
+    )
     args = parser.parse_args()
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -1156,7 +1202,19 @@ def main() -> int:
     kakasi_converter = kakasi()
     reports = []
     textgrid_paths = sorted(args.textgrid_dir.glob("*.TextGrid"))
-    for textgrid_path in tqdm(textgrid_paths, desc="Postprocess TextGrids", unit="tg"):
+    total = len(textgrid_paths)
+    print(f"共 {total} 个 TextGrid 待处理")
+    print(f"语言: {'中文拼音' if args.language == 'zh' else '日文罗马音'}")
+    print(f"TXT 目录: {args.txt_dir}")
+    print(f"WAV 目录: {args.wav_dir or '(未指定)'}")
+    print()
+    for idx, textgrid_path in enumerate(tqdm(textgrid_paths, desc="Postprocess TextGrids", unit="tg"), 1):
+        stem = textgrid_path.stem
+        wav_info = wav_paths.get(stem, "")
+        txt_info = (args.txt_dir / f"{stem}.txt")
+        has_txt = "✓" if txt_info.exists() else "✗"
+        print(f"[{idx}/{total}] {stem}")
+        print(f"       TXT: {has_txt} {txt_info.name}  |  WAV: {wav_info or '(未关联)'}")
         try:
             report = process_one(
                 textgrid_path=textgrid_path,
@@ -1167,6 +1225,7 @@ def main() -> int:
                 filtered_dir=args.filtered_dir,
                 kakasi_converter=kakasi_converter,
                 args=args,
+                language=args.language,
             )
         except Exception as exc:
             report = {

@@ -99,6 +99,12 @@ class Pipeline:
             tmp = self._jobs_file + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+            # Keep .bak as recovery fallback, but don't backup empty state
+            if os.path.exists(self._jobs_file) and os.path.getsize(self._jobs_file) > 2:
+                try:
+                    os.replace(self._jobs_file, self._jobs_file + ".bak")
+                except Exception:
+                    pass
             os.replace(tmp, self._jobs_file)
         except Exception as e:
             print(f"[pipeline] Failed to save jobs: {e}")
@@ -110,7 +116,13 @@ class Pipeline:
         try:
             with open(self._jobs_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            for jid, jd in data.items():
+        except Exception as e:
+            print(f"[pipeline] Failed to read jobs file: {e}")
+            return
+
+        restored = 0
+        for jid, jd in data.items():
+            try:
                 # Only restore non-download jobs (download ones come from aria2c)
                 st = jd.get("status", "")
                 if st in ("download_submitted",):
@@ -144,9 +156,10 @@ class Pipeline:
                         duration_seconds=s.get("duration", 0),
                     ))
                 self.jobs[jid] = job
-            print(f"[pipeline] Restored {len(self.jobs)} jobs from disk")
-        except Exception as e:
-            print(f"[pipeline] Failed to load jobs: {e}")
+                restored += 1
+            except Exception as e:
+                print(f"[pipeline] Failed to restore job {jid}: {e}")
+        print(f"[pipeline] Restored {restored} jobs from disk")
 
     def create_job(self, job_id: str, title: str = "", magnet: str = "") -> PipelineJob:
         job = PipelineJob(job_id=job_id, title=title, magnet=magnet)

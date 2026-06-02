@@ -29,5 +29,9 @@ demucs>=4.0
 # Optional: torrent file list parsing (pip install bencodepy)
 # bencodepy>=0.4.0
 
+# MFA Chinese alignment — tokenization + pinyin conversion
+jieba>=0.42.0
+pypinyin>=0.51.0
+
 # Optional: ONNX Runtime for gender detection (pip install onnxruntime)
 # onnxruntime>=1.18.0

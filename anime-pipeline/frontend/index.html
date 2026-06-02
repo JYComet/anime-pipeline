@@ -246,7 +246,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
 .mfa-browser-item .mfa-file-icon { font-size:14px;flex-shrink:0; }
 .mfa-browser-item .mfa-item-name { flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
 .mfa-browser-item .mfa-item-size { font-size:11px;color:var(--text2);flex-shrink:0; }
-.mfa-tier-row { display:flex;align-items:stretch;border-bottom:1px solid #1a1a2e; }
+.mfa-tier-row { display:flex;align-items:stretch;border-bottom:1px solid #222; }
 .mfa-tier-label {
   width:110px;flex-shrink:0;font-size:10px;color:var(--text2);
   padding:3px 6px;display:flex;align-items:center;justify-content:flex-end;
@@ -260,16 +260,17 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
   transition:opacity .15s;
 }
 .mfa-tier-seg:hover { opacity:0.8; }
-.mfa-tier-seg.sil0 { background:#1a2a1a;color:#3a5a3a; }
-.mfa-tier-seg.sil1 { background:#1a2a2a;color:#3a6a6a; }
-.mfa-tier-seg.sil2 { background:#2a1a1a;color:#6a4a3a; }
-.mfa-tier-seg.sil3 { background:#2a1a2a;color:#6a3a6a; }
-.mfa-tier-seg.word { background:#0f3460;color:#4a9eff; }
-.mfa-tier-seg.phone { background:#1a3a2a;color:#4ecca3; }
-.mfa-tier-seg.romaji { background:#2a2a0a;color:#cccc44; }
-.mfa-tier-seg.raw { background:#2a0a2a;color:#cc88cc; }
-.mfa-tier-seg.token { background:#0a2a2a;color:#44cccc; }
-.mfa-tier-seg.question { background:#3a1a1a;color:#e94560; }
+.mfa-tier-seg.sil0 { background:#141414;color:#333; }
+.mfa-tier-seg.sil1 { background:#161616;color:#3a3a3a; }
+.mfa-tier-seg.sil2 { background:#181818;color:#444; }
+.mfa-tier-seg.sil3 { background:#1a1a1a;color:#555; }
+.mfa-tier-seg.word { background:#222;color:#ccc; }
+.mfa-tier-seg.phone { background:#1e1e1e;color:#aaa; }
+.mfa-tier-seg.romaji { background:#1c1c1c;color:#999; }
+.mfa-tier-seg.pinyin { background:#1c1c1c;color:#999; }
+.mfa-tier-seg.raw { background:#1a1a1a;color:#bbb; }
+.mfa-tier-seg.token { background:#202020;color:#888; }
+.mfa-tier-seg.question { background:#333;color:#fff; }
 .toast-container { position: fixed; top: 16px; right: 16px; z-index: 1000; display: flex; flex-direction: column; gap: 8px; }
 .toast {
   padding: 12px 20px; border-radius: 8px; font-size: 14px;
@@ -1375,6 +1376,12 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
         </div>
         <!-- File list -->
         <div id="cmp-folder-file-list" class="file-list" style="display:none;max-height:250px;overflow-y:auto;margin-top:4px;border:1px solid var(--border);border-radius:8px;"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;">
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;">
+            <input type="checkbox" id="cmp-filter-english" checked style="cursor:pointer;">
+            <span style="color:var(--text2);">英文过滤（含英文 → 匹配率 0%）</span>
+          </label>
+        </div>
         <!-- Run button -->
         <button class="btn btn-primary" id="btn-cmp-run" onclick="runAsrCompareAll()" style="width:100%;padding:10px;font-size:14px;margin-top:8px;" disabled>
           开始对比
@@ -2059,6 +2066,18 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
           <input type="checkbox" id="mfa-gen-overwrite" checked><label style="font-size:12px;color:var(--text2);">覆盖已有文件</label></div>
       </div>
       <button class="btn btn-primary" onclick="mfaRunStep('generate')" id="btn-mfa-gen" style="margin-top:10px;">执行步骤 2</button>
+
+      <!-- Generate result display -->
+      <div id="mfa-gen-result" style="display:none;margin-top:10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <span style="font-size:13px;font-weight:600;">分词结果</span>
+          <span id="mfa-gen-result-count" style="font-size:11px;color:var(--text2);"></span>
+        </div>
+        <div id="mfa-gen-result-list" style="max-height:250px;overflow-y:auto;font-size:12px;"></div>
+        <div style="display:flex;gap:8px;margin-top:8px;" id="mfa-gen-result-actions">
+          <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="mfaGenBrowseDir()">浏览输出目录</button>
+        </div>
+      </div>
     </details>
 
     <!-- Step 3: MFA Align -->
@@ -2096,6 +2115,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
         </div>
         <button class="btn btn-secondary" onclick="mfaUseOriginalPaths()" style="font-size:11px;padding:4px 10px;margin-top:10px;">📂 使用音频原路径</button>
         <button class="btn btn-primary" onclick="mfaRunStep('align')" id="btn-mfa-align" style="margin-top:10px;">执行 Align</button>
+        <button class="btn btn-secondary" onclick="mfaViewAlignResults()" style="font-size:11px;padding:4px 10px;margin-top:10px;margin-left:6px;">在 TextGrid 查看器中查看结果</button>
       </div>
 
       <!-- Validate panel (hidden by default) -->
@@ -2118,6 +2138,16 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
             <input type="checkbox" id="mfa-val-overwrite" checked><label style="font-size:12px;color:var(--text2);">--overwrite</label></div>
         </div>
         <button class="btn btn-secondary" onclick="mfaRunStep('validate')" id="btn-mfa-validate" style="margin-top:10px;">执行 Validate</button>
+
+        <!-- Validate result display -->
+        <div id="mfa-val-result" style="display:none;margin-top:10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <span style="font-size:13px;font-weight:600;" id="mfa-val-result-title">验证结果</span>
+            <span id="mfa-val-result-badge" style="font-size:11px;padding:2px 8px;border-radius:10px;"></span>
+          </div>
+          <div id="mfa-val-result-body" style="font-size:12px;color:var(--text2);"></div>
+          <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;" id="mfa-val-result-actions"></div>
+        </div>
       </div>
     </details>
 
@@ -2150,6 +2180,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
       </div>
       <button class="btn btn-secondary" onclick="mfaUseOriginalPaths()" style="font-size:11px;padding:4px 10px;margin-top:10px;">📂 使用音频原路径</button>
       <button class="btn btn-primary" onclick="mfaRunStep('postprocess')" id="btn-mfa-post" style="margin-top:10px;">执行步骤 4</button>
+      <button class="btn btn-secondary" onclick="mfaViewPostResults()" style="font-size:11px;padding:4px 10px;margin-top:10px;margin-left:6px;">在 TextGrid 查看器中查看结果</button>
       <!-- Matched text content preview -->
       <div id="mfa-post-text-preview" style="display:none;margin-top:8px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px;">
         <div style="font-size:11px;color:var(--accent);margin-bottom:4px;">📝 对齐语料文本 (来自已选中的文本文件):</div>
@@ -2193,6 +2224,15 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
 
         <!-- Tier timeline -->
         <div id="mfa-viewer-tiers" style="background:var(--bg);border-radius:0 0 6px 6px;overflow:hidden;"></div>
+
+        <!-- Matching TXT content -->
+        <div id="mfa-viewer-txt-panel" style="display:none;margin-top:8px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <span style="font-size:11px;color:var(--accent);">📝 匹配文本: <span id="mfa-viewer-txt-name" style="color:var(--text2);">-</span></span>
+            <button class="btn btn-secondary" style="font-size:10px;padding:2px 8px;" onclick="document.getElementById('mfa-viewer-txt-content').style.display=document.getElementById('mfa-viewer-txt-content').style.display==='none'?'block':'none'">显示/隐藏</button>
+          </div>
+          <pre id="mfa-viewer-txt-content" style="white-space:pre-wrap;word-break:break-all;font-size:13px;margin:0;max-height:120px;overflow-y:auto;color:var(--text);"></pre>
+        </div>
       </div>
       <div id="mfa-viewer-empty" style="text-align:center;padding:30px;color:var(--text2);">
         <p>选择一个 .TextGrid 文件查看对齐结果</p>
@@ -2210,6 +2250,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
       <details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12px;color:var(--text2);">查看输出日志</summary>
         <pre id="mfa-stdout" style="max-height:300px;overflow-y:auto;background:#000;color:#0f0;padding:8px;border-radius:4px;font-size:11px;white-space:pre-wrap;word-break:break-all;margin-top:4px;"></pre>
       </details>
+      <div id="mfa-progress-actions" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);"></div>
     </div>
 
     <!-- Job history -->
@@ -2220,6 +2261,18 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
       </div>
     </div>
   </div>
+
+<!-- MFA Log Viewer Modal -->
+<div id="mfa-log-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:2000;overflow-y:auto;">
+  <div style="max-width:800px;margin:40px auto;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:24px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <h3 style="margin:0;font-size:15px;" id="mfa-log-modal-title">日志文件</h3>
+      <button class="btn btn-secondary" onclick="document.getElementById('mfa-log-modal').style.display='none'" style="font-size:18px;padding:2px 10px;">&times;</button>
+    </div>
+    <div style="font-size:11px;color:var(--text2);margin-bottom:8px;" id="mfa-log-modal-path"></div>
+    <pre id="mfa-log-modal-content" style="max-height:500px;overflow-y:auto;background:#000;color:#0f0;padding:10px;border-radius:6px;font-size:11px;white-space:pre-wrap;word-break:break-all;margin:0;"></pre>
+  </div>
+</div>
 
 </main>
 
@@ -2616,7 +2669,7 @@ function switchTab(name) {
   if (name === 'denoise') {
     if (!_denoiseJobsRestored) { restoreDenoiseJobs(); _denoiseJobsRestored = true; }
   }
-  if (name === 'mfa') { loadMfaJobs(); if (!_mfaSrtDir) mfaSrtLoadDir(''); if (!_mfaAudioDir) mfaAudioLoadDir('/mnt/project/ComicCut/anime-pipeline/data/asr_compare/segments/'); if (!_mfaTextDir) mfaTextLoadDir('/mnt/project/ComicCut/anime-pipeline/data/asr_compare/segments/'); if (!window._mfaWired) { mfaApplySettingsDefaults(); mfaWireAutoSync(); window._mfaWired = true; } }
+  if (name === 'mfa') { loadMfaJobs(); _mfaRestoreState(); if (!_mfaSrtDir) mfaSrtLoadDir(''); if (!_mfaAudioDir) { if (!_mfaAudioDir) mfaAudioLoadDir('/mnt/project/ComicCut/anime-pipeline/data/asr_compare/segments/'); } if (!_mfaTextDir) mfaTextLoadDir('/mnt/project/ComicCut/anime-pipeline/data/asr_compare/segments/'); if (!window._mfaWired) { mfaApplySettingsDefaults(); mfaWireAutoSync(); window._mfaWired = true; } }
 }
 
 // ============================================================
@@ -6890,8 +6943,9 @@ async function runAsrExtraction() {
       '&model=' + encodeURIComponent(model) +
       '&language=' + encodeURIComponent(lang) +
       '&device=' + encodeURIComponent(device) +
-      '&hotwords=' + encodeURIComponent(hotwords);
-    if (outputDir) url += '&output_dir=' + encodeURIComponent(outputDir);
+      '&hotwords=' + encodeURIComponent(hotwords) +
+    '&filter_english=' + (filterEnglish ? '1' : '0');
+  if (outputDir) url += '&output_dir=' + encodeURIComponent(outputDir);
     var resp = await fetch(url, { method: 'POST' });
     var data = await resp.json();
     if (data.status !== 'started') { toast('启动 ASR 失败', 'error'); return; }
@@ -7869,6 +7923,7 @@ function runAsrCompareAll() {
   var lang = document.getElementById('cmp-lang-select').value || 'ja';
   var device = document.getElementById('cmp-device-select').value || 'cuda';
   var hotwords = document.getElementById('cmp-hotwords').value.trim();
+  var filterEnglish = document.getElementById('cmp-filter-english').checked;
   var isSeg = _cmpMode === 'seg';
 
   document.getElementById('cmp-progress').style.display = 'block';
@@ -11795,6 +11850,138 @@ var _mfaJobId = null;
 var _mfaPollTimer = null;
 var _mfaLang = 'zh';
 
+// --- MFA State Persistence (survives refresh & tab switch) ---
+var _mfaStateRestored = false;
+
+function _mfaSaveState() {
+  var state = {
+    // Audio selection
+    audioSelected: _mfaAudioSelected || '',
+    audioSelectedName: _mfaAudioSelectedName || '',
+    audioDir: _mfaAudioDir || '',
+    // Text selection
+    textSelected: _mfaTextSelected || '',
+    textSelectedName: _mfaTextSelectedName || '',
+    textSelectedIsTxt: _mfaTextSelectedIsTxt || false,
+    textDir: _mfaTextDir || '',
+    // Matched text
+    matchedTxtPath: _mfaMatchedTxtPath || '',
+    matchedTxtDir: _mfaMatchedTxtDir || '',
+    // SRT
+    srtDir: _mfaSrtDir || '',
+    srtSelected: _mfaSrtSelected || '',
+    srtSelectedName: _mfaSrtSelectedName || '',
+    // Language
+    lang: _mfaLang || 'zh',
+    // MFA sub-tab
+    mfaSub: (document.getElementById('mfa-align-panel') && document.getElementById('mfa-align-panel').style.display !== 'none') ? 'align' : 'validate',
+    // Section open states
+    sections: {},
+    // Form values
+    formValues: {},
+    // Viewer
+    viewerDir: _mfaViewerDir || '',
+    viewerTgPath: _mfaViewerTgPath || '',
+  };
+  // Collect section open states
+  for (var s = 1; s <= 4; s++) {
+    var sec = document.getElementById('mfa-section-' + s);
+    if (sec) state.sections['mfa-section-' + s] = sec.open;
+  }
+  var viewerSec = document.getElementById('mfa-viewer-section');
+  if (viewerSec) state.sections['mfa-viewer-section'] = viewerSec.open;
+  // Collect form values (all .mfa-input elements)
+  var inputs = document.querySelectorAll('.mfa-input, #mfa-tab input[type="checkbox"]');
+  for (var i = 0; i < inputs.length; i++) {
+    var el = inputs[i];
+    if (el.id) {
+      if (el.type === 'checkbox') state.formValues[el.id] = el.checked;
+      else state.formValues[el.id] = el.value;
+    }
+  }
+  try { localStorage.setItem('mfa_state', JSON.stringify(state)); } catch(e) {}
+}
+
+function _mfaRestoreState() {
+  if (_mfaStateRestored) return;
+  _mfaStateRestored = true;
+  try {
+    var raw = localStorage.getItem('mfa_state');
+    if (!raw) return;
+    var state = JSON.parse(raw);
+    // Restore language first
+    if (state.lang && state.lang !== _mfaLang) mfaSwitchLanguage(state.lang);
+    // Restore audio
+    if (state.audioSelected) {
+      _mfaAudioSelected = state.audioSelected;
+      _mfaAudioSelectedName = state.audioSelectedName || '';
+      _mfaAudioDir = state.audioDir || '';
+      var asName = document.getElementById('mfa-audio-selected-name');
+      if (asName) { asName.textContent = state.audioSelectedName || ''; document.getElementById('mfa-audio-selected').style.display = 'block'; }
+      if (state.matchedTxtPath) {
+        _mfaMatchedTxtPath = state.matchedTxtPath;
+        _mfaMatchedTxtDir = state.matchedTxtDir || '';
+      }
+    }
+    // Restore text
+    if (state.textSelected) {
+      _mfaTextSelected = state.textSelected;
+      _mfaTextSelectedName = state.textSelectedName || '';
+      _mfaTextSelectedIsTxt = state.textSelectedIsTxt || false;
+      mfaTextUpdateSelectionUI();
+      if (_mfaTextSelectedIsTxt) {
+        // Update step 2 button
+        var genBtn = document.getElementById('btn-mfa-gen');
+        if (genBtn) { genBtn.textContent = '步骤 2 (已跳过 — 使用外部 TXT)'; genBtn.disabled = true; genBtn.style.background = '#666'; genBtn.style.cursor = 'not-allowed'; }
+        var runAllBtn = document.getElementById('btn-mfa-runall');
+        if (runAllBtn) runAllBtn.textContent = '运行管线 (1→跳过2→3→4)';
+      }
+    }
+    // Restore SRT
+    if (state.srtSelected) {
+      _mfaSrtSelected = state.srtSelected;
+      _mfaSrtSelectedName = state.srtSelectedName || '';
+    }
+    // Restore directories
+    if (state.textDir) { _mfaTextDir = state.textDir; mfaTextLoadDir(state.textDir); }
+    if (state.srtDir) { _mfaSrtDir = state.srtDir; mfaSrtLoadDir(state.srtDir); }
+    if (state.audioDir) { _mfaAudioDir = state.audioDir; mfaAudioLoadDir(state.audioDir); }
+    // Restore form values
+    if (state.formValues) {
+      for (var key in state.formValues) {
+        var el = document.getElementById(key);
+        if (el) {
+          if (el.type === 'checkbox') el.checked = state.formValues[key];
+          else el.value = state.formValues[key];
+        }
+      }
+    }
+    // Restore section states
+    if (state.sections) {
+      for (var secId in state.sections) {
+        var sec = document.getElementById(secId);
+        if (sec) sec.open = state.sections[secId];
+      }
+    }
+    // Restore sub-tab
+    if (state.mfaSub === 'validate') mfaSwitchMfaSub('validate');
+    // Restore viewer
+    if (state.viewerDir) _mfaViewerDir = state.viewerDir;
+    if (state.viewerTgPath) _mfaViewerTgPath = state.viewerTgPath;
+  } catch(e) { console.error('MFA state restore failed:', e); }
+}
+
+// Auto-save on changes (debounced)
+var _mfaSaveTimer = null;
+function _mfaScheduleSave() {
+  if (_mfaSaveTimer) clearTimeout(_mfaSaveTimer);
+  _mfaSaveTimer = setTimeout(_mfaSaveState, 500);
+}
+
+// Save on page unload (refresh)
+window.addEventListener('beforeunload', _mfaSaveState);
+var _mfaLang = 'zh';
+
 // -- Language Switch ---
 var MFA_LANG_CONFIG = {
   jp: {
@@ -11811,6 +11998,7 @@ var MFA_LANG_CONFIG = {
 
 function mfaSwitchLanguage(lang) {
   _mfaLang = lang;
+  _mfaScheduleSave();
   var cfg = MFA_LANG_CONFIG[lang];
   document.getElementById('mfa-lang-label').textContent = cfg.label;
   document.getElementById('mfa-lang-jp').className = lang === 'jp' ? 'btn btn-primary' : 'btn btn-secondary';
@@ -11914,6 +12102,12 @@ function mfaWireAutoSync() {
     var el = document.getElementById(keys[i]);
     if (el) { el.addEventListener('input', mfaSyncPipeline); el.addEventListener('change', mfaSyncPipeline); }
   }
+  // Wire all MFA inputs to auto-save state
+  var allInputs = document.querySelectorAll('#tab-mfa .mfa-input, #tab-mfa input[type="checkbox"]');
+  for (var j = 0; j < allInputs.length; j++) {
+    allInputs[j].addEventListener('change', _mfaScheduleSave);
+    allInputs[j].addEventListener('input', _mfaScheduleSave);
+  }
 }
 
 // -- Audio File Browser ---
@@ -11955,7 +12149,7 @@ function _mfaRenderList(containerId, breadId, backId, data, navFn, selectFn) {
     div.className = 'mfa-browser-item file' + sel;
     div.setAttribute('data-path', af.path);
     div.onclick = (function(p, n, s) { return function() { window[selectFn](p, n, s); }; })(af.path, af.name, af.size_kb || 0);
-    div.innerHTML = '<span class="mfa-file-icon">' + icon + '</span><span class="mfa-item-name">' + escapeHtml(af.name) + '</span><span class="mfa-item-size">' + (af.size_kb || '') + ' KB</span>';
+    div.innerHTML = '<span class="mfa-file-icon">' + icon + '</span><span class="mfa-item-name">' + escapeHtml(af.name) + '</span><span class="mfa-item-size">' + (af.size_kb ? af.size_kb + ' KB' : '') + '</span>';
     frag.appendChild(div);
   }
   if (!folders.length && !files.length) {
@@ -11970,7 +12164,11 @@ function _mfaRenderList(containerId, breadId, backId, data, navFn, selectFn) {
 
 function _mfaCacheGet(path) { return _mfaDirCache[path] || null; }
 function _mfaCacheSet(path, data) {
-  if (_mfaDirCache[path]) return; // don't evict by re-adding
+  // Update existing entry in-place (directory contents may have changed)
+  if (_mfaDirCache[path]) {
+    _mfaDirCache[path] = data;
+    return;
+  }
   _mfaDirCache[path] = data;
   _mfaDirCacheKeys.push(path);
   while (_mfaDirCacheKeys.length > 20) { var old = _mfaDirCacheKeys.shift(); delete _mfaDirCache[old]; }
@@ -12016,6 +12214,7 @@ async function mfaAudioBrowseOther() {
 function mfaAudioSelectFile(path, name, sizeKb) {
   _mfaAudioSelected = path;
   _mfaAudioSelectedName = name;
+  _mfaScheduleSave();
   document.getElementById('mfa-audio-selected').style.display = 'block';
   document.getElementById('mfa-audio-selected-name').textContent = name;
   document.getElementById('mfa-audio-selected-info').textContent = sizeKb ? (sizeKb + ' KB') : '';
@@ -12044,18 +12243,45 @@ async function mfaAudioMatchText() {
     if (data.found) {
       _mfaMatchedTxtPath = data.txt_path;
       _mfaMatchedTxtDir = data.txt_dir;
-      info.textContent = '✓ 文本已匹配: ' + data.txt_path.split('/').pop();
+      var txtName = data.txt_path.split('/').pop();
+      info.textContent = '✓ 文本已匹配: ' + txtName;
       info.style.color = 'var(--success)';
-      // Auto-fill the TXT dir into Step 2 output and Step 3/4 txt_dir
-      if (data.txt_dir) {
-        var d = data.txt_dir;
-        var el2 = document.getElementById('mfa-gen-output');
-        if (!el2.value.trim() || el2.value === 'data/mfa/txt') el2.value = d;
-        var el3 = document.getElementById('mfa-align-txt-dir');
-        if (!el3.value.trim() || el3.value === 'data/mfa/txt') el3.value = d;
-        var el4 = document.getElementById('mfa-post-txt-dir');
-        if (!el4.value.trim() || el4.value === 'data/mfa/txt') el4.value = d;
-      }
+      // Auto-select in text browser
+      _mfaTextSelected = data.txt_path;
+      _mfaTextSelectedName = txtName;
+      _mfaTextSelectedIsTxt = true;
+      mfaTextLoadDir(data.txt_dir);
+      mfaTextUpdateSelectionUI();
+
+      // Use matched text content for Step 2 tokenization
+      var stem = _mfaAudioSelectedName.replace(/\.(wav|mp3|flac|m4a)$/i, '');
+      // Create JSONL from matched text content
+      mfaCreateJsonlFromMatch(stem, data);
+
+      // Step 2 output → data/mfa/txt (tokenized), Steps 3/4 use this
+      document.getElementById('mfa-gen-output').value = 'data/mfa/txt';
+      document.getElementById('mfa-align-txt-dir').value = 'data/mfa/txt';
+      document.getElementById('mfa-val-txt-dir').value = 'data/mfa/txt';
+      document.getElementById('mfa-post-txt-dir').value = 'data/mfa/txt';
+
+      // Restore step 2 button
+      document.getElementById('mfa-section-2').style.opacity = '1';
+      var genBtn = document.getElementById('btn-mfa-gen');
+      genBtn.textContent = '执行步骤 2';
+      genBtn.disabled = false;
+      genBtn.style.background = '';
+      genBtn.style.cursor = '';
+      var runAllBtn = document.getElementById('btn-mfa-runall');
+      runAllBtn.textContent = '运行完整管线 (1→2→3→4)';
+
+      document.getElementById('mfa-section-2').open = true;
+      document.getElementById('mfa-section-3').open = true;
+      document.getElementById('mfa-section-4').open = true;
+
+      mfaTextLoadPreview(data.txt_path);
+      // Scroll to step 3
+      document.getElementById('mfa-section-3').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      toast('文本已匹配: ' + stem + ' → 分词中...', 'info');
     } else {
       var reason = data.hint || data.detail || '未知错误';
       info.textContent = '⚠ 未匹配: ' + reason;
@@ -12084,17 +12310,17 @@ function mfaAudioSyncToPipeline() {
   document.getElementById('mfa-gen-jsonl').value = 'data/mfa/jsonl/' + stem + '.jsonl';
   document.getElementById('mfa-gen-output').value = 'data/mfa/txt';
   document.getElementById('mfa-align-txt-dir').value = 'data/mfa/txt';
-  document.getElementById('mfa-align-wav-dir').value = 'data/mfa/wav';
+  document.getElementById('mfa-align-wav-dir').value = dir || 'data/mfa/wav';
   document.getElementById('mfa-align-output').value = 'data/mfa/aligned';
   document.getElementById('mfa-val-txt-dir').value = 'data/mfa/txt';
-  document.getElementById('mfa-val-wav-dir').value = 'data/mfa/wav';
+  document.getElementById('mfa-val-wav-dir').value = dir || 'data/mfa/wav';
   document.getElementById('mfa-val-output').value = 'data/mfa/validate';
   document.getElementById('mfa-post-jsonl').value = 'data/mfa/jsonl/' + stem + '.jsonl';
   document.getElementById('mfa-post-txt-dir').value = 'data/mfa/txt';
   document.getElementById('mfa-post-textgrid-dir').value = 'data/mfa/aligned';
   document.getElementById('mfa-post-output').value = 'data/mfa/post';
   document.getElementById('mfa-post-filtered').value = 'data/mfa/filtered';
-  document.getElementById('mfa-post-wav-dir').value = 'data/mfa/wav';
+  document.getElementById('mfa-post-wav-dir').value = dir || 'data/mfa/wav';
 
   toast('管线路径已同步: ' + stem, 'success');
 }
@@ -12105,46 +12331,50 @@ var _mfaTextSelected = '';
 var _mfaTextSelectedName = '';
 var _mfaTextSelectedIsTxt = false;  // true when the selected file is .txt → skip step 2
 
+function _mfaTextRenderDir(data) {
+  _mfaTextDir = data.path;
+  _mfaCacheSet(data.path, data);
+  var bread = document.getElementById('mfa-text-breadcrumb');
+  var parts = data.path.split('/').filter(function(p){return p;});
+  var bc = '', cum = '';
+  for (var i = 0; i < parts.length; i++) {
+    cum += '/' + parts[i];
+    if (i > 0) bc += ' / ';
+    bc += '<span style="cursor:pointer;color:var(--accent);" onclick="mfaTextNavigate(\'' + cum.replace(/'/g, "\\'") + '\')">' + escapeHtml(parts[i]) + '</span>';
+  }
+  bread.innerHTML = bc || '/';
+  document.getElementById('mfa-text-back').disabled = !data.parent;
+  var html = '';
+  var folders = data.folders || [];
+  for (var j = 0; j < folders.length; j++) {
+    var f = folders[j];
+    html += '<div class="mfa-browser-item dir" onclick="mfaTextNavigate(\'' + f.path.replace(/'/g, "\\'") + '\')">' +
+      '<span class="mfa-folder-icon">📁</span><span class="mfa-item-name">' + escapeHtml(f.name) + '</span></div>';
+  }
+  var files = data.files || [];
+  for (var k = 0; k < files.length; k++) {
+    var tf = files[k];
+    var sel = (_mfaTextSelected === tf.path) ? ' selected' : '';
+    var icon = tf.type === 'txt' ? '📝' : '📄';
+    html += '<div class="mfa-browser-item file' + sel + '" onclick="mfaTextSelectFile(\'' + tf.path.replace(/'/g, "\\'") + '\', \'' + escapeHtml(tf.name).replace(/'/g, "\\'") + '\', \'' + (tf.size_kb || 0) + '\', ' + (tf.type === 'txt') + ')">' +
+      '<span class="mfa-file-icon">' + icon + '</span>' +
+      '<span class="mfa-item-name">' + escapeHtml(tf.name) + '</span>' +
+      '<span class="mfa-item-size">' + (tf.size_kb ? tf.size_kb + ' KB' : '') + '</span></div>';
+  }
+  if (!html) html = '<div class="empty-state" style="padding:20px;"><p>此目录下没有文本文件 (.txt/.lab/.text)</p></div>';
+  document.getElementById('mfa-text-file-list').innerHTML = html;
+}
+
 async function mfaTextLoadDir(path) {
-  var container = document.getElementById('mfa-text-file-list');
-  container.innerHTML = '<div class="empty-state" style="padding:20px;"><p>加载中...</p></div>';
+  var cached = _mfaCacheGet(path);
+  if (cached) { _mfaTextRenderDir(cached); return; }
+  document.getElementById('mfa-text-file-list').innerHTML = '<div class="empty-state" style="padding:20px;"><p>加载中...</p></div>';
   try {
     var resp = await fetch(API + '/api/mfa/browse-dir?ext=.txt,.lab,.text,.transcription&path=' + encodeURIComponent(path || ''));
     var data = await resp.json();
-    _mfaTextDir = data.path;
-
-    var bread = document.getElementById('mfa-text-breadcrumb');
-    var parts = data.path.split('/').filter(function(p){return p;});
-    var bc = '', cum = '';
-    for (var i = 0; i < parts.length; i++) {
-      cum += '/' + parts[i];
-      if (i > 0) bc += ' / ';
-      bc += '<span style="cursor:pointer;color:var(--accent);" onclick="mfaTextNavigate(\'' + cum.replace(/'/g, "\\'") + '\')">' + escapeHtml(parts[i]) + '</span>';
-    }
-    bread.innerHTML = bc || '/';
-    document.getElementById('mfa-text-back').disabled = !data.parent;
-
-    var html = '';
-    var folders = data.folders || [];
-    for (var j = 0; j < folders.length; j++) {
-      var f = folders[j];
-      html += '<div class="mfa-browser-item dir" onclick="mfaTextNavigate(\'' + f.path.replace(/'/g, "\\'") + '\')">' +
-        '<span class="mfa-folder-icon">📁</span><span class="mfa-item-name">' + escapeHtml(f.name) + '</span></div>';
-    }
-    var files = data.files || [];
-    for (var k = 0; k < files.length; k++) {
-      var tf = files[k];
-      var sel = (_mfaTextSelected === tf.path) ? ' selected' : '';
-      var icon = tf.type === 'txt' ? '📝' : '📄';
-      html += '<div class="mfa-browser-item file' + sel + '" onclick="mfaTextSelectFile(\'' + tf.path.replace(/'/g, "\\'") + '\', \'' + escapeHtml(tf.name).replace(/'/g, "\\'") + '\', \'' + (tf.size_kb || 0) + '\', ' + (tf.type === 'txt') + ')">' +
-        '<span class="mfa-file-icon">' + icon + '</span>' +
-        '<span class="mfa-item-name">' + escapeHtml(tf.name) + '</span>' +
-        '<span class="mfa-item-size">' + (tf.size_kb || '') + ' KB</span></div>';
-    }
-    if (!html) html = '<div class="empty-state" style="padding:20px;"><p>此目录下没有文本文件 (.txt/.lab/.text)</p></div>';
-    container.innerHTML = html;
+    _mfaTextRenderDir(data);
   } catch(e) {
-    container.innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
+    document.getElementById('mfa-text-file-list').innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
   }
 }
 
@@ -12169,6 +12399,7 @@ function mfaTextSelectFile(path, name, sizeKb, isTxt) {
   _mfaTextSelected = path;
   _mfaTextSelectedName = name;
   _mfaTextSelectedIsTxt = isTxt;
+  _mfaScheduleSave();
   mfaTextUpdateSelectionUI();
   mfaTextLoadDir(_mfaTextDir);
 
@@ -12256,7 +12487,7 @@ async function mfaMatchAudioText() {
         'onclick="mfaSelectTextMatch(\'' + m.path.replace(/'/g, "\\'") + '\', \'' + escapeHtml(m.name).replace(/'/g, "\\'") + '\', ' + m.is_txt + ')">' +
         '<span class="mfa-file-icon">' + icon + '</span>' +
         '<span class="mfa-item-name">' + escapeHtml(m.name) + '</span>' + badge +
-        '<span class="mfa-item-size">' + m.size_kb + ' KB</span></div>';
+        '<span class="mfa-item-size">' + (m.size_kb ? m.size_kb + ' KB' : '') + '</span></div>';
     }
     listDiv.innerHTML = html;
   } catch(e) {
@@ -12301,7 +12532,8 @@ async function mfaTextApplyToPipeline(audioStem) {
   var copyUrl = API + '/api/mfa/copy-text-for-align?' +
     'text_path=' + encodeURIComponent(_mfaTextSelected) +
     '&audio_stem=' + encodeURIComponent(audioStem) +
-    '&output_dir=' + encodeURIComponent(outputDir);
+    '&output_dir=' + encodeURIComponent(outputDir) +
+    '&language=' + encodeURIComponent(_mfaLang || 'zh');
 
   try {
     var resp = await fetch(copyUrl, { method: 'POST' });
@@ -12336,16 +12568,23 @@ async function mfaTextApplyToPipeline(audioStem) {
       }
     }
 
-    // Mark step 2 as skippable by showing a visual indicator
+    // Show tokenized preview in the text browser
+    if (data.content_preview) {
+      document.getElementById('mfa-text-preview').style.display = 'block';
+      var preview = data.content_preview.length > 500 ? data.content_preview.substring(0, 500) + '\n\n... (共 ' + data.content_length + ' 字符)' : data.content_preview;
+      document.getElementById('mfa-text-preview-content').textContent = preview;
+    }
+
+    // Mark step 2 as done — text has been tokenized via copy-text-for-align
     document.getElementById('mfa-section-2').style.opacity = '0.5';
     var genBtn = document.getElementById('btn-mfa-gen');
-    genBtn.textContent = '步骤 2 (已跳过 — 使用外部 TXT)';
+    genBtn.textContent = '步骤 2 (已完成 — 外部文本已分词)';
     genBtn.disabled = true;
     genBtn.style.background = '#666';
     genBtn.style.cursor = 'not-allowed';
     // Update run-all button label
     var runAllBtn = document.getElementById('btn-mfa-runall');
-    runAllBtn.textContent = '运行管线 (1→跳过2→3→4)';
+    runAllBtn.textContent = '运行管线 (1→2✓→3→4)';
 
     // Show text content in post-processing section
     mfaTextShowInPostprocess(audioStem);
@@ -12391,6 +12630,41 @@ function mfaTextShowInPostprocess(audioStem) {
 }
 
 // -- Use original audio/text paths in Step 3/4 ---
+async function mfaCreateJsonlFromMatch(stem, data) {
+  // Tokenize the matched TXT directly → skip JSONL, skip Step 2 button
+  try {
+    var url = API + '/api/mfa/tokenize-txt?' +
+      'txt_path=' + encodeURIComponent(data.txt_path) +
+      '&wav_file=' + encodeURIComponent(stem + '.wav') +
+      '&output_dir=' + encodeURIComponent('data/mfa/txt') +
+      '&language=' + encodeURIComponent(_mfaLang || 'zh');
+    var resp = await fetch(url, { method: 'POST' });
+    var r = await resp.json();
+    if (r.status === 'ok') {
+      var genBtn = document.getElementById('btn-mfa-gen');
+      genBtn.textContent = '步骤 2 (已完成 — ' + r.token_count + ' tokens)';
+      genBtn.disabled = true; genBtn.style.background = 'var(--success)'; genBtn.style.cursor = 'default';
+      var runAllBtn = document.getElementById('btn-mfa-runall');
+      runAllBtn.textContent = '运行管线 (3→4)';
+      // Show tokenized text inline in step 2 panel
+      _mfaGenOutputDir = r.output_dir || 'data/mfa/txt';
+      var section = document.getElementById('mfa-section-2');
+      if (section) section.open = true;
+      var panel = document.getElementById('mfa-gen-result');
+      if (panel) panel.style.display = 'block';
+      var countEl = document.getElementById('mfa-gen-result-count');
+      if (countEl) countEl.textContent = r.token_count + ' tokens';
+      var listEl = document.getElementById('mfa-gen-result-list');
+      if (listEl) listEl.innerHTML = '<pre style="white-space:pre-wrap;word-break:break-all;font-size:13px;margin:0;padding:8px;color:var(--text);">' + escapeHtml(r.preview || '(分词完成)') + '</pre>';
+      // Scroll to result
+      setTimeout(function() { section.scrollIntoView({behavior: 'smooth', block: 'center'}); }, 200);
+      toast('分词完成: ' + r.token_count + ' tokens', 'success');
+    }
+  } catch(e) {
+    console.error('Tokenize failed:', e);
+  }
+}
+
 function mfaUseOriginalPaths() {
   if (!_mfaAudioSelected) { toast('请先在顶部选择音频文件', 'info'); return; }
   var audioDir = _mfaAudioSelected.substring(0, _mfaAudioSelected.lastIndexOf('/'));
@@ -12415,49 +12689,15 @@ var _mfaSrtSelectedName = '';
 
 async function mfaSrtLoadDir(path) {
   var container = document.getElementById('mfa-srt-file-list');
+  var cached = _mfaCacheGet(path);
+  if (cached) { _mfaSrtDir = cached.path; _mfaRenderList('mfa-srt-file-list', 'mfa-srt-breadcrumb', 'mfa-srt-back', cached, 'mfaSrtNavigate', 'mfaSrtSelectFile'); return; }
   container.innerHTML = '<div class="empty-state" style="padding:30px;"><p>加载中...</p></div>';
   try {
     var resp = await fetch(API + '/api/mfa/browse-dir?ext=.srt&path=' + encodeURIComponent(path || ''));
     var data = await resp.json();
     _mfaSrtDir = data.path;
-
-    // Breadcrumb
-    var bread = document.getElementById('mfa-srt-breadcrumb');
-    var parts = data.path.split('/').filter(function(p) { return p; });
-    var bc = '';
-    var cum = '';
-    for (var i = 0; i < parts.length; i++) {
-      cum += '/' + parts[i];
-      if (i > 0) bc += ' / ';
-      bc += '<span style="cursor:pointer;color:var(--accent);" onclick="mfaSrtNavigate(\'' + cum.replace(/'/g, "\\'") + '\')">' + escapeHtml(parts[i]) + '</span>';
-    }
-    bread.innerHTML = bc || '/';
-
-    // Back button
-    document.getElementById('mfa-srt-back').disabled = !data.parent;
-
-    // Render folders + files
-    var html = '';
-    var entries = data.folders || [];
-    for (var j = 0; j < entries.length; j++) {
-      var e = entries[j];
-      html += '<div class="mfa-browser-item dir" onclick="mfaSrtNavigate(\'' + e.path.replace(/'/g, "\\'") + '\')">' +
-        '<span class="mfa-folder-icon">📁</span>' +
-        '<span class="mfa-item-name">' + escapeHtml(e.name) + '</span>' +
-      '</div>';
-    }
-    var files = data.files || [];
-    for (var k = 0; k < files.length; k++) {
-      var f = files[k];
-      var selClass = (_mfaSrtSelected === f.path) ? ' selected' : '';
-      html += '<div class="mfa-browser-item file' + selClass + '" onclick="mfaSrtSelectFile(\'' + f.path.replace(/'/g, "\\'") + '\', \'' + escapeHtml(f.name).replace(/'/g, "\\'") + '\')">' +
-        '<span class="mfa-file-icon">📄</span>' +
-        '<span class="mfa-item-name">' + escapeHtml(f.name) + '</span>' +
-        '<span class="mfa-item-size">' + f.size_kb + ' KB</span>' +
-      '</div>';
-    }
-    if (!html) html = '<div class="empty-state" style="padding:20px;"><p>此目录下没有 SRT 文件</p></div>';
-    container.innerHTML = html;
+    _mfaCacheSet(data.path, data);
+    _mfaRenderList('mfa-srt-file-list', 'mfa-srt-breadcrumb', 'mfa-srt-back', data, 'mfaSrtNavigate', 'mfaSrtSelectFile');
   } catch(e) {
     container.innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
   }
@@ -12629,6 +12869,7 @@ function mfaSwitchMfaSub(sub) {
   document.getElementById('mfa-subtab-validate').className = sub === 'validate' ? 'btn btn-primary' : 'btn btn-secondary';
   document.getElementById('mfa-align-panel').style.display = sub === 'align' ? 'block' : 'none';
   document.getElementById('mfa-validate-panel').style.display = sub === 'validate' ? 'block' : 'none';
+  _mfaScheduleSave();
 }
 
 async function mfaRunStep(step) {
@@ -12714,6 +12955,9 @@ async function mfaRunStep(step) {
     var data = await resp.json();
     if (data.status !== 'ok') { toast('启动失败', 'error'); return; }
     _mfaJobId = data.job_id;
+    // Hide stale results when starting new jobs
+    if (step === 'validate') document.getElementById('mfa-val-result').style.display = 'none';
+    if (step === 'generate') document.getElementById('mfa-gen-result').style.display = 'none';
     document.getElementById('mfa-progress-panel').style.display = 'block';
     document.getElementById('mfa-progress-title').textContent = label;
     document.getElementById('mfa-progress-status').textContent = '启动中...';
@@ -12818,8 +13062,34 @@ async function pollMfaJob() {
     document.getElementById('mfa-progress-title').textContent = (job.type || 'MFA任务') + ' - ' + job.status;
     var stdout = document.getElementById('mfa-stdout');
     if (stdout && job.stdout) stdout.textContent = job.stdout;
-    if (job.status === 'completed') { stopMfaPolling(); toast('MFA 任务完成', 'success'); loadMfaJobs(); }
-    else if (job.status === 'failed') { stopMfaPolling(); toast('MFA 任务失败', 'error'); loadMfaJobs(); }
+
+    // Update completed actions buttons
+    mfaUpdateProgressActions(job);
+
+    if (job.status === 'completed') {
+      stopMfaPolling();
+      // Show step results
+      if (job.type === 'mfa-validate') mfaDisplayValidateResult(job);
+      if (job.type === 'generate-txt') mfaShowGenerateResults((job.params && job.params.output_dir) || '');
+      // Auto-open TextGrid viewer for align / postprocess / run-all
+      var viewDir = '', viewWav = '', viewTxt = '', p = job.params || {};
+      if (job.type === 'mfa-align') {
+        viewDir = p.output_dir || ''; viewWav = p.wav_dir || ''; viewTxt = p.txt_dir || '';
+      } else if (job.type === 'mfa-postprocess') {
+        viewDir = p.output_dir || ''; viewWav = p.wav_dir || ''; viewTxt = p.txt_dir || '';
+      } else if (job.type === 'mfa-run-all') {
+        viewDir = p.post_output_dir || p.align_output_dir || '';
+        viewWav = p.align_wav_dir || '';
+        viewTxt = p.post_txt_dir || p.align_txt_dir || p.gen_output_dir || '';
+      }
+      if (viewDir) mfaAutoOpenViewer(viewDir, viewWav, viewTxt);
+      toast('MFA 任务完成', 'success'); loadMfaJobs();
+    }
+    else if (job.status === 'failed') {
+      stopMfaPolling();
+      if (job.type === 'mfa-validate') mfaDisplayValidateResult(job);
+      toast('MFA 任务失败', 'error'); loadMfaJobs();
+    }
     else if (job.status === 'cancelled') { stopMfaPolling(); toast('任务已取消', 'info'); loadMfaJobs(); }
   } catch(e) { console.error(e); }
 }
@@ -12867,6 +13137,400 @@ async function mfaCancelJob(jobId) {
 }
 
 // ============================================================
+// Progress panel action buttons — shown when job completes
+// ============================================================
+function mfaUpdateProgressActions(job) {
+  var container = document.getElementById('mfa-progress-actions');
+  if (!container) return;
+
+  // Only show buttons for completed jobs that produce viewable output
+  if (job.status !== 'completed') {
+    container.style.display = 'none';
+    return;
+  }
+
+  var actionsHtml = '';
+  var viewDir = '', viewWav = '', viewTxt = '';
+
+  if (job.type === 'mfa-align') {
+    viewDir = (job.params && job.params.output_dir) || '';
+    viewWav = (job.params && job.params.wav_dir) || '';
+    viewTxt = (job.params && job.params.txt_dir) || '';
+  } else if (job.type === 'mfa-postprocess') {
+    viewDir = (job.params && job.params.output_dir) || '';
+    viewWav = (job.params && job.params.wav_dir) || '';
+    viewTxt = (job.params && job.params.txt_dir) || '';
+  } else if (job.type === 'mfa-run-all') {
+    viewDir = (job.params && job.params.post_output_dir) || (job.params && job.params.align_output_dir) || '';
+    viewWav = (job.params && job.params.align_wav_dir) || '';
+    viewTxt = (job.params && job.params.post_txt_dir) || (job.params && job.params.align_txt_dir) || '';
+  }
+
+  if (viewDir) {
+    var label = job.type === 'mfa-postprocess' ? '后处理' : '对齐';
+    actionsHtml += '<button class="btn btn-primary" style="font-size:12px;padding:6px 14px;" onclick="mfaOpenViewerWithContext(\'' + viewDir.replace(/'/g, "\\'") + '\', \'' + viewWav.replace(/'/g, "\\'") + '\', \'' + viewTxt.replace(/'/g, "\\'") + '\')">在 TextGrid 查看器中查看 ' + label + ' 结果</button>';
+  }
+
+  // generate-txt actions
+  if (job.type === 'generate-txt') {
+    var genOut = (job.params && job.params.output_dir) || '';
+    if (genOut) {
+      actionsHtml += '<button class="btn btn-primary" style="font-size:12px;padding:6px 14px;" onclick="mfaShowGenerateResults(\'' + genOut.replace(/'/g, "\\'") + '\')">查看分词结果</button>';
+    }
+  }
+
+  // Also add validate-specific actions
+  if (job.type === 'mfa-validate') {
+    var valOut = (job.params && job.params.output_dir) || '';
+    if (valOut) {
+      actionsHtml += '<button class="btn btn-secondary" style="font-size:12px;padding:6px 14px;margin-right:8px;" onclick="mfaOpenValidateDir(\'' + valOut.replace(/'/g, "\\'") + '\')">查看验证日志</button>';
+      actionsHtml += '<button class="btn btn-secondary" style="font-size:12px;padding:6px 14px;" onclick="mfaViewLogFiles(\'' + valOut.replace(/'/g, "\\'") + '\')">浏览输出文件</button>';
+    }
+  }
+
+  if (actionsHtml) {
+    container.innerHTML = actionsHtml;
+    container.style.display = 'block';
+  } else {
+    container.style.display = 'none';
+  }
+}
+
+// Open viewer with full context (dir, wav, txt)
+function mfaOpenViewerWithContext(outputDir, wavDir, txtDir) {
+  _mfaViewerTxtDir = txtDir || '';
+  mfaAutoOpenViewer(outputDir, wavDir, txtDir);
+}
+
+// Quick-view postprocess results from current form values
+function mfaViewPostResults() {
+  var outputDir = document.getElementById('mfa-post-output').value;
+  var txtDir = document.getElementById('mfa-post-txt-dir').value;
+  var wavDir = document.getElementById('mfa-post-wav-dir').value;
+  if (!outputDir) { toast('请先填写输出目录', 'info'); return; }
+  mfaOpenViewerWithContext(outputDir, wavDir, txtDir);
+}
+
+// Quick-view align results from current form values
+function mfaViewAlignResults() {
+  var outputDir = document.getElementById('mfa-align-output').value;
+  var txtDir = document.getElementById('mfa-align-txt-dir').value;
+  var wavDir = document.getElementById('mfa-align-wav-dir').value;
+  if (!outputDir) { toast('请先填写对齐输出目录', 'info'); return; }
+  mfaOpenViewerWithContext(outputDir, wavDir, txtDir);
+}
+
+// ============================================================
+// Generate TXT result display — show tokenized text after step 2
+// ============================================================
+var _mfaGenOutputDir = '';
+
+async function mfaShowGenerateResults(outputDir) {
+  if (!outputDir) return;
+  _mfaGenOutputDir = outputDir;
+
+  var section = document.getElementById('mfa-section-2');
+  if (section) section.open = true;
+  var panel = document.getElementById('mfa-gen-result');
+  if (panel) panel.style.display = 'block';
+  var listEl = document.getElementById('mfa-gen-result-list');
+  var countEl = document.getElementById('mfa-gen-result-count');
+  if (listEl) listEl.innerHTML = '<div style="color:var(--text2);padding:8px;">加载中...</div>';
+
+  try {
+    var resp = await fetch(API + '/api/mfa/browse-dir?ext=.txt,.lab,.text&path=' + encodeURIComponent(outputDir));
+    var data = await resp.json();
+    var files = data.files || [];
+
+    if (files.length === 0) {
+      if (listEl) listEl.innerHTML = '<div style="color:var(--text2);padding:8px;">此目录下没有 TXT 文件</div>';
+      if (countEl) countEl.textContent = '0 个文件';
+      return;
+    }
+
+    if (countEl) countEl.textContent = files.length + ' 个文件';
+
+    var html = '';
+    var limit = Math.min(files.length, 20);
+    for (var i = 0; i < limit; i++) {
+      var f = files[i];
+      html += '<div class="mfa-gen-file-item" style="padding:6px 8px;border-bottom:1px solid var(--border);cursor:pointer;" onclick="mfaGenViewFile(\'' + f.path.replace(/'/g, "\\'") + '\', \'' + escapeHtml(f.name).replace(/'/g, "\\'") + '\')">' +
+        '<div style="display:flex;justify-content:space-between;">' +
+          '<span style="color:var(--accent);">📝 ' + escapeHtml(f.name) + '</span>' +
+          '<span style="font-size:10px;color:var(--text2);">' + (f.size_kb || 0) + ' KB</span>' +
+        '</div>' +
+        '<div id="mfa-gen-preview-' + i + '" style="font-size:11px;color:var(--text2);margin-top:2px;white-space:pre-wrap;word-break:break-all;max-height:40px;overflow:hidden;">加载预览...</div>' +
+      '</div>';
+    }
+    if (files.length > 20) {
+      html += '<div style="padding:8px;color:var(--text2);font-size:11px;">... 还有 ' + (files.length - 20) + ' 个文件，点击"浏览输出目录"查看全部</div>';
+    }
+    listEl.innerHTML = html;
+
+    // Lazy-load previews
+    for (var j = 0; j < limit; j++) {
+      mfaGenLoadPreview(files[j].path, j);
+    }
+
+    if (section) setTimeout(function() { section.scrollIntoView({behavior: 'smooth', block: 'center'}); }, 200);
+  } catch(e) {
+    if (listEl) listEl.innerHTML = '<div style="color:var(--danger);padding:8px;">加载失败: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+async function mfaGenLoadPreview(path, idx) {
+  try {
+    var resp = await fetch(API + '/api/mfa/read-text?path=' + encodeURIComponent(path));
+    var data = await resp.json();
+    var preview = document.getElementById('mfa-gen-preview-' + idx);
+    if (preview) {
+      var text = (data.content || '').substring(0, 200);
+      preview.textContent = text;
+      if (data.content && data.content.length > 200) preview.textContent += '...';
+    }
+  } catch(e) {}
+}
+
+function mfaGenViewFile(path, name) {
+  mfaOpenLog(path);
+}
+
+function mfaGenBrowseDir() {
+  if (!_mfaGenOutputDir) { toast('请先执行步骤 2', 'info'); return; }
+  // Navigate the text browser to the output dir
+  mfaTextLoadDir(_mfaGenOutputDir);
+  // Expand step 2 section so user can see the text browser
+  var section = document.getElementById('mfa-section-2');
+  if (section) { section.open = true; section.scrollIntoView({behavior: 'smooth', block: 'start'}); }
+  toast('文本浏览器已加载分词输出目录', 'info');
+}
+
+// ============================================================
+// Validate result display — parse MFA validate output
+// ============================================================
+function mfaDisplayValidateResult(job) {
+  var panel = document.getElementById('mfa-val-result');
+  var body = document.getElementById('mfa-val-result-body');
+  var badge = document.getElementById('mfa-val-result-badge');
+  var title = document.getElementById('mfa-val-result-title');
+  var actions = document.getElementById('mfa-val-result-actions');
+  var stdout = job.stdout || '';
+
+  // Switch to validate sub-tab so the result is visible
+  mfaSwitchMfaSub('validate');
+
+  panel.style.display = 'block';
+
+  // Parse stdout for key info
+  var oovCount = 0;
+  var oovWords = [];
+  var filesChecked = 0;
+  var filesIssues = 0;
+  var warnings = [];
+  var errors = [];
+
+  var lines = stdout.split(/\r?\n/);
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].trim();
+    if (!line) continue;
+    // "Found N wav files" / "N files validated" style lines
+    var m = line.match(/(\d+)\s*(?:files?\s*(?:validated|checked|processed|found|total))/i);
+    if (m) filesChecked = Math.max(filesChecked, parseInt(m[1]) || 0);
+    // "N files had issues"
+    var mi = line.match(/(\d+)\s*files?\s*(?:had|with)?\s*(?:issues?|errors?|problems?)/i);
+    if (mi) filesIssues = parseInt(mi[1]) || 0;
+    // OOV detection lines
+    if (/oov|out.of.vocabulary|unknown.word/i.test(line)) {
+      var mo = line.match(/(\d+)/);
+      if (mo) oovCount = parseInt(mo[1]) || oovCount;
+      warnings.push(line);
+    }
+    // Error lines
+    if (/error|fail|missing|not found|no such/i.test(line)) {
+      errors.push(line);
+    }
+    // Warning lines
+    if (/warn/i.test(line) && !/error|fail/i.test(line)) {
+      warnings.push(line);
+    }
+  }
+
+  // Status badge
+  if (job.status === 'completed' && filesIssues === 0 && oovCount === 0) {
+    badge.textContent = '全部通过';
+    badge.style.background = 'rgba(78,204,163,0.2)';
+    badge.style.color = 'var(--success)';
+  } else if (job.status === 'completed') {
+    badge.textContent = '有需要注意的项';
+    badge.style.background = 'rgba(233,169,96,0.2)';
+    badge.style.color = '#e9a960';
+  } else {
+    badge.textContent = '失败';
+    badge.style.background = 'rgba(233,69,96,0.2)';
+    badge.style.color = 'var(--danger)';
+  }
+
+  // Build summary
+  var summary = '';
+  if (filesChecked > 0) summary += '<div>检查了 <b>' + filesChecked + '</b> 个文件';
+  if (filesIssues > 0) summary += '，其中 <b style="color:#e9a960;">' + filesIssues + '</b> 个有问题';
+  summary += '</div>';
+  if (oovCount > 0) {
+    summary += '<div style="margin-top:4px;">OOV (词典外词): <b style="color:#e94560;">' + oovCount + '</b> 个不重复词</div>';
+    // Extract OOV words from lines
+    var oovLine = '';
+    for (var k = 0; k < lines.length; k++) {
+      if (lines[k].indexOf('OOV') !== -1 || lines[k].indexOf('oov') !== -1) {
+        oovLine = lines[k];
+        break;
+      }
+    }
+  }
+  if (warnings.length > 0) {
+    summary += '<div style="margin-top:6px;color:#e9a960;">⚠ 警告 (' + warnings.length + '):</div>';
+    for (var w = 0; w < Math.min(warnings.length, 5); w++) {
+      summary += '<div style="font-size:11px;margin-left:8px;color:var(--text2);">' + escapeHtml(warnings[w].substring(0, 120)) + '</div>';
+    }
+    if (warnings.length > 5) summary += '<div style="font-size:11px;margin-left:8px;color:var(--text2);">... 还有 ' + (warnings.length - 5) + ' 条</div>';
+  }
+  if (errors.length > 0) {
+    summary += '<div style="margin-top:6px;color:#e94560;">✖ 错误 (' + errors.length + '):</div>';
+    for (var e = 0; e < Math.min(errors.length, 5); e++) {
+      summary += '<div style="font-size:11px;margin-left:8px;color:var(--text2);">' + escapeHtml(errors[e].substring(0, 120)) + '</div>';
+    }
+    if (errors.length > 5) summary += '<div style="font-size:11px;margin-left:8px;color:var(--text2);">... 还有 ' + (errors.length - 5) + ' 条</div>';
+  }
+  if (!summary) summary = '<div>查看下方 stdout 日志了解详情</div>';
+
+  body.innerHTML = summary;
+
+  // Action buttons
+  var outputDir = (job.params && job.params.output_dir) ? job.params.output_dir : '';
+  var outEsc = outputDir.replace(/'/g, "\\'");
+  var actionsHtml = '';
+  if (outputDir) {
+    actionsHtml += '<button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="mfaOpenValidateDir(\'' + outEsc + '\')">打开验证输出目录</button>';
+  }
+  // OOV file link
+  if (oovCount > 0 && outputDir) {
+    actionsHtml += '<button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="mfaOpenLog(\'' + outEsc + '/oovs_found.txt\')">查看 OOV 报告</button>';
+  }
+  // Log file link
+  if (outputDir) {
+    actionsHtml += '<button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="mfaViewLogFiles(\'' + outEsc + '\')">查看日志文件列表</button>';
+  }
+  actions.innerHTML = actionsHtml;
+}
+
+function mfaOpenLog(path) {
+  var modal = document.getElementById('mfa-log-modal');
+  var title = document.getElementById('mfa-log-modal-title');
+  var pathEl = document.getElementById('mfa-log-modal-path');
+  var content = document.getElementById('mfa-log-modal-content');
+
+  title.textContent = path.split('/').pop() || path.split('\\').pop() || '日志';
+  pathEl.textContent = path;
+  // Reset to default log viewer style
+  content.style.color = ''; content.style.background = ''; content.style.fontSize = '';
+  content.textContent = '加载中...';
+  modal.style.display = 'block';
+
+  fetch(API + '/api/mfa/read-text?path=' + encodeURIComponent(path))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      content.style.color = ''; content.style.background = ''; content.style.fontSize = '';
+      content.textContent = data.content || '(空文件)';
+    })
+    .catch(function(e) {
+      content.textContent = '加载失败: ' + e.message;
+    });
+}
+
+async function mfaOpenValidateDir(outputDir) {
+  // Switch to validate sub-tab and browse the directory to list all files
+  try {
+    var resp = await fetch(API + '/api/mfa/browse-dir?ext=.txt,.log,.csv,.out,.dict&path=' + encodeURIComponent(outputDir));
+    var data = await resp.json();
+    var files = data.files || [];
+    if (files.length === 0) {
+      toast('验证目录下无日志文件', 'info');
+      return;
+    }
+    // Open the first log/txt file
+    var first = files[0];
+    mfaOpenLog(first.path);
+  } catch(e) {
+    toast('无法打开目录: ' + e.message, 'error');
+  }
+}
+
+async function mfaViewLogFiles(outputDir) {
+  // List all log/txt files in the validate output dir and show in log modal
+  var modal = document.getElementById('mfa-log-modal');
+  var title = document.getElementById('mfa-log-modal-title');
+  var pathEl = document.getElementById('mfa-log-modal-path');
+  var content = document.getElementById('mfa-log-modal-content');
+
+  title.textContent = '日志文件列表';
+  pathEl.textContent = outputDir;
+  content.textContent = '加载中...';
+  modal.style.display = 'block';
+
+  try {
+    var resp = await fetch(API + '/api/mfa/browse-dir?ext=.txt,.log,.csv,.out,.dict&path=' + encodeURIComponent(outputDir));
+    var data = await resp.json();
+    var files = data.files || [];
+    if (files.length === 0) {
+      content.textContent = '此目录下没有日志文件';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i];
+      html += '<div style="padding:6px 8px;cursor:pointer;border-bottom:1px solid var(--border);font-size:11px;color:var(--accent);" onclick="mfaOpenLog(\'' + escapeHtmlAttr(f.path) + '\')">' +
+        '📄 ' + escapeHtml(f.name) + ' <span style="color:var(--text2);">(' + (f.size_kb || 0) + ' KB)</span></div>';
+    }
+    content.style.color = ''; content.style.background = 'var(--bg2)';
+    content.innerHTML = html;
+  } catch(e) {
+    content.textContent = '加载失败: ' + e.message;
+  }
+}
+
+// ============================================================
+// Auto-open TextGrid viewer after align completes
+// ============================================================
+function mfaAutoOpenViewer(outputDir, wavDir, txtDir) {
+  if (!outputDir) return;
+  if (txtDir) _mfaViewerTxtDir = txtDir;
+  if (wavDir) _mfaViewerWavDirHint = wavDir;
+  var viewerSection = document.getElementById('mfa-viewer-section');
+  if (viewerSection) {
+    if (!viewerSection.open) viewerSection.open = true;
+    viewerSection.scrollIntoView({behavior: 'smooth', block: 'start'});
+  } else {
+    console.error('mfa-viewer-section not found');
+    return;
+  }
+
+  // Load the output directory and auto-select the first TextGrid
+  // (find-wav now uses wav_dir hint so the correct audio will be matched)
+  mfaViewerLoadDir(outputDir, function() {
+    var fileList = document.getElementById('mfa-viewer-file-list');
+    var items = fileList.querySelectorAll('.mfa-browser-item.file');
+    if (items.length > 0) {
+      var firstItem = items[0];
+      var onclick = firstItem.getAttribute('onclick');
+      var match = onclick.match(/mfaViewerSelectTg\('([^']+)'/);
+      if (match) {
+        mfaViewerSelectTg(match[1], '');
+      }
+    }
+  });
+  toast('对齐完成，TextGrid 文件已加载到查看器', 'success');
+}
+
+// ============================================================
 // TextGrid Viewer — waveform + tier timeline + audio sync
 // ============================================================
 var _mfaViewerDir = '';
@@ -12876,6 +13540,15 @@ var _mfaViewerTgData = null;
 var _mfaViewerAudio = null;
 var _mfaViewerAudioCtx = null;
 var _mfaViewerAnimId = null;
+var _mfaViewerTxtDir = '';
+var _mfaViewerWavDirHint = '';
+var _mfaViewerAudioDuration = 0;
+var _mfaViewerAudioUrl = '';
+var _mfaViewerAudioLoaded = false;
+var _mfaViewerEpoch = 0;
+
+// TXT content display area reference
+var _mfaViewerTxtContent = null;
 
 function _mfaViewerGetColorClass(text) {
   if (!text) return 'sil0';
@@ -12895,54 +13568,56 @@ function _mfaViewerGetTierClass(name) {
   if (n === 'tokenized_text') return 'token';
   if (n === 'words') return 'word';
   if (n === 'romaji') return 'romaji';
+  if (n === 'pinyin') return 'pinyin';
   if (n === 'phones') return 'phone';
   return '';
 }
 
 // --- Directory browser for TextGrid files ---
-async function mfaViewerLoadDir(path) {
-  var container = document.getElementById('mfa-viewer-file-list');
-  container.innerHTML = '<div class="empty-state" style="padding:20px;"><p>加载中...</p></div>';
+function _mfaViewerRenderDir(data, callback) {
+  _mfaViewerDir = data.path;
+  _mfaCacheSet(data.path, data);
+  var bread = document.getElementById('mfa-viewer-breadcrumb');
+  var parts = data.path.split('/').filter(function(p){return p;});
+  var bc = '', cum = '';
+  for (var i = 0; i < parts.length; i++) {
+    cum += '/' + parts[i];
+    if (i > 0) bc += ' / ';
+    bc += '<span style="cursor:pointer;color:var(--accent);" onclick="mfaViewerNavigate(\'' + cum.replace(/'/g, "\\'") + '\')">' + escapeHtml(parts[i]) + '</span>';
+  }
+  bread.innerHTML = bc || '/';
+  document.getElementById('mfa-viewer-back').disabled = !data.parent;
+  var tgFiles = [];
+  var allFiles = data.files || [];
+  for (var j = 0; j < allFiles.length; j++) {
+    if (allFiles[j].name.toLowerCase().endsWith('.textgrid')) tgFiles.push(allFiles[j]);
+  }
+  var html = '';
+  var folders = data.folders || [];
+  for (var k = 0; k < folders.length; k++) {
+    var f = folders[k];
+    html += '<div class="mfa-browser-item dir" onclick="mfaViewerNavigate(\'' + f.path.replace(/'/g, "\\'") + '\')">' +
+      '<span class="mfa-folder-icon">📁</span><span class="mfa-item-name">' + escapeHtml(f.name) + '</span></div>';
+  }
+  for (var m = 0; m < tgFiles.length; m++) {
+    var tg = tgFiles[m];
+    var sel = (_mfaViewerTgPath === tg.path) ? ' selected' : '';
+    html += '<div class="mfa-browser-item file' + sel + '" onclick="mfaViewerSelectTg(\'' + tg.path.replace(/'/g, "\\'") + '\', \'' + escapeHtml(tg.name).replace(/'/g, "\\'") + '\')">' +
+      '<span class="mfa-file-icon">📄</span><span class="mfa-item-name">' + escapeHtml(tg.name) + '</span></div>';
+  }
+  if (!html) html = '<div class="empty-state" style="padding:20px;"><p>此目录下没有 TextGrid 文件</p></div>';
+  document.getElementById('mfa-viewer-file-list').innerHTML = html;
+  if (callback) callback();
+}
+
+async function mfaViewerLoadDir(path, callback) {
+  document.getElementById('mfa-viewer-file-list').innerHTML = '<div class="empty-state" style="padding:20px;"><p>加载中...</p></div>';
   try {
-    var resp = await fetch(API + '/api/mfa/browse-dir?ext=.TextGrid&path=' + encodeURIComponent(path || ''));
+    var resp = await fetch(API + '/api/mfa/browse-dir?ext=.TextGrid&path=' + encodeURIComponent(path || '') + '&_=' + Date.now());
     var data = await resp.json();
-    _mfaViewerDir = data.path;
-
-    var bread = document.getElementById('mfa-viewer-breadcrumb');
-    var parts = data.path.split('/').filter(function(p){return p;});
-    var bc = '', cum = '';
-    for (var i = 0; i < parts.length; i++) {
-      cum += '/' + parts[i];
-      if (i > 0) bc += ' / ';
-      bc += '<span style="cursor:pointer;color:var(--accent);" onclick="mfaViewerNavigate(\'' + cum.replace(/'/g, "\\'") + '\')">' + escapeHtml(parts[i]) + '</span>';
-    }
-    bread.innerHTML = bc || '/';
-    document.getElementById('mfa-viewer-back').disabled = !data.parent;
-
-    // Also accept .TextGrid files (not just .srt)
-    var tgFiles = [];
-    var allFiles = data.files || [];
-    for (var j = 0; j < allFiles.length; j++) {
-      if (allFiles[j].name.toLowerCase().endsWith('.textgrid')) tgFiles.push(allFiles[j]);
-    }
-
-    var html = '';
-    var folders = data.folders || [];
-    for (var k = 0; k < folders.length; k++) {
-      var f = folders[k];
-      html += '<div class="mfa-browser-item dir" onclick="mfaViewerNavigate(\'' + f.path.replace(/'/g, "\\'") + '\')">' +
-        '<span class="mfa-folder-icon">📁</span><span class="mfa-item-name">' + escapeHtml(f.name) + '</span></div>';
-    }
-    for (var m = 0; m < tgFiles.length; m++) {
-      var tg = tgFiles[m];
-      var sel = (_mfaViewerTgPath === tg.path) ? ' selected' : '';
-      html += '<div class="mfa-browser-item file' + sel + '" onclick="mfaViewerSelectTg(\'' + tg.path.replace(/'/g, "\\'") + '\', \'' + escapeHtml(tg.name).replace(/'/g, "\\'") + '\')">' +
-        '<span class="mfa-file-icon">📄</span><span class="mfa-item-name">' + escapeHtml(tg.name) + '</span></div>';
-    }
-    if (!html) html = '<div class="empty-state" style="padding:20px;"><p>此目录下没有 TextGrid 文件</p></div>';
-    container.innerHTML = html;
+    _mfaViewerRenderDir(data, callback);
   } catch(e) {
-    container.innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
+    document.getElementById('mfa-viewer-file-list').innerHTML = '<div class="empty-state"><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
   }
 }
 
@@ -12959,32 +13634,115 @@ async function mfaViewerBrowseOther() {
 
 // --- Select & render ---
 async function mfaViewerSelectTg(path, name) {
+  var epoch = ++_mfaViewerEpoch;
   _mfaViewerTgPath = path;
   mfaViewerLoadDir(_mfaViewerDir);
   document.getElementById('mfa-viewer-empty').style.display = 'none';
 
   try {
+    // Reset audio duration for new file
+    _mfaViewerAudioDuration = 0;
+
     // Parse TextGrid
-    var tgResp = await fetch(API + '/api/mfa/parse-textgrid?path=' + encodeURIComponent(path));
+    var tgResp = await fetch(API + '/api/mfa/parse-textgrid?path=' + encodeURIComponent(path), {cache: 'no-store'});
+    if (epoch !== _mfaViewerEpoch) return;
     if (!tgResp.ok) { toast('解析失败', 'error'); return; }
     _mfaViewerTgData = await tgResp.json();
 
-    // Find matching WAV
-    var wavResp = await fetch(API + '/api/mfa/find-wav?textgrid_path=' + encodeURIComponent(path));
+    // Find matching WAV — include user-specified WAV dir for better matching
+    var stem = path.split('/').pop().replace(/\.(textgrid|TextGrid)$/i, '');
+    var findWavUrl = API + '/api/mfa/find-wav?textgrid_path=' + encodeURIComponent(path);
+    if (_mfaViewerWavDirHint) findWavUrl += '&wav_dir=' + encodeURIComponent(_mfaViewerWavDirHint);
+    var wavResp = await fetch(findWavUrl, {cache: 'no-store'});
+    if (epoch !== _mfaViewerEpoch) return;
     var wavData = await wavResp.json();
     if (wavData.wav_path) {
       _mfaViewerWavPath = wavData.wav_path;
-      document.getElementById('mfa-viewer-wav-name').textContent = wavData.stem + '.wav';
+      var matchTag = '';
+      if (wavData.source === 'fuzzy') {
+        matchTag = ' (模糊匹配)';
+      } else if (wavData.source === 'similarity') {
+        matchTag = ' (相似匹配, 前缀' + (wavData.common_prefix_len || 0) + '字符)';
+      }
+      document.getElementById('mfa-viewer-wav-name').textContent = wavData.stem + '.wav' + matchTag;
+      if (matchTag) document.getElementById('mfa-viewer-wav-name').style.color = '#e9a960';
+      else document.getElementById('mfa-viewer-wav-name').style.color = '';
     } else {
       _mfaViewerWavPath = '';
-      document.getElementById('mfa-viewer-wav-name').textContent = '(未找到 WAV)';
+      // Show diagnostic details
+      var detail = '(未找到 WAV)';
+      console.warn('find-wav 未找到匹配 for: ' + stem +
+        '\n  wav_dir: ' + (_mfaViewerWavDirHint || '(未设置)') +
+        '\n  尝试stems: ' + JSON.stringify(wavData.candidates || [stem]) +
+        '\n  搜索目录: ' + JSON.stringify(wavData.search_dirs || []) +
+        '\n  WAV数量: ' + (wavData.wav_count || 0) +
+        '\n  WAV样本: ' + JSON.stringify(wavData.sample_wavs || []));
+      if (wavData.candidates && wavData.candidates.length > 1) {
+        detail += ' [尝试: ' + wavData.candidates.join(' → ') + ']';
+      }
+      document.getElementById('mfa-viewer-wav-name').textContent = detail;
+      document.getElementById('mfa-viewer-wav-name').style.color = 'var(--danger)';
     }
 
-    mfaViewerRender();
+    // Find matching TXT content
+    mfaViewerLoadMatchingText(stem);
+
+    mfaViewerRender(epoch);
   } catch(e) { toast('加载失败: ' + e.message, 'error'); }
 }
 
-function mfaViewerRender() {
+async function mfaViewerLoadMatchingText(stem) {
+  var panel = document.getElementById('mfa-viewer-txt-panel');
+  var nameEl = document.getElementById('mfa-viewer-txt-name');
+  var contentEl = document.getElementById('mfa-viewer-txt-content');
+
+  if (!_mfaViewerTxtDir) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  try {
+    // Find matching TXT by stem
+    var resp = await fetch(API + '/api/mfa/match-text?audio_stem=' + encodeURIComponent(stem) + '&text_dir=' + encodeURIComponent(_mfaViewerTxtDir), {cache: 'no-store'});
+    var data = await resp.json();
+    var matches = data.matches || [];
+    // Pick the first .txt match
+    var txtMatch = null;
+    for (var i = 0; i < matches.length; i++) {
+      if (matches[i].is_txt) { txtMatch = matches[i]; break; }
+    }
+    if (!txtMatch && matches.length > 0) txtMatch = matches[0];
+
+    if (txtMatch) {
+      nameEl.textContent = txtMatch.name;
+      // Read content
+      var readResp = await fetch(API + '/api/mfa/read-text?path=' + encodeURIComponent(txtMatch.path), {cache: 'no-store'});
+      var readData = await readResp.json();
+      contentEl.textContent = readData.content || '(空文件)';
+      panel.style.display = 'block';
+    } else {
+      // Try direct stem match: <stem>.txt in txt_dir
+      var directPath = _mfaViewerTxtDir.replace(/\/$/, '') + '/' + stem + '.txt';
+      try {
+        var directResp = await fetch(API + '/api/mfa/read-text?path=' + encodeURIComponent(directPath), {cache: 'no-store'});
+        if (directResp.ok) {
+          var directData = await directResp.json();
+          if (directData.content) {
+            nameEl.textContent = stem + '.txt';
+            contentEl.textContent = directData.content;
+            panel.style.display = 'block';
+            return;
+          }
+        }
+      } catch(e) {}
+      panel.style.display = 'none';
+    }
+  } catch(e) {
+    panel.style.display = 'none';
+  }
+}
+
+function mfaViewerRender(epoch) {
   var data = _mfaViewerTgData;
   if (!data || !data.tiers) return;
   document.getElementById('mfa-viewer-main').style.display = 'block';
@@ -12993,11 +13751,14 @@ function mfaViewerRender() {
   var totalDur = data.xmax || data.xmin || 1;
   if (totalDur < 0.01) totalDur = 1;
 
+  // Use actual audio duration for seek bar if available (better sync)
+  var displayDur = _mfaViewerAudioDuration || totalDur;
+
   // Seek bar max
   var seek = document.getElementById('mfa-viewer-seek');
-  seek.max = Math.round(totalDur * 1000);
+  seek.max = Math.round(displayDur * 1000);
   seek.value = 0;
-  document.getElementById('mfa-viewer-time').textContent = '0.00s / ' + totalDur.toFixed(2) + 's';
+  document.getElementById('mfa-viewer-time').textContent = '0.00s / ' + displayDur.toFixed(2) + 's';
 
   // Render tiers
   var tiersHtml = '';
@@ -13028,7 +13789,7 @@ function mfaViewerRender() {
   document.getElementById('mfa-viewer-tiers').innerHTML = tiersHtml;
 
   // Draw waveform if WAV available
-  if (_mfaViewerWavPath) mfaViewerDrawWaveform(_mfaViewerWavPath);
+  if (_mfaViewerWavPath) mfaViewerDrawWaveform(_mfaViewerWavPath, epoch);
   else {
     var canvas = document.getElementById('mfa-waveform-canvas');
     var ctx = canvas.getContext('2d');
@@ -13040,7 +13801,7 @@ function mfaViewerRender() {
 
 // --- Waveform rendering ---
 // --- Waveform rendering (server-side peak data, no full WAV download) ---
-function mfaViewerDrawWaveform(wavUrl) {
+function mfaViewerDrawWaveform(wavUrl, epoch) {
   var canvas = document.getElementById('mfa-waveform-canvas');
   var ctx = canvas.getContext('2d');
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -13048,9 +13809,13 @@ function mfaViewerDrawWaveform(wavUrl) {
   ctx.fillText('加载波形...', canvas.width/2, canvas.height/2);
 
   // Fetch lightweight peak data (server computes it, ~2KB instead of 100+MB WAV)
-  fetch(API + '/api/mfa/waveform?path=' + encodeURIComponent(wavUrl))
+  fetch(API + '/api/mfa/waveform?path=' + encodeURIComponent(wavUrl), {cache: 'no-store'})
     .then(function(r) { return r.json(); })
     .then(function(data) {
+      // Discard stale response if user has already selected a different file
+      if (epoch !== _mfaViewerEpoch) return;
+      // Store actual audio duration for accurate playhead sync
+      if (data.duration && data.duration > 0) _mfaViewerAudioDuration = data.duration;
       var peaks = data.peaks;
       if (!peaks || peaks.length === 0) {
         ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -13064,18 +13829,20 @@ function mfaViewerDrawWaveform(wavUrl) {
       if (ampMax < 0.001) ampMax = 1;
       ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
       var mid = canvas.height / 2;
-      for (var k = 0; k < peaks.length && k < canvas.width; k++) {
-        var h = (peaks[k] / ampMax) * (canvas.height * 0.45);
-        var alpha = 0.3 + (peaks[k] / ampMax) * 0.7;
-        ctx.fillStyle = 'rgba(78, 204, 163, ' + alpha.toFixed(2) + ')';
+      // Map peaks to canvas width so playhead position aligns correctly
+      for (var k = 0; k < canvas.width; k++) {
+        var peakIdx = Math.floor((k / canvas.width) * peaks.length);
+        var h = (peaks[peakIdx] / ampMax) * (canvas.height * 0.45);
+        var alpha = 0.3 + (peaks[peakIdx] / ampMax) * 0.7;
+        ctx.fillStyle = 'rgba(200, 200, 200, ' + alpha.toFixed(2) + ')';
         ctx.fillRect(k, mid - h, 1, h * 2);
       }
-      ctx.strokeStyle = 'rgba(233, 69, 96, 0.5)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
       ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(canvas.width, mid); ctx.stroke();
     }).catch(function(e) {
       ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#633'; ctx.font = '12px monospace'; ctx.textAlign = 'center';
+      ctx.fillStyle = '#555'; ctx.font = '12px monospace'; ctx.textAlign = 'center';
       ctx.fillText('波形加载失败', canvas.width/2, canvas.height/2);
     });
 
@@ -13084,7 +13851,11 @@ function mfaViewerDrawWaveform(wavUrl) {
 }
 
 function _mfaViewerSetupAudioLazy(url) {
-  if (_mfaViewerAudio) { _mfaViewerAudio.pause(); _mfaViewerAudio = null; }
+  if (_mfaViewerAudio) {
+    _mfaViewerAudio.pause();
+    _mfaViewerAudio.removeEventListener('timeupdate', _mfaViewerOnTimeUpdate);
+    _mfaViewerAudio = null;
+  }
   _mfaViewerAudioUrl = url;
   _mfaViewerAudioLoaded = false;
 }
@@ -13100,21 +13871,22 @@ function _mfaViewerOnTimeUpdate() {
 
 function _mfaViewerDrawPlayhead(t) {
   if (!_mfaViewerTgData) return;
-  var totalDur = _mfaViewerTgData.xmax || 1;
+  // Use actual audio element duration for best sync, fall back to waveform/server duration
+  var audioDur = (_mfaViewerAudio && _mfaViewerAudio.duration) || _mfaViewerAudioDuration || _mfaViewerTgData.xmax || 1;
   var canvas = document.getElementById('mfa-waveform-canvas');
   var ctx = canvas.getContext('2d');
-  var x = (t / totalDur) * canvas.width;
+  var x = (t / audioDur) * canvas.width;
   // Simple redraw approach: just draw a vertical line overlay
   // We do this by showing/hiding a positioned div since redrawing canvas is expensive
   var existing = document.getElementById('mfa-playhead');
   if (!existing) {
     existing = document.createElement('div');
     existing.id = 'mfa-playhead';
-    existing.style.cssText = 'position:absolute;top:0;bottom:0;width:1px;background:#e94560;pointer-events:none;z-index:5;';
+    existing.style.cssText = 'position:absolute;top:0;bottom:0;width:1px;background:#fff;pointer-events:none;z-index:5;';
     canvas.parentNode.style.position = 'relative';
     canvas.parentNode.appendChild(existing);
   }
-  var pct = (t / totalDur * 100).toFixed(2);
+  var pct = (t / audioDur * 100).toFixed(2);
   existing.style.left = pct + '%';
   existing.style.display = 'block';
   // Highlight current tier segments
@@ -13128,7 +13900,7 @@ function _mfaViewerHighlightSegments(t) {
     var xmin = parseFloat(el.getAttribute('data-xmin') || '0');
     var xmax = parseFloat(el.getAttribute('data-xmax') || '0');
     if (t >= xmin && t < xmax) {
-      el.style.boxShadow = '0 0 6px rgba(233,69,96,0.8)';
+      el.style.boxShadow = '0 0 6px rgba(255,255,255,0.6)';
       el.style.zIndex = '3';
     } else {
       el.style.boxShadow = '';
@@ -13140,6 +13912,14 @@ function _mfaViewerHighlightSegments(t) {
 function _mfaViewerEnsureAudio(callback) {
   if (_mfaViewerAudioLoaded && _mfaViewerAudio) { callback(); return; }
   if (!_mfaViewerAudioUrl) return;
+
+  // Clean up any stale Audio reference before creating a new one
+  if (_mfaViewerAudio) {
+    _mfaViewerAudio.pause();
+    _mfaViewerAudio.removeEventListener('timeupdate', _mfaViewerOnTimeUpdate);
+    _mfaViewerAudio = null;
+  }
+
   var url = API + '/api/mfa/stream?path=' + encodeURIComponent(_mfaViewerAudioUrl);
   var audio = new Audio(url);
   audio.addEventListener('timeupdate', _mfaViewerOnTimeUpdate);
@@ -13151,10 +13931,8 @@ function _mfaViewerEnsureAudio(callback) {
   });
   audio.addEventListener('canplaythrough', function() {
     _mfaViewerAudioLoaded = true;
-    if (callback) callback();
   }, {once: true});
   _mfaViewerAudio = audio;
-  _mfaViewerAudioLoaded = true;
   audio.load();
   if (callback) callback();
   return audio;

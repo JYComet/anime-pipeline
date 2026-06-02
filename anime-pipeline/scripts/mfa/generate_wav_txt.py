@@ -43,6 +43,8 @@ python scripts/generate_wav_txt.py --jsonl data/wav/generated.jsonl --output-dir
 import argparse
 from collections import Counter
 import json
+import os
+import shutil
 import sys
 import unicodedata
 from dataclasses import dataclass
@@ -513,9 +515,12 @@ def process_jsonl(
     dict_path: Path | None,
     max_merge_tokens: int,
     oov_report: Path | None,
+    wav_link_dir: Path | None = None,
 ) -> tuple[int, int, CorrectionStats]:
     sudachi = dictionary.Dictionary().create()
     output_dir.mkdir(parents=True, exist_ok=True)
+    if wav_link_dir is not None:
+        wav_link_dir.mkdir(parents=True, exist_ok=True)
 
     dict_words = None
     final_oov_counts: Counter[str] = Counter()
@@ -527,6 +532,7 @@ def process_jsonl(
 
     written = 0
     skipped = 0
+    linked = 0
     with jsonl_path.open("r", encoding="utf-8") as file:
         for line_no, line in enumerate(file, start=1):
             line = line.strip()
@@ -548,6 +554,19 @@ def process_jsonl(
                     file=sys.stderr,
                 )
                 continue
+
+            # Link source WAV into wav_link_dir so MFA align finds it by stem
+            if wav_link_dir is not None:
+                stem = Path(wav_file).stem
+                wav_src = Path(wav_file) if os.path.isabs(wav_file) else Path.cwd() / wav_file
+                wav_dst = wav_link_dir / f"{stem}.wav"
+                if wav_src.exists() and not wav_dst.exists():
+                    try:
+                        os.link(wav_src, wav_dst)
+                        linked += 1
+                    except OSError:
+                        shutil.copy2(wav_src, wav_dst)
+                        linked += 1
 
             output_path = output_dir / wav_to_txt_name(wav_file)
             if output_path.exists() and not overwrite:
@@ -576,6 +595,7 @@ def process_jsonl(
 
             output_path.write_text(" ".join(output_tokens) + "\n", encoding="utf-8")
             written += 1
+            print(f"[{written}] {Path(wav_file).name} → {output_path.name} | 原文: {text[:60]}{'...' if len(text) > 60 else ''}", file=sys.stderr)
 
     if oov_report is None and dict_words is not None:
         oov_report = output_dir.parent / f"{output_dir.name}_final_oovs.txt"
@@ -598,7 +618,7 @@ def process_jsonl(
                 file=sys.stderr,
             )
 
-    return written, skipped, total_stats
+    return written, skipped, linked, total_stats
 
 
 def parse_mode(value: str):
@@ -674,9 +694,15 @@ def main() -> int:
             "Default with --dict-path: <output-dir-parent>/<output-dir-name>_final_oovs.txt"
         ),
     )
+    parser.add_argument(
+        "--wav-link-dir",
+        type=Path,
+        default=None,
+        help="Auto hardlink/copy source WAVs into this directory so MFA align finds them by stem.",
+    )
     args = parser.parse_args()
 
-    written, skipped, stats = process_jsonl(
+    written, skipped, linked, stats = process_jsonl(
         jsonl_path=args.jsonl,
         output_dir=args.output_dir,
         text_key=args.text_key,
@@ -686,8 +712,9 @@ def main() -> int:
         dict_path=args.dict_path,
         max_merge_tokens=args.max_merge_tokens,
         oov_report=args.oov_report,
+        wav_link_dir=args.wav_link_dir,
     )
-    print(f"Done. written={written}, skipped={skipped}")
+    print(f"Done. written={written}, skipped={skipped}, linked={linked}")
     if args.dict_path is not None:
         print(
             "Dictionary correction stats: "

@@ -1578,6 +1578,7 @@ def compare_asr_pipeline(
     model_b: str = "cohere-transcribe",
     hotwords: str = "",
     cancel_check=None,  # callable → bool; if True, abort processing
+    filter_english: bool = True,
 ) -> dict:
     """Run two selected ASR models on a single WAV file and compare results.
 
@@ -1753,12 +1754,33 @@ def compare_asr_pipeline(
         if mr["segments_count"] == 0:
             empty_models.append(mr["model_name"])
 
-    # Sentence-level comparison
-    sentence_cmp = compare_srt_sentences(
-        srt_paths[compare_models[0]], srt_paths[compare_models[1]]
-    )
-    diff_percent = sentence_cmp["overall_diff_percent"]
-    flagged = diff_percent > 10.0 or len(empty_models) > 0
+    # If filter enabled and either output contains English, match rate = 0%
+    if filter_english:
+        eng_a = _has_english(srt_to_plain_text(srt_paths[compare_models[0]]))
+        eng_b = _has_english(srt_to_plain_text(srt_paths[compare_models[1]]))
+        eng_flag = eng_a or eng_b
+    else:
+        eng_flag = False
+    if eng_flag:
+        diff_percent = 100.0
+        match_rate = 0.0
+        sentence_results = []
+        matched_count = 0
+        unmatched_a = 0
+        unmatched_b = 0
+        flagged = True
+    else:
+        # Sentence-level comparison
+        sentence_cmp = compare_srt_sentences(
+            srt_paths[compare_models[0]], srt_paths[compare_models[1]]
+        )
+        diff_percent = sentence_cmp["overall_diff_percent"]
+        match_rate = sentence_cmp["match_rate"]
+        sentence_results = sentence_cmp["sentence_results"]
+        matched_count = sentence_cmp["matched_count"]
+        unmatched_a = sentence_cmp["unmatched_a"]
+        unmatched_b = sentence_cmp["unmatched_b"]
+        flagged = diff_percent > 10.0 or len(empty_models) > 0
 
     if progress_callback:
         progress_callback("completed", 100)
@@ -1770,13 +1792,13 @@ def compare_asr_pipeline(
         "results": model_results,
         "srt_paths": srt_paths,
         "diff_percent": diff_percent,
-        "match_rate": sentence_cmp["match_rate"],
+        "match_rate": match_rate,
         "flagged": flagged,
         "empty_models": empty_models,
-        "sentence_results": sentence_cmp["sentence_results"],
-        "matched_count": sentence_cmp["matched_count"],
-        "unmatched_a": sentence_cmp["unmatched_a"],
-        "unmatched_b": sentence_cmp["unmatched_b"],
+        "sentence_results": sentence_results,
+        "matched_count": matched_count,
+        "unmatched_a": unmatched_a,
+        "unmatched_b": unmatched_b,
     }
 
 
