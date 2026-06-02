@@ -4761,6 +4761,23 @@ def _save_asr_compare_jobs():
         print(f"[asr-compare] Failed to save jobs: {e}")
 
 
+def _sync_user_action_to_jobs(audio_path: str):
+    """Copy user_action/flagged from _asr_compare_results into all job results and persist."""
+    with _asr_compare_lock:
+        result = _asr_compare_results.get(audio_path, {})
+        user_action = result.get("user_action")
+        flagged = result.get("flagged", False)
+        segments = result.get("segments")
+        for job in _asr_compare_jobs.values():
+            job_results = job.get("results", {})
+            if audio_path in job_results:
+                job_results[audio_path]["user_action"] = user_action
+                job_results[audio_path]["flagged"] = flagged
+                if segments is not None:
+                    job_results[audio_path]["segments"] = segments
+        _save_asr_compare_jobs()
+
+
 def _load_asr_compare_jobs():
     """Restore ASR compare jobs from disk. Mark running/loading jobs as interrupted."""
     if not os.path.exists(_ASR_COMPARE_JOBS_FILE):
@@ -4770,7 +4787,7 @@ def _load_asr_compare_jobs():
             data = json.load(f)
         for job_id, jd in data.items():
             status = jd.get("status", "")
-            if status in ("running", "loading"):
+            if status in ("running", "loading", "pending"):
                 jd["status"] = "interrupted"
                 jd["current_step"] = "服务器重启中断"
             _asr_compare_jobs[job_id] = jd
@@ -5398,6 +5415,7 @@ def keep_asr_compare_audio(payload: dict = Body(...)):
             _asr_compare_results[audio_path]["flagged"] = False
             _asr_compare_results[audio_path]["user_action"] = "kept"
 
+    _sync_user_action_to_jobs(audio_path)
     return {"status": "ok", "action": "kept"}
 
 
@@ -5427,6 +5445,7 @@ def discard_asr_compare_audio(payload: dict = Body(...)):
             _asr_compare_results[audio_path]["flagged"] = False
             _asr_compare_results[audio_path]["user_action"] = "discarded"
 
+    _sync_user_action_to_jobs(audio_path)
     return {"status": "ok", "action": "discarded"}
 
 
@@ -5463,6 +5482,7 @@ def delete_asr_compare_audio(payload: dict = Body(...)):
             _asr_compare_results[audio_path]["flagged"] = False
             _asr_compare_results[audio_path]["user_action"] = "deleted"
 
+    _sync_user_action_to_jobs(audio_path)
     return {"status": "ok", "action": "deleted", "files": deleted_files}
 
 
@@ -5500,6 +5520,7 @@ def batch_delete_asr_compare_audios(payload: dict = Body(...)):
                 _asr_compare_results[audio_path]["flagged"] = False
                 _asr_compare_results[audio_path]["user_action"] = "deleted"
 
+        _sync_user_action_to_jobs(audio_path)
         results.append({"path": audio_path, "status": "deleted", "files": deleted})
 
     return {"status": "ok", "total": len(paths), "results": results}
@@ -5776,6 +5797,7 @@ def delete_asr_compare_segments(payload: dict = Body(...)):
     deleted_txt = []
     skipped_security = []
     skipped_missing = []
+    affected_parents = set()
     for wav_path in wav_paths:
         real_path = os.path.normcase(os.path.realpath(wav_path))
         print(f"[delete-segments] wav_path={wav_path!r}")
@@ -5793,6 +5815,7 @@ def delete_asr_compare_segments(payload: dict = Body(...)):
             for seg in segs:
                 if seg.get("wav_path") == wav_path:
                     found = True
+                    affected_parents.add(parent_audio_path)
                     # Delete TXT files
                     for txt_key in ("txt_path_a", "txt_path_b"):
                         txt_path = seg.get(txt_key)
@@ -5817,6 +5840,8 @@ def delete_asr_compare_segments(payload: dict = Body(...)):
         else:
             skipped_missing.append(wav_path)
 
+    for parent_path in affected_parents:
+        _sync_user_action_to_jobs(parent_path)
     print(f"[delete-segments] deleted={deleted} skipped_security={skipped_security} skipped_missing={skipped_missing}")
     return {"status": "ok", "deleted": len(deleted), "paths": deleted, "_debug": {"skipped_security": skipped_security, "skipped_missing": skipped_missing}}
 
@@ -6070,7 +6095,7 @@ def pv_start_pipeline(payload: dict = Body(...)):
         _pipeline_video_jobs[job_id] = job
         _save_pv_jobs()
 
-    threading.Thread(target=_run_pipeline_video, args=(job_id,), daemon=True).start()
+    threading.Thread(target=_run_pipeline_video_safe, args=(job_id,), daemon=True).start()
 
     return {"status": "ok", "job_id": job_id, "file_count": len(valid_paths)}
 
@@ -6152,7 +6177,7 @@ def pv_resume_job(job_id: str):
     job.cancelled = False
     _update_pipeline_job_progress(job)
     _save_pv_jobs()
-    threading.Thread(target=_run_pipeline_video_resume, args=(job_id,), daemon=True).start()
+    threading.Thread(target=_run_pipeline_video_resume_safe, args=(job_id,), daemon=True).start()
     return {"status": "ok", "message": "已恢复执行"}
 
 
@@ -6244,14 +6269,43 @@ def _run_pipeline_video_resume(job_id: str):
     job.status = "running"
     _save_pv_jobs()
 
-    _run_pipeline_video(job_id)
+    _run_pipeline_video_safe(job_id)
 
     with _pipeline_video_lock:
         job = _pipeline_video_jobs.get(job_id)
-        if job:
+        if job and job.status != "error":
             job.files = completed + job.files
             _update_pipeline_job_progress(job)
             _save_pv_jobs()
+
+
+def _run_pipeline_video_resume_safe(job_id: str):
+    """Thread-safe wrapper for resume that catches any unhandled exception."""
+    try:
+        _run_pipeline_video_resume(job_id)
+    except Exception:
+        import logging as _logging, sys as _sys
+        _log = _logging.getLogger("pipeline-video")
+        if not _log.handlers:
+            _h = _logging.StreamHandler(_sys.stdout)
+            _h.setFormatter(_logging.Formatter(
+                "[pipeline-video] %(asctime)s %(message)s", datefmt="%H:%M:%S"
+            ))
+            _log.addHandler(_h)
+        _log.exception("管线恢复异常崩溃 — 后台线程")
+        with _pipeline_video_lock:
+            job = _pipeline_video_jobs.get(job_id)
+            if job and job.status not in ("completed", "cancelled", "error"):
+                job.status = "error"
+                for f in job.files:
+                    if f.status not in ("completed", "skipped", "error"):
+                        f.status = "error"
+                        if not f.error:
+                            f.error = "管线内部异常"
+                        f.steps.append({"step": "fatal", "status": "error",
+                                        "message": "管线恢复线程异常崩溃，请查看服务器日志"})
+                _update_pipeline_job_progress(job)
+                _save_pv_jobs()
 
 
 def _run_pipeline_video(job_id: str):
@@ -6316,6 +6370,8 @@ def _run_pipeline_video(job_id: str):
                 f.steps.append({"step": "init", "status": "error",
                                 "message": f"CUDA不可用，无法执行GPU步骤: {', '.join(gpu_steps)}"})
             _update_pipeline_job_progress(job)
+            job.status = "error"
+            _save_pv_jobs()
             return
 
     # Job-specific temp directory for intermediate files
@@ -7313,6 +7369,35 @@ def _run_pipeline_video(job_id: str):
     _log.info("=== 任务完成: %s | 耗时: %.1fs | 完成: %d | 跳过: %d | 异常: %d | 输出: %d 个文件 ===",
               job_id[:8], time.time() - t0, completed, skipped, errors, total_clips)
 
+
+def _run_pipeline_video_safe(job_id: str):
+    """Thread-safe wrapper that catches any unhandled exception."""
+    try:
+        _run_pipeline_video(job_id)
+    except Exception:
+        import logging as _logging, sys as _sys
+        _log = _logging.getLogger("pipeline-video")
+        if not _log.handlers:
+            _h = _logging.StreamHandler(_sys.stdout)
+            _h.setFormatter(_logging.Formatter(
+                "[pipeline-video] %(asctime)s %(message)s", datefmt="%H:%M:%S"
+            ))
+            _log.addHandler(_h)
+        _log.exception("管线异常崩溃 — 后台线程")
+        with _pipeline_video_lock:
+            job = _pipeline_video_jobs.get(job_id)
+            if job and job.status not in ("completed", "cancelled", "error"):
+                job.status = "error"
+                for f in job.files:
+                    if f.status not in ("completed", "skipped", "error"):
+                        f.status = "error"
+                        if not f.error:
+                            f.error = "管线内部异常"
+                        f.steps.append({"step": "fatal", "status": "error",
+                                        "message": "管线处理线程异常崩溃，请查看服务器日志"})
+                _update_pipeline_job_progress(job)
+                _save_pv_jobs()
+
 # ============================================================
 # cut_audio_by_subtitle — helper to slice audio by SRT
 # ============================================================
@@ -7934,6 +8019,7 @@ def mfa_align(
     output_format: str = Query("long_textgrid"),
     no_tokenization: bool = Query(True),
     no_textgrid_cleanup: bool = Query(True),
+    check_audio_stem: str = Query("", description="Audio stem to check if TextGrid already exists"),
 ):
     """Step 3b: Run MFA align to produce TextGrid files."""
     import tempfile as _tmp, shutil as _shutil
@@ -7949,6 +8035,13 @@ def mfa_align(
         output_dir = os.path.normpath(os.path.join(PROJECT_ROOT, output_dir))
     if wav_dir and not os.path.isabs(wav_dir):
         wav_dir = os.path.normpath(os.path.join(PROJECT_ROOT, wav_dir))
+
+    # Check if TextGrid already exists for the given audio stem
+    if check_audio_stem:
+        for ext in (".TextGrid", ".textgrid"):
+            tg_path = os.path.join(output_dir, check_audio_stem + ext)
+            if os.path.exists(tg_path):
+                return {"status": "ok", "already_done": True, "message": f"TextGrid 已存在，无需重复生成: {check_audio_stem}{ext}"}
 
     # Resolve model names to full paths
     dict_path = os.path.join(models_root, "pretrained_models", "dictionary", dictionary + ".dict")
@@ -8471,87 +8564,89 @@ def mfa_parse_textgrid(path: str = Query(..., description="Path to TextGrid file
 
 @app.get("/api/mfa/find-wav")
 def mfa_find_wav(textgrid_path: str = Query(..., description="TextGrid file path, finds matching WAV by stem"),
-                 wav_dir: str = Query("", description="Optional WAV search directory")):
-    """Given a TextGrid path, find the corresponding WAV by stem matching.
+                 wav_dir: str = Query("", description="Step 3 wav_dir — audio input directory")):
+    """Find the WAV that was fed into step 3 (align) for this TextGrid.
 
-    Step 3 align: TextGrid in output_dir, WAV in wav_dir (or tg_dir or MFA_WAV_DIR).
-    Strategy: strip known segment suffixes from TG stem, then match against WAV stems.
+    MFA align produces TextGrid with the same stem as the input WAV.
+    So just look for {tg_stem}.wav in wav_dir, tg_dir, then MFA_WAV_DIR.
     """
-    import re as _fw_re
     if not os.path.exists(textgrid_path):
-        raise HTTPException(status_code=404, detail="TextGrid not found")
+        raise HTTPException(status_code=404, detail=f"TextGrid not found: {textgrid_path}")
 
     tg_stem = os.path.splitext(os.path.basename(textgrid_path))[0]
     tg_dir = os.path.dirname(textgrid_path)
 
-    # Build search dirs: wav_dir (step 3 input) first, then tg_dir, then defaults
+    print(f"[find-wav] TextGrid: {textgrid_path}")
+    print(f"[find-wav]   stem={tg_stem}, wav_dir={wav_dir or '(none)'}")
+
+    # Simple sequential lookup — no fuzzy, no guesswork
     search_dirs = []
     if wav_dir and os.path.isdir(wav_dir):
         search_dirs.append(wav_dir)
-    if tg_dir not in search_dirs:
-        search_dirs.append(tg_dir)
-    if os.path.isdir(MFA_WAV_DIR) and MFA_WAV_DIR not in search_dirs:
+    search_dirs.append(tg_dir)
+    if os.path.isdir(MFA_WAV_DIR):
         search_dirs.append(MFA_WAV_DIR)
 
-    # Collect all WAV stems from search dirs
-    all_wavs = []  # (stem, full_path)
     for sd in search_dirs:
-        try:
-            for name in sorted(os.listdir(sd)):
-                nl = name.lower()
-                if nl.endswith('.wav') or nl.endswith('.mp3') or nl.endswith('.flac'):
-                    all_wavs.append((os.path.splitext(name)[0], os.path.join(sd, name)))
-        except OSError:
-            continue
+        wav_path = os.path.join(sd, tg_stem + ".wav")
+        exists = os.path.exists(wav_path)
+        print(f"[find-wav]   check: {wav_path} -> {'OK' if exists else 'NO'}")
+        if exists:
+            return {"wav_path": os.path.normpath(wav_path).replace("\\", "/"),
+                    "stem": tg_stem, "source": "exact"}
 
-    if not all_wavs:
-        return {"wav_path": "", "stem": tg_stem, "source": "not_found",
-                "hint": f"搜索目录中无 WAV 文件: {search_dirs}"}
+    # Fuzzy fallback: strip _separated_* suffixes (MFA splits audio into separated tracks)
+    import re as _fuzzy_re
+    fuzzy_stems = []
+    m = _fuzzy_re.match(r'^(.+?)_separated_([^_]+)$', tg_stem)
+    if m:
+        base = m.group(1)
+        fuzzy_stems.append(base)
+        nested = _fuzzy_re.match(r'^(.+?)_seg\d+$', base)
+        if nested:
+            fuzzy_stems.append(nested.group(1))
+    m2 = _fuzzy_re.match(r'^(.+?)_seg\d+$', tg_stem)
+    if m2:
+        fuzzy_stems.append(m2.group(1))
+    # Strip trailing _segNNN_separated_segNNN chain
+    simplified = _fuzzy_re.sub(r'(_seg\d+)*(_separated_[^_]+)*$', '', tg_stem)
+    if simplified and simplified != tg_stem:
+        fuzzy_stems.append(simplified)
 
-    # Generate candidate stems from the TextGrid stem by progressively stripping suffixes
-    # e.g. "锈湖_seg001_separated_seg002" → "锈湖_seg001_separated" → "锈湖"
-    candidate_stems = [tg_stem]
-    stripped = tg_stem
-    while True:
-        new_stem = _fw_re.sub(r'_seg\d+$|_part\d+$|_chunk\d+$|_clip\d+$|_separated$|_[0-9a-f]{8,}$', '', stripped)
-        if new_stem == stripped:
-            break
-        candidate_stems.append(new_stem)
-        stripped = new_stem
+    # Deduplicate while preserving order
+    seen = set()
+    fuzzy_stems = [s for s in fuzzy_stems if not (s in seen or seen.add(s))]
 
-    # Try each candidate stem: exact match first, then prefix/suffix match
-    for cs in candidate_stems:
-        for wav_stem, wav_path in all_wavs:
-            if cs.lower() == wav_stem.lower():
+    for fs in fuzzy_stems:
+        for sd in search_dirs:
+            wav_path = os.path.join(sd, fs + ".wav")
+            exists = os.path.exists(wav_path)
+            print(f"[find-wav]   fuzzy check: {wav_path} -> {'OK' if exists else 'NO'}")
+            if exists:
                 return {"wav_path": os.path.normpath(wav_path).replace("\\", "/"),
-                        "stem": wav_stem, "source": "exact" if cs == tg_stem else "fuzzy"}
+                        "stem": fs, "source": "fuzzy_stem", "original_stem": tg_stem}
 
-    # Best-effort: find WAV whose stem shares the longest common prefix with any candidate
-    best = None
-    best_len = 0
-    for cs in candidate_stems:
-        cs_lower = cs.lower()
-        for wav_stem, wav_path in all_wavs:
-            w_lower = wav_stem.lower()
-            # Longest common prefix
-            lcp = 0
-            for a, b in zip(cs_lower, w_lower):
-                if a == b: lcp += 1
-                else: break
-            if lcp > best_len:
-                best_len = lcp
-                best = (wav_stem, wav_path)
+    # Last resort: scan the directory for any WAV whose stem is a prefix of the tg_stem
+    for sd in search_dirs:
+        if not os.path.isdir(sd):
+            continue
+        try:
+            for fn in sorted(os.listdir(sd)):
+                if not fn.lower().endswith(".wav"):
+                    continue
+                wav_stem = fn[:-4]
+                if tg_stem.startswith(wav_stem) or wav_stem.startswith(tg_stem):
+                    wav_path = os.path.join(sd, fn)
+                    print(f"[find-wav]   prefix match: {wav_path} -> OK")
+                    return {"wav_path": os.path.normpath(wav_path).replace("\\", "/"),
+                            "stem": wav_stem, "source": "prefix_match", "original_stem": tg_stem}
+        except OSError:
+            pass
 
-    if best and best_len > 5:  # require at least 5 chars of overlap
-        return {"wav_path": os.path.normpath(best[1]).replace("\\", "/"),
-                "stem": best[0], "source": "similarity", "common_prefix_len": best_len}
-
+    print(f"[find-wav]   NOT FOUND! stem={tg_stem}, search_dirs={search_dirs}")
     return {"wav_path": "", "stem": tg_stem, "source": "not_found",
-            "candidates": candidate_stems,
             "search_dirs": [d.replace("\\", "/") for d in search_dirs],
-            "wav_count": len(all_wavs),
-            "sample_wavs": [w[0] for w in all_wavs[:5]],
-            "hint": "将匹配的 WAV 放入 wav 目录"}
+            "hint": f"在以下目录未找到 {tg_stem}.wav, 也试了模糊匹配: {fuzzy_stems}"}
 
 
 @app.get("/api/mfa/stream")
@@ -8803,13 +8898,12 @@ def mfa_browse_dir(path: str = Query("", description="Absolute directory path"),
 
     path = os.path.normpath(path)
 
-    # Check cache (keyed by path + sorted exts), skip if _ bypass param present
+    # Check cache (keyed by path + sorted exts)
     cache_key = path + "|" + ",".join(sorted(exts))
     now = time.time()
-    if "_" not in request.query_params:
-        cached = _browse_cache.get(cache_key)
-        if cached and now - cached[0] < _BROWSE_CACHE_TTL:
-            return cached[1]
+    cached = _browse_cache.get(cache_key)
+    if cached and now - cached[0] < _BROWSE_CACHE_TTL:
+        return cached[1]
 
     folders = []
     files = []
@@ -8820,7 +8914,15 @@ def mfa_browse_dir(path: str = Query("", description="Absolute directory path"),
                     folders.append({"name": entry.name, "path": entry.path.replace("\\", "/"), "type": "dir"})
                 elif entry.is_file() and entry.name.lower().endswith(exts):
                     ft = os.path.splitext(entry.name)[1].lower().lstrip(".")
-                    files.append({"name": entry.name, "path": entry.path.replace("\\", "/"), "type": ft, "size_kb": 0})
+                    try:
+                        st = entry.stat()
+                        mtime = st.st_mtime
+                        size_kb = round(st.st_size / 1024, 1)
+                    except OSError:
+                        mtime = 0
+                        size_kb = 0
+                    files.append({"name": entry.name, "path": entry.path.replace("\\", "/"), "type": ft,
+                                  "size_kb": size_kb, "mtime": mtime})
 
         folders.sort(key=lambda e: e["name"])
         files.sort(key=lambda e: e["name"])

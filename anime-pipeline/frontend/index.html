@@ -2216,14 +2216,20 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
           <button id="mfa-viewer-play" class="btn btn-primary" onclick="mfaViewerTogglePlay()" style="font-size:12px;padding:4px 16px;">▶ 播放</button>
           <span id="mfa-viewer-time" style="font-size:12px;color:var(--text2);min-width:90px;">0.00s / 0.00s</span>
           <input type="range" id="mfa-viewer-seek" min="0" max="1000" value="0" oninput="mfaViewerSeek(this.value)" style="flex:1;min-width:120px;accent-color:var(--accent);">
+          <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;flex-shrink:0;" onclick="mfaViewerPickAudio()" title="选择音频文件">🎵 选音频</button>
           <span id="mfa-viewer-wav-name" style="font-size:11px;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
         </div>
 
-        <!-- Waveform canvas -->
-        <canvas id="mfa-waveform-canvas" width="1200" height="120" style="width:100%;height:120px;background:#000;border-radius:6px 6px 0 0;display:block;"></canvas>
-
-        <!-- Tier timeline -->
-        <div id="mfa-viewer-tiers" style="background:var(--bg);border-radius:0 0 6px 6px;overflow:hidden;"></div>
+        <!-- Waveform + tier timeline — shared label column, aligned bars -->
+        <div id="mfa-viewer-timeline" style="position:relative;border-radius:6px;overflow:hidden;">
+          <div class="mfa-tier-row" style="height:120px;">
+            <div class="mfa-tier-label" style="font-size:10px;">wave</div>
+            <div class="mfa-tier-bars" style="position:relative;height:120px;">
+              <canvas id="mfa-waveform-canvas" width="1200" height="120" style="width:100%;height:100%;background:#000;display:block;"></canvas>
+            </div>
+          </div>
+          <div id="mfa-viewer-tiers" style="background:var(--bg);"></div>
+        </div>
 
         <!-- Matching TXT content -->
         <div id="mfa-viewer-txt-panel" style="display:none;margin-top:8px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px;">
@@ -6943,8 +6949,7 @@ async function runAsrExtraction() {
       '&model=' + encodeURIComponent(model) +
       '&language=' + encodeURIComponent(lang) +
       '&device=' + encodeURIComponent(device) +
-      '&hotwords=' + encodeURIComponent(hotwords) +
-    '&filter_english=' + (filterEnglish ? '1' : '0');
+      '&hotwords=' + encodeURIComponent(hotwords);
   if (outputDir) url += '&output_dir=' + encodeURIComponent(outputDir);
     var resp = await fetch(url, { method: 'POST' });
     var data = await resp.json();
@@ -7944,7 +7949,8 @@ function runAsrCompareAll() {
     '&model_b=' + encodeURIComponent(models.b) +
     '&language=' + encodeURIComponent(lang) +
     '&device=' + encodeURIComponent(device) +
-    '&hotwords=' + encodeURIComponent(hotwords);
+    '&hotwords=' + encodeURIComponent(hotwords) +
+    '&filter_english=' + (filterEnglish ? '1' : '0');
 
   fetch(url, {
     method: 'POST',
@@ -8766,7 +8772,7 @@ async function restoreAsrCompareInterruptedJobs() {
     var running = null, interrupted = null, lastCompleted = null;
     for (var i = 0; i < jobs.length; i++) {
       var j = jobs[i];
-      if (j.status === 'running' && !running) running = j;
+      if ((j.status === 'running' || j.status === 'pending' || j.status === 'loading') && !running) running = j;
       if (j.status === 'interrupted' && !interrupted) interrupted = j;
       if (j.status === 'completed' && !lastCompleted) lastCompleted = j;
     }
@@ -10962,10 +10968,23 @@ function pollPvJobs() {
 }
 
 function pvProcessNextInQueue() {
-  while (_pvQueue.length > 0 && (_pvQueue[0].status === 'completed' || _pvQueue[0].status === 'cancelled')) {
+  while (_pvQueue.length > 0 && (_pvQueue[0].status === 'completed' || _pvQueue[0].status === 'cancelled' || _pvQueue[0].status === 'error')) {
     _pvQueue.shift();
   }
   if (_pvQueue.length > 0 && _pvQueue[0].status === 'pending') {
+    var item = _pvQueue[0];
+    item._retries = (item._retries || 0) + 1;
+    if (item._retries > 3) {
+      item.status = 'error';
+      if (!item.files) item.files = [];
+      for (var fi = 0; fi < item.files.length; fi++) {
+        if (item.files[fi].status !== 'completed') item.files[fi].status = 'error';
+        item.files[fi].error = item.files[fi].error || '后端任务反复失败，已放弃重试';
+      }
+      toast('任务 ' + (item.folder_name || '') + ' 反复失败，已跳过', 'error');
+      pvProcessNextInQueue();
+      return;
+    }
     pvStartQueuedBackend(0);
   }
   pvRenderQueue();
@@ -12918,6 +12937,9 @@ async function mfaRunStep(step) {
     params.set('output_format', document.getElementById('mfa-align-format').value);
     params.set('no_tokenization', document.getElementById('mfa-align-no-tokenization').checked ? 'true' : 'false');
     params.set('no_textgrid_cleanup', document.getElementById('mfa-align-no-cleanup').checked ? 'true' : 'false');
+    if (_mfaAudioSelectedName) {
+      params.set('check_audio_stem', _mfaAudioSelectedName.replace(/\.(wav|mp3|flac|m4a|ogg)$/i, ''));
+    }
     label = '步骤 3: MFA Align';
   } else if (step === 'validate') {
     url = API + '/api/mfa/validate';
@@ -12954,6 +12976,7 @@ async function mfaRunStep(step) {
     var resp = await fetch(url + '?' + params.toString(), { method: 'POST' });
     var data = await resp.json();
     if (data.status !== 'ok') { toast('启动失败', 'error'); return; }
+    if (data.already_done) { toast(data.message || 'TextGrid 已存在，无需重复生成', 'info'); return; }
     _mfaJobId = data.job_id;
     // Hide stale results when starting new jobs
     if (step === 'validate') document.getElementById('mfa-val-result').style.display = 'none';
@@ -13513,25 +13536,15 @@ function mfaAutoOpenViewer(outputDir, wavDir, txtDir) {
     return;
   }
 
-  // Load the output directory and auto-select the first TextGrid
-  // (find-wav now uses wav_dir hint so the correct audio will be matched)
+  // Load TextGrid directory; if audio is already selected, load it
   mfaViewerLoadDir(outputDir, function() {
-    var fileList = document.getElementById('mfa-viewer-file-list');
-    var items = fileList.querySelectorAll('.mfa-browser-item.file');
-    if (items.length > 0) {
-      var firstItem = items[0];
-      var onclick = firstItem.getAttribute('onclick');
-      var match = onclick.match(/mfaViewerSelectTg\('([^']+)'/);
-      if (match) {
-        mfaViewerSelectTg(match[1], '');
-      }
-    }
+    if (_mfaAudioSelected) mfaViewerSetAudio(_mfaAudioSelected);
   });
   toast('对齐完成，TextGrid 文件已加载到查看器', 'success');
 }
 
 // ============================================================
-// TextGrid Viewer — waveform + tier timeline + audio sync
+// TextGrid Viewer — audio-driven: pick audio → find matching TextGrid
 // ============================================================
 var _mfaViewerDir = '';
 var _mfaViewerTgPath = '';
@@ -13546,9 +13559,49 @@ var _mfaViewerAudioDuration = 0;
 var _mfaViewerAudioUrl = '';
 var _mfaViewerAudioLoaded = false;
 var _mfaViewerEpoch = 0;
+var _mfaViewerRefDur = 0;
 
 // TXT content display area reference
 var _mfaViewerTxtContent = null;
+
+// --- Audio picker — the driver for TextGrid matching ---
+async function mfaViewerPickAudio() {
+  var current = _mfaViewerWavPath || _mfaAudioSelected || '';
+  if (current) current = current.replace(/\\/g, '/').split('/').slice(0, -1).join('/');
+  var path = await openFolderPicker('选择音频文件', current);
+  if (path) mfaViewerSetAudio(path);
+}
+
+function mfaViewerSetAudio(audioPath) {
+  _mfaViewerWavPath = audioPath;
+  _mfaViewerAudioDuration = 0;
+  _mfaViewerAudioLoaded = false;
+  _mfaViewerSetupAudioLazy(audioPath);
+
+  var name = audioPath.replace(/\\/g, '/').split('/').pop();
+  var el = document.getElementById('mfa-viewer-wav-name');
+  el.textContent = name;
+  el.style.color = '';
+
+  // Find matching TextGrid by audio stem in the current directory
+  var audioStem = name.replace(/\.(wav|mp3|flac|m4a|ogg)$/i, '');
+  var items = document.querySelectorAll('#mfa-viewer-file-list .mfa-browser-item.file');
+  for (var i = 0; i < items.length; i++) {
+    var itemPath = items[i].getAttribute('data-path') || '';
+    var itemStem = itemPath.replace(/\\/g, '/').split('/').pop().replace(/\.(textgrid|TextGrid)$/i, '');
+    if (itemStem.indexOf(audioStem) === 0) {
+      mfaViewerSelectTg(itemPath, '');
+      return;
+    }
+  }
+  // No matching TextGrid — just show waveform
+  _mfaViewerTgData = null;
+  _mfaViewerTgPath = '';
+  document.getElementById('mfa-viewer-tiers').innerHTML = '';
+  document.getElementById('mfa-viewer-main').style.display = 'block';
+  document.getElementById('mfa-viewer-empty').style.display = 'none';
+  mfaViewerDrawWaveform(audioPath, ++_mfaViewerEpoch);
+}
 
 function _mfaViewerGetColorClass(text) {
   if (!text) return 'sil0';
@@ -13602,7 +13655,7 @@ function _mfaViewerRenderDir(data, callback) {
   for (var m = 0; m < tgFiles.length; m++) {
     var tg = tgFiles[m];
     var sel = (_mfaViewerTgPath === tg.path) ? ' selected' : '';
-    html += '<div class="mfa-browser-item file' + sel + '" onclick="mfaViewerSelectTg(\'' + tg.path.replace(/'/g, "\\'") + '\', \'' + escapeHtml(tg.name).replace(/'/g, "\\'") + '\')">' +
+    html += '<div class="mfa-browser-item file' + sel + '" data-path="' + escapeHtmlAttr(tg.path) + '" data-mtime="' + (tg.mtime || 0) + '" onclick="mfaViewerSelectTg(\'' + tg.path.replace(/'/g, "\\'") + '\', \'' + escapeHtml(tg.name).replace(/'/g, "\\'") + '\')">' +
       '<span class="mfa-file-icon">📄</span><span class="mfa-item-name">' + escapeHtml(tg.name) + '</span></div>';
   }
   if (!html) html = '<div class="empty-state" style="padding:20px;"><p>此目录下没有 TextGrid 文件</p></div>';
@@ -13632,61 +13685,22 @@ async function mfaViewerBrowseOther() {
   if (path) mfaViewerLoadDir(path);
 }
 
-// --- Select & render ---
+// --- Select & render TextGrid (audio must be set already) ---
 async function mfaViewerSelectTg(path, name) {
   var epoch = ++_mfaViewerEpoch;
   _mfaViewerTgPath = path;
   mfaViewerLoadDir(_mfaViewerDir);
   document.getElementById('mfa-viewer-empty').style.display = 'none';
+  _mfaViewerAudioDuration = 0;
 
   try {
-    // Reset audio duration for new file
-    _mfaViewerAudioDuration = 0;
-
-    // Parse TextGrid
     var tgResp = await fetch(API + '/api/mfa/parse-textgrid?path=' + encodeURIComponent(path), {cache: 'no-store'});
     if (epoch !== _mfaViewerEpoch) return;
     if (!tgResp.ok) { toast('解析失败', 'error'); return; }
     _mfaViewerTgData = await tgResp.json();
 
-    // Find matching WAV — include user-specified WAV dir for better matching
     var stem = path.split('/').pop().replace(/\.(textgrid|TextGrid)$/i, '');
-    var findWavUrl = API + '/api/mfa/find-wav?textgrid_path=' + encodeURIComponent(path);
-    if (_mfaViewerWavDirHint) findWavUrl += '&wav_dir=' + encodeURIComponent(_mfaViewerWavDirHint);
-    var wavResp = await fetch(findWavUrl, {cache: 'no-store'});
-    if (epoch !== _mfaViewerEpoch) return;
-    var wavData = await wavResp.json();
-    if (wavData.wav_path) {
-      _mfaViewerWavPath = wavData.wav_path;
-      var matchTag = '';
-      if (wavData.source === 'fuzzy') {
-        matchTag = ' (模糊匹配)';
-      } else if (wavData.source === 'similarity') {
-        matchTag = ' (相似匹配, 前缀' + (wavData.common_prefix_len || 0) + '字符)';
-      }
-      document.getElementById('mfa-viewer-wav-name').textContent = wavData.stem + '.wav' + matchTag;
-      if (matchTag) document.getElementById('mfa-viewer-wav-name').style.color = '#e9a960';
-      else document.getElementById('mfa-viewer-wav-name').style.color = '';
-    } else {
-      _mfaViewerWavPath = '';
-      // Show diagnostic details
-      var detail = '(未找到 WAV)';
-      console.warn('find-wav 未找到匹配 for: ' + stem +
-        '\n  wav_dir: ' + (_mfaViewerWavDirHint || '(未设置)') +
-        '\n  尝试stems: ' + JSON.stringify(wavData.candidates || [stem]) +
-        '\n  搜索目录: ' + JSON.stringify(wavData.search_dirs || []) +
-        '\n  WAV数量: ' + (wavData.wav_count || 0) +
-        '\n  WAV样本: ' + JSON.stringify(wavData.sample_wavs || []));
-      if (wavData.candidates && wavData.candidates.length > 1) {
-        detail += ' [尝试: ' + wavData.candidates.join(' → ') + ']';
-      }
-      document.getElementById('mfa-viewer-wav-name').textContent = detail;
-      document.getElementById('mfa-viewer-wav-name').style.color = 'var(--danger)';
-    }
-
-    // Find matching TXT content
     mfaViewerLoadMatchingText(stem);
-
     mfaViewerRender(epoch);
   } catch(e) { toast('加载失败: ' + e.message, 'error'); }
 }
@@ -13701,12 +13715,38 @@ async function mfaViewerLoadMatchingText(stem) {
     return;
   }
 
+  // Build a list of stems to try: original, then fuzzy variants
+  var stemsToTry = [stem];
+  var m = stem.match(/^(.+?)_separated_([^_]+)$/);
+  if (m) {
+    stemsToTry.push(m[1]);
+    var nested = m[1].match(/^(.+?)_seg\d+$/);
+    if (nested) stemsToTry.push(nested[1]);
+  }
+  m = stem.match(/^(.+?)_seg\d+$/);
+  if (m) stemsToTry.push(m[1]);
+
+  async function tryReadTxt(txtPath, label) {
+    try {
+      var resp = await fetch(API + '/api/mfa/read-text?path=' + encodeURIComponent(txtPath), {cache: 'no-store'});
+      if (resp.ok) {
+        var data = await resp.json();
+        if (data.content) {
+          nameEl.textContent = label;
+          contentEl.textContent = data.content;
+          panel.style.display = 'block';
+          return true;
+        }
+      }
+    } catch(e) {}
+    return false;
+  }
+
   try {
-    // Find matching TXT by stem
+    // Try match-text API first with original stem
     var resp = await fetch(API + '/api/mfa/match-text?audio_stem=' + encodeURIComponent(stem) + '&text_dir=' + encodeURIComponent(_mfaViewerTxtDir), {cache: 'no-store'});
     var data = await resp.json();
     var matches = data.matches || [];
-    // Pick the first .txt match
     var txtMatch = null;
     for (var i = 0; i < matches.length; i++) {
       if (matches[i].is_txt) { txtMatch = matches[i]; break; }
@@ -13715,29 +13755,26 @@ async function mfaViewerLoadMatchingText(stem) {
 
     if (txtMatch) {
       nameEl.textContent = txtMatch.name;
-      // Read content
       var readResp = await fetch(API + '/api/mfa/read-text?path=' + encodeURIComponent(txtMatch.path), {cache: 'no-store'});
       var readData = await readResp.json();
       contentEl.textContent = readData.content || '(空文件)';
       panel.style.display = 'block';
-    } else {
-      // Try direct stem match: <stem>.txt in txt_dir
-      var directPath = _mfaViewerTxtDir.replace(/\/$/, '') + '/' + stem + '.txt';
-      try {
-        var directResp = await fetch(API + '/api/mfa/read-text?path=' + encodeURIComponent(directPath), {cache: 'no-store'});
-        if (directResp.ok) {
-          var directData = await directResp.json();
-          if (directData.content) {
-            nameEl.textContent = stem + '.txt';
-            contentEl.textContent = directData.content;
-            panel.style.display = 'block';
-            return;
-          }
-        }
-      } catch(e) {}
-      panel.style.display = 'none';
+      return;
     }
+
+    // Try direct stem matches with all variants
+    for (var s = 0; s < stemsToTry.length; s++) {
+      var tryStem = stemsToTry[s];
+      var directPath = _mfaViewerTxtDir.replace(/\/$/, '') + '/' + tryStem + '.txt';
+      if (await tryReadTxt(directPath, tryStem + '.txt')) return;
+    }
+    panel.style.display = 'none';
   } catch(e) {
+    // Final fallback: try fuzzy stems even if match-text threw
+    for (var s2 = 1; s2 < stemsToTry.length; s2++) {
+      var dp = _mfaViewerTxtDir.replace(/\/$/, '') + '/' + stemsToTry[s2] + '.txt';
+      if (await tryReadTxt(dp, stemsToTry[s2] + '.txt')) return;
+    }
     panel.style.display = 'none';
   }
 }
@@ -13751,16 +13788,18 @@ function mfaViewerRender(epoch) {
   var totalDur = data.xmax || data.xmin || 1;
   if (totalDur < 0.01) totalDur = 1;
 
-  // Use actual audio duration for seek bar if available (better sync)
-  var displayDur = _mfaViewerAudioDuration || totalDur;
+  // Unified reference duration: audio is ground truth, fall back to TextGrid
+  // Use the longer of the two so tiers and waveform share the same scale
+  var refDur = _mfaViewerAudioDuration > 0 ? Math.max(totalDur, _mfaViewerAudioDuration) : totalDur;
+  _mfaViewerRefDur = refDur;
 
   // Seek bar max
   var seek = document.getElementById('mfa-viewer-seek');
-  seek.max = Math.round(displayDur * 1000);
+  seek.max = Math.round(refDur * 1000);
   seek.value = 0;
-  document.getElementById('mfa-viewer-time').textContent = '0.00s / ' + displayDur.toFixed(2) + 's';
+  document.getElementById('mfa-viewer-time').textContent = '0.00s / ' + refDur.toFixed(2) + 's';
 
-  // Render tiers
+  // Render tiers — scaled to refDur so they align with waveform
   var tiersHtml = '';
   for (var i = 0; i < data.tiers.length; i++) {
     var tier = data.tiers[i];
@@ -13771,8 +13810,8 @@ function mfaViewerRender(epoch) {
 
     for (var j = 0; j < tier.intervals.length; j++) {
       var iv = tier.intervals[j];
-      var leftPct = (iv.xmin / totalDur * 100).toFixed(3);
-      var wPct = ((iv.xmax - iv.xmin) / totalDur * 100).toFixed(3);
+      var leftPct = (iv.xmin / refDur * 100).toFixed(3);
+      var wPct = ((iv.xmax - iv.xmin) / refDur * 100).toFixed(3);
       if (wPct < 0.1) wPct = '0.1';
       var segClass = _mfaViewerGetColorClass(iv.text) || barClass || 'raw';
       var displayText = iv.text || '';
@@ -13799,6 +13838,30 @@ function mfaViewerRender(epoch) {
   }
 }
 
+// Re-scale already-rendered tier bars when audio duration > TextGrid duration
+function _mfaViewerRescaleTiers(newDur) {
+  if (!newDur || newDur <= 0) return;
+  var oldDur = _mfaViewerRefDur || newDur;
+  _mfaViewerRefDur = newDur;
+  // Update seek bar and time display
+  var seek = document.getElementById('mfa-viewer-seek');
+  seek.max = Math.round(newDur * 1000);
+  var timeEl = document.getElementById('mfa-viewer-time');
+  if (timeEl) {
+    var currentTime = (_mfaViewerAudio && _mfaViewerAudio.currentTime) || 0;
+    timeEl.textContent = currentTime.toFixed(2) + 's / ' + newDur.toFixed(2) + 's';
+  }
+  // Re-scale each tier segment to the new reference duration
+  var segs = document.querySelectorAll('#mfa-viewer-tiers .mfa-tier-seg');
+  for (var i = 0; i < segs.length; i++) {
+    var el = segs[i];
+    var xmin = parseFloat(el.getAttribute('data-xmin') || '0');
+    var xmax = parseFloat(el.getAttribute('data-xmax') || '0');
+    el.style.left = (xmin / newDur * 100).toFixed(3) + '%';
+    el.style.width = (Math.max(0.1, (xmax - xmin) / newDur * 100)).toFixed(3) + '%';
+  }
+}
+
 // --- Waveform rendering ---
 // --- Waveform rendering (server-side peak data, no full WAV download) ---
 function mfaViewerDrawWaveform(wavUrl, epoch) {
@@ -13815,7 +13878,15 @@ function mfaViewerDrawWaveform(wavUrl, epoch) {
       // Discard stale response if user has already selected a different file
       if (epoch !== _mfaViewerEpoch) return;
       // Store actual audio duration for accurate playhead sync
-      if (data.duration && data.duration > 0) _mfaViewerAudioDuration = data.duration;
+      if (data.duration && data.duration > 0) {
+        var prevDur = _mfaViewerAudioDuration;
+        _mfaViewerAudioDuration = data.duration;
+        // If audio is longer than TextGrid, re-scale tiers to match
+        var tgDur = (_mfaViewerTgData && _mfaViewerTgData.xmax) || 0;
+        if (data.duration > tgDur && data.duration > prevDur) {
+          _mfaViewerRescaleTiers(data.duration);
+        }
+      }
       var peaks = data.peaks;
       if (!peaks || peaks.length === 0) {
         ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -13871,25 +13942,23 @@ function _mfaViewerOnTimeUpdate() {
 
 function _mfaViewerDrawPlayhead(t) {
   if (!_mfaViewerTgData) return;
-  // Use actual audio element duration for best sync, fall back to waveform/server duration
-  var audioDur = (_mfaViewerAudio && _mfaViewerAudio.duration) || _mfaViewerAudioDuration || _mfaViewerTgData.xmax || 1;
-  var canvas = document.getElementById('mfa-waveform-canvas');
-  var ctx = canvas.getContext('2d');
-  var x = (t / audioDur) * canvas.width;
-  // Simple redraw approach: just draw a vertical line overlay
-  // We do this by showing/hiding a positioned div since redrawing canvas is expensive
+  var refDur = _mfaViewerRefDur || (_mfaViewerAudio && _mfaViewerAudio.duration) || _mfaViewerAudioDuration || _mfaViewerTgData.xmax || 1;
+  var timeline = document.getElementById('mfa-viewer-timeline');
+  if (!timeline) return;
+  // Playhead aligns with bars area (after the 110px label column)
+  var barsWidth = timeline.clientWidth - 110;
+  if (barsWidth < 1) barsWidth = 1;
+  var x = 110 + (t / refDur) * barsWidth;
+
   var existing = document.getElementById('mfa-playhead');
   if (!existing) {
     existing = document.createElement('div');
     existing.id = 'mfa-playhead';
     existing.style.cssText = 'position:absolute;top:0;bottom:0;width:1px;background:#fff;pointer-events:none;z-index:5;';
-    canvas.parentNode.style.position = 'relative';
-    canvas.parentNode.appendChild(existing);
+    timeline.appendChild(existing);
   }
-  var pct = (t / audioDur * 100).toFixed(2);
-  existing.style.left = pct + '%';
+  existing.style.left = x + 'px';
   existing.style.display = 'block';
-  // Highlight current tier segments
   _mfaViewerHighlightSegments(t);
 }
 
