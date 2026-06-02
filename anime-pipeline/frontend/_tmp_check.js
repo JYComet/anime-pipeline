@@ -329,7 +329,7 @@ function switchTab(name) {
   if (name === 'denoise-review') { loadDreviewBaseDirs(); loadEmotionCounts('dreview-emotion-bar', '/api/denoise-review/emotion-counts'); }
   if (name === 'extract') { loadExtractFiles(); loadExtractedSubs(); }
   if (name === 'asr') { loadAsrVideos(); loadAsrModels(); loadAsrResults(); restoreAsrInterruptedJobs(); loadHotwordConfigs(); loadFolderBrowser(_asrFolderPath || ''); }
-  if (name === 'asr-compare') { if (!_cmpLoaded) { loadCmpFolderBrowser(_cmpFolderPath); loadAsrCompareModels(); _cmpLoaded = true; } restoreAsrCompareInterruptedJobs(); loadHotwordConfigs(); }
+  if (name === 'asr-compare') { if (!_cmpLoaded) { loadCmpFolderBrowser(_cmpFolderPath); loadAsrCompareModels(); _cmpLoaded = true; } if (!_cmpRestored) { restoreAsrCompareInterruptedJobs(); _cmpRestored = true; } loadHotwordConfigs(); }
   if (name === 'stitch') loadStitchVideos();
   if (name === 'split') {
     if (!window._splitLoaded) { loadSplitFolderBrowser(''); loadSplitClipDirs(); window._splitLoaded = true; }
@@ -5326,7 +5326,9 @@ function restoreUiState() {
 // ASR Comparison
 // ============================================================
 var _cmpLoaded = false;
+var _cmpRestored = false;    // only restore interrupted jobs once per page load
 var _cmpFolderPath = '';     // current browsing path for compare
+var _cmpDefaultPath = '/mnt/nas/Persons/jiangyichen/Enhanced/529';
 var _cmpFolderFiles = [];    // audio files in current folder
 var _cmpFolderSelected = {}; // selected file names
 var _cmpJobId = null;
@@ -5335,10 +5337,20 @@ var _cmpResults = {};
 var _cmpModels = [];
 
 async function loadCmpFolderBrowser(path) {
-  if (!path) path = '';
+  if (!path) path = _cmpDefaultPath || '';
   try {
     var resp = await fetch(API + '/api/asr-compare/dir-browse?path=' + encodeURIComponent(path));
-    if (!resp.ok) { console.error('cmp dir-browse failed:', resp.status); return; }
+    if (!resp.ok) {
+      var errMsg = '目录访问失败: ' + resp.status;
+      try {
+        var errDetail = await resp.json();
+        if (errDetail && errDetail.detail) errMsg += '\n' + errDetail.detail;
+      } catch(_) {}
+      if (resp.status === 404) errMsg += '\n请检查路径是否存在或网络共享是否已挂载';
+      else if (resp.status === 403) errMsg += '\n没有访问该目录的权限';
+      else if (resp.status >= 500) errMsg += '\n服务器内部错误，请查看后端日志';
+      toast(errMsg, 'error'); return;
+    }
     var data = await resp.json();
     _cmpFolderPath = data.current_path;
     _cmpFolderFiles = data.audio_files || [];
@@ -5386,7 +5398,7 @@ async function loadCmpFolderBrowser(path) {
       listEl.style.display = 'none';
       document.getElementById('btn-cmp-run').disabled = true;
     }
-  } catch(e) { console.error('loadCmpFolderBrowser:', e); }
+  } catch(e) { console.error('loadCmpFolderBrowser:', e); toast('加载目录失败: ' + (e.message || e), 'error'); }
 }
 
 function cmpFolderGoUp() {
@@ -5793,62 +5805,126 @@ function packageAsrCompareResults() {
 // ============================================================
 // Audio Stitching
 // ============================================================
+// ASR Compare — Job State Restore (mirrors pipeline-video pattern)
+// ============================================================
 async function restoreAsrCompareInterruptedJobs() {
-  /* Check for interrupted ASR compare jobs and show resume/discard buttons */
+  /* Recover ASR compare state after page refresh or server restart.
+     Three cases (mirrors pvRestoreJobs pattern):
+       1. running   → re-attach polling so the UI reflects live progress
+       2. interrupted → show restore card with resume/discard buttons
+       3. completed → reload results from the last completed job */
   try {
     var resp = await fetch(API + '/api/asr-compare/jobs');
     if (!resp.ok) return;
     var data = await resp.json();
     var jobs = data.jobs || [];
-    var interrupted = jobs.filter(function(j) { return j.status === 'interrupted'; });
-    if (!interrupted.length) return;
+    if (!jobs.length) return;
 
-    // Show interrupted section above the main compare panel
-    var panel = document.getElementById('tab-asr-compare');
-    var existing = document.getElementById('cmp-interrupted-section');
-    if (existing) existing.remove();
+    var running = null, interrupted = null, lastCompleted = null;
+    for (var i = 0; i < jobs.length; i++) {
+      var j = jobs[i];
+      if (j.status === 'running' && !running) running = j;
+      if (j.status === 'interrupted' && !interrupted) interrupted = j;
+      if (j.status === 'completed' && !lastCompleted) lastCompleted = j;
+    }
 
-    var html = '<div id="cmp-interrupted-section" style="margin:12px 0;padding:12px;border-radius:8px;background:#3a1a1a;border:1px solid #ff6b6b;">';
-    html += '<div style="font-size:13px;color:#ff6b6b;font-weight:600;margin-bottom:8px;">' +
-      '有 ' + interrupted.length + ' 个 ASR 对比任务因服务器重启而中断</div>';
-    for (var i = 0; i < interrupted.length; i++) {
-      var j = interrupted[i];
+    // Case 1: a job is still running → re-attach polling
+    if (running) {
+      _cmpJobId = running.job_id;
+      document.getElementById('cmp-progress').style.display = 'block';
+      document.getElementById('cmp-progress-fill').style.width = (running.progress || 0) + '%';
+      document.getElementById('cmp-progress-text').textContent = running.current_step || '处理中...';
+      document.getElementById('btn-cmp-stop').style.display = 'inline-block';
+      document.getElementById('btn-cmp-run').disabled = true;
+      document.getElementById('btn-cmp-run').textContent = '处理中...';
+      if (running.results && Object.keys(running.results).length) {
+        _cmpResults = running.results;
+        renderCmpSummary();
+        renderCmpResults();
+      }
+      startCmpPolling();
+      return;
+    }
+
+    // Case 2: interrupted job → show restore card
+    if (interrupted) {
+      var panel = document.getElementById('tab-asr-compare');
+      var existing = document.getElementById('cmp-interrupted-section');
+      if (existing) existing.remove();
+
+      var j = interrupted;
       var total = j.total || 0;
       var completed = j.completed || 0;
-      html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,107,107,0.2);">' +
-        '<span style="font-size:12px;color:var(--text);">ASR 对比任务 (' + completed + '/' + total + ' 完成)</span>' +
-        '<span style="flex-shrink:0;">' +
-        '<button class="btn btn-primary" style="font-size:10px;padding:2px 8px;margin-left:8px;" onclick="resumeAsrCompareJob(\'' + j.job_id + '\')">恢复</button>' +
-        '<button class="btn" style="font-size:10px;padding:2px 8px;margin-left:4px;background:var(--danger);color:#fff;" onclick="discardAsrCompareJob(\'' + j.job_id + '\')">丢弃</button>' +
-        '</span></div>';
+      var pending = total - completed;
+      var progress = j.progress || 0;
+      var isSeg = j.is_segmented ? ' (分段对比)' : '';
+      var modelA = (j._model_a || '?').replace('qwen3-asr', 'Qwen3-ASR').replace('firered-asr2', 'FireRedASR2');
+      var modelB = (j._model_b || '?').replace('qwen3-asr', 'Qwen3-ASR').replace('firered-asr2', 'FireRedASR2');
+      var folderPath = j.files && j.files.length && j.files[0].path ?
+        j.files[0].path.split('/').slice(0, -1).join('/') : '';
+      var html = '<div id="cmp-interrupted-section" style="margin:12px 0;">';
+      html += '<div style="background:var(--bg2);border:1px solid #ff6b6b;border-radius:8px;padding:16px;margin-bottom:12px;">';
+      html += '<div style="font-size:16px;font-weight:bold;color:#ff6b6b;margin-bottom:8px;">⚠ 任务因服务器重启中断</div>';
+      html += '<div style="font-size:13px;color:var(--text2);margin-bottom:4px;">模型: ' + escapeHtml(modelA) + ' vs ' + escapeHtml(modelB) + isSeg + '</div>';
+      if (folderPath) html += '<div style="font-size:13px;color:var(--text2);margin-bottom:4px;">目录: ' + escapeHtml(folderPath) + '</div>';
+      html += '<div style="font-size:13px;color:var(--text2);margin-bottom:4px;">总文件数: ' + total + ' | 已完成: ' + completed + ' | 待处理: ' + pending + '</div>';
+      html += '<div style="font-size:13px;color:var(--text2);margin-bottom:4px;">进度: ' + progress + '%</div>';
+      html += '<div style="margin-top:8px;background:var(--bg);border-radius:4px;height:6px;overflow:hidden;">';
+      html += '<div style="width:' + progress + '%;height:100%;background:linear-gradient(90deg,#ff6b6b,#ff4444);border-radius:4px;"></div>';
+      html += '</div>';
+      html += '<div style="display:flex;gap:8px;margin-top:12px;">';
+      html += '<button class="btn btn-success" onclick="resumeAsrCompareJob(\'' + j.job_id + '\')" style="background:var(--success);color:#000;font-weight:600;">继续执行 (跳过已完成)</button>';
+      html += '<button class="btn btn-secondary" onclick="discardAsrCompareJob(\'' + j.job_id + '\')" style="background:var(--danger);color:#fff;">丢弃任务</button>';
+      html += '</div></div></div>';
+      panel.insertAdjacentHTML('afterbegin', html);
+      return;
     }
-    html += '</div>';
-    panel.insertAdjacentHTML('afterbegin', html);
-  } catch(e) { console.error(e); }
+
+    // Case 3: completed job → restore results display
+    if (lastCompleted && lastCompleted.results && Object.keys(lastCompleted.results).length) {
+      _cmpResults = lastCompleted.results;
+      document.getElementById('cmp-summary').style.display = 'block';
+      document.getElementById('cmp-empty-state').style.display = 'none';
+      document.getElementById('btn-cmp-package').disabled = false;
+      document.getElementById('btn-cmp-run').disabled = false;
+      document.getElementById('btn-cmp-run').textContent = '重新对比';
+      renderCmpSummary();
+      renderCmpResults();
+    }
+  } catch(e) { console.error('restoreAsrCompareInterruptedJobs:', e); }
 }
 
 async function resumeAsrCompareJob(jobId) {
+  if (!confirm('确定恢复此任务？将跳过已完成的文件继续处理。')) return;
   try {
     var resp = await fetch(API + '/api/asr-compare/job/' + jobId + '/resume', { method: 'POST' });
     if (!resp.ok) { var err = await resp.json(); toast('恢复失败: ' + (err.detail || '未知错误'), 'error'); return; }
-    toast('ASR 对比任务已恢复');
+    toast('ASR 对比任务已恢复执行', 'success');
     var section = document.getElementById('cmp-interrupted-section');
     if (section) section.remove();
-    // Start polling
-    _cmpActiveJobId = jobId;
-    pollAsrCompareJob();
-  } catch(e) { toast('恢复失败', 'error'); }
+    // Set up the compare UI for polling
+    _cmpJobId = jobId;
+    document.getElementById('cmp-progress').style.display = 'block';
+    document.getElementById('cmp-progress-fill').style.width = '0%';
+    document.getElementById('cmp-progress-text').textContent = '加载模型中...';
+    document.getElementById('btn-cmp-stop').style.display = 'inline-block';
+    document.getElementById('cmp-summary').style.display = 'none';
+    document.getElementById('cmp-empty-state').style.display = 'none';
+    document.getElementById('btn-cmp-run').disabled = true;
+    document.getElementById('btn-cmp-run').textContent = '处理中...';
+    startCmpPolling();
+  } catch(e) { toast('恢复失败: ' + e.message, 'error'); }
 }
 
 async function discardAsrCompareJob(jobId) {
-  if (!confirm('确定要丢弃此 ASR 对比任务吗？')) return;
+  if (!confirm('确定丢弃此中断的任务？已完成的文件结果将丢失。')) return;
   try {
     var resp = await fetch(API + '/api/asr-compare/job/' + jobId + '/discard', { method: 'POST' });
-    if (!resp.ok) { toast('丢弃失败', 'error'); return; }
-    toast('ASR 对比任务已丢弃');
+    if (!resp.ok) { var err = await resp.json(); toast('丢弃失败: ' + (err.detail || ''), 'error'); return; }
+    toast('ASR 对比任务已丢弃', 'info');
     var section = document.getElementById('cmp-interrupted-section');
     if (section) section.remove();
-  } catch(e) { toast('丢弃失败', 'error'); }
+  } catch(e) { toast('丢弃失败: ' + e.message, 'error'); }
 }
 
 var _stitchClips = [];
@@ -8919,6 +8995,7 @@ async function mfaRunStep(step) {
     params.set('workers', document.getElementById('mfa-trim-workers').value || '8');
     label = '步骤 1: 裁剪静音';
   } else if (step === 'generate') {
+    if (_mfaTextSelectedIsTxt) { toast('已选择外部 TXT 文件，步骤2已自动跳过', 'info'); return; }
     url = API + '/api/mfa/generate-txt';
     params.set('jsonl_path', document.getElementById('mfa-gen-jsonl').value);
     params.set('output_dir', document.getElementById('mfa-gen-output').value);
@@ -9039,6 +9116,8 @@ async function mfaRunAll() {
     post_fix_short_multi_unit: document.getElementById('mfa-post-fix-short').checked,
     post_filter_suspicious_alignment: document.getElementById('mfa-post-filter-suspicious').checked,
     post_copy_errors: document.getElementById('mfa-post-copy-errors').checked,
+    language: _mfaLang || 'zh',
+    skip_step2: _mfaTextSelectedIsTxt,
   };
 
   try {
@@ -9303,73 +9382,54 @@ function mfaViewerRender() {
   }
 }
 
-// --- Waveform rendering ---
+// --- Waveform rendering (server-side peak data, no full WAV download) ---
 function mfaViewerDrawWaveform(wavUrl) {
   var canvas = document.getElementById('mfa-waveform-canvas');
   var ctx = canvas.getContext('2d');
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = '#333'; ctx.font = '14px monospace'; ctx.textAlign = 'center';
-  ctx.fillText('加载波形中...', canvas.width/2, canvas.height/2);
+  ctx.fillText('加载波形...', canvas.width/2, canvas.height/2);
 
-  // Decode audio via Web Audio API
-  var url = API + '/api/mfa/stream?path=' + encodeURIComponent(wavUrl);
-  if (_mfaViewerAudioCtx) _mfaViewerAudioCtx.close();
-  try {
-    _mfaViewerAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  } catch(e) { ctx.fillText('浏览器不支持音频', canvas.width/2, canvas.height/2); return; }
-
-  fetch(url).then(function(r) { return r.arrayBuffer(); }).then(function(buf) {
-    return _mfaViewerAudioCtx.decodeAudioData(buf);
-  }).then(function(audioBuffer) {
-    // Setup audio element for playback
-    _mfaViewerSetupAudio(url);
-    // Draw
-    var data = audioBuffer.getChannelData(0);
-    var step = Math.max(1, Math.floor(data.length / canvas.width));
-    var ampMax = 0;
-    var peaks = [];
-    for (var i = 0; i < canvas.width; i++) {
-      var start = i * step;
-      var end = Math.min(start + step, data.length);
-      var max = 0;
-      for (var j = start; j < end; j++) {
-        var abs = Math.abs(data[j]);
-        if (abs > max) max = abs;
+  // Fetch lightweight peak data (server computes it, ~2KB instead of 100+MB WAV)
+  fetch(API + '/api/mfa/waveform?path=' + encodeURIComponent(wavUrl))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var peaks = data.peaks;
+      if (!peaks || peaks.length === 0) {
+        ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#333'; ctx.fillText('无波形数据', canvas.width/2, canvas.height/2);
+        return;
       }
-      peaks.push(max);
-      if (max > ampMax) ampMax = max;
-    }
-    if (ampMax < 0.001) ampMax = 1;
-    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-    var mid = canvas.height / 2;
-    for (var k = 0; k < peaks.length; k++) {
-      var h = (peaks[k] / ampMax) * (canvas.height * 0.45);
-      var alpha = 0.3 + (peaks[k] / ampMax) * 0.7;
-      ctx.fillStyle = 'rgba(78, 204, 163, ' + alpha.toFixed(2) + ')';
-      ctx.fillRect(k, mid - h, 1, h * 2);
-    }
-    // Playhead line
-    ctx.strokeStyle = 'rgba(233, 69, 96, 0.5)';
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(canvas.width, mid); ctx.stroke();
-  }).catch(function(e) {
-    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#633'; ctx.font = '12px monospace'; ctx.textAlign = 'center';
-    ctx.fillText('WAV 加载失败', canvas.width/2, canvas.height/2);
-  });
+      var ampMax = 0;
+      for (var i = 0; i < peaks.length; i++) {
+        if (peaks[i] > ampMax) ampMax = peaks[i];
+      }
+      if (ampMax < 0.001) ampMax = 1;
+      ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      var mid = canvas.height / 2;
+      for (var k = 0; k < peaks.length && k < canvas.width; k++) {
+        var h = (peaks[k] / ampMax) * (canvas.height * 0.45);
+        var alpha = 0.3 + (peaks[k] / ampMax) * 0.7;
+        ctx.fillStyle = 'rgba(78, 204, 163, ' + alpha.toFixed(2) + ')';
+        ctx.fillRect(k, mid - h, 1, h * 2);
+      }
+      ctx.strokeStyle = 'rgba(233, 69, 96, 0.5)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(canvas.width, mid); ctx.stroke();
+    }).catch(function(e) {
+      ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#633'; ctx.font = '12px monospace'; ctx.textAlign = 'center';
+      ctx.fillText('波形加载失败', canvas.width/2, canvas.height/2);
+    });
+
+  // Lazy-load audio element for playback (don't download until play is clicked)
+  _mfaViewerSetupAudioLazy(wavUrl);
 }
 
-function _mfaViewerSetupAudio(url) {
+function _mfaViewerSetupAudioLazy(url) {
   if (_mfaViewerAudio) { _mfaViewerAudio.pause(); _mfaViewerAudio = null; }
-  var audio = new Audio(url);
-  audio.addEventListener('timeupdate', _mfaViewerOnTimeUpdate);
-  audio.addEventListener('loadedmetadata', function() {
-    document.getElementById('mfa-viewer-seek').max = Math.round(audio.duration * 1000);
-  });
-  audio.addEventListener('ended', function() {
-    document.getElementById('mfa-viewer-play').textContent = '▶ 播放';
-  });
-  _mfaViewerAudio = audio;
+  _mfaViewerAudioUrl = url;
+  _mfaViewerAudioLoaded = false;
 }
 
 function _mfaViewerOnTimeUpdate() {
@@ -9420,38 +9480,66 @@ function _mfaViewerHighlightSegments(t) {
   }
 }
 
+function _mfaViewerEnsureAudio(callback) {
+  if (_mfaViewerAudioLoaded && _mfaViewerAudio) { callback(); return; }
+  if (!_mfaViewerAudioUrl) return;
+  var url = API + '/api/mfa/stream?path=' + encodeURIComponent(_mfaViewerAudioUrl);
+  var audio = new Audio(url);
+  audio.addEventListener('timeupdate', _mfaViewerOnTimeUpdate);
+  audio.addEventListener('loadedmetadata', function() {
+    document.getElementById('mfa-viewer-seek').max = Math.round(audio.duration * 1000);
+  });
+  audio.addEventListener('ended', function() {
+    document.getElementById('mfa-viewer-play').textContent = '▶ 播放';
+  });
+  audio.addEventListener('canplaythrough', function() {
+    _mfaViewerAudioLoaded = true;
+    if (callback) callback();
+  }, {once: true});
+  _mfaViewerAudio = audio;
+  _mfaViewerAudioLoaded = true;  // set immediately so we don't re-create
+  audio.load();
+  if (callback) callback();
+  return audio;
+}
+
 function mfaViewerTogglePlay() {
-  if (!_mfaViewerAudio) return;
+  if (!_mfaViewerAudioUrl) return;
   var btn = document.getElementById('mfa-viewer-play');
-  if (_mfaViewerAudio.paused) {
-    _mfaViewerAudio.play();
-    btn.textContent = '⏸ 暂停';
-  } else {
-    _mfaViewerAudio.pause();
-    btn.textContent = '▶ 播放';
-  }
+  _mfaViewerEnsureAudio(function() {
+    if (_mfaViewerAudio.paused) {
+      _mfaViewerAudio.play();
+      btn.textContent = '⏸ 暂停';
+    } else {
+      _mfaViewerAudio.pause();
+      btn.textContent = '▶ 播放';
+    }
+  });
 }
 
 function mfaViewerSeek(value) {
   var t = parseInt(value) / 1000;
-  if (_mfaViewerAudio) _mfaViewerAudio.currentTime = t;
+  _mfaViewerEnsureAudio(function() {
+    if (_mfaViewerAudio) _mfaViewerAudio.currentTime = t;
+  });
   _mfaViewerDrawPlayhead(t);
 }
 
 function mfaViewerPlaySegment(xmin, xmax) {
-  if (_mfaViewerAudio) {
-    _mfaViewerAudio.currentTime = xmin;
-    _mfaViewerAudio.play();
-    document.getElementById('mfa-viewer-play').textContent = '⏸ 暂停';
-    // Stop after segment
-    var stopAt = xmax;
-    var check = setInterval(function() {
-      if (!_mfaViewerAudio || _mfaViewerAudio.currentTime >= stopAt) {
-        if (_mfaViewerAudio) _mfaViewerAudio.pause();
-        clearInterval(check);
-        document.getElementById('mfa-viewer-play').textContent = '▶ 播放';
-      }
-    }, 50);
-  }
+  _mfaViewerEnsureAudio(function() {
+    if (_mfaViewerAudio) {
+      _mfaViewerAudio.currentTime = xmin;
+      _mfaViewerAudio.play();
+      document.getElementById('mfa-viewer-play').textContent = '⏸ 暂停';
+      var stopAt = xmax;
+      var check = setInterval(function() {
+        if (!_mfaViewerAudio || _mfaViewerAudio.currentTime >= stopAt) {
+          if (_mfaViewerAudio) _mfaViewerAudio.pause();
+          clearInterval(check);
+          document.getElementById('mfa-viewer-play').textContent = '▶ 播放';
+        }
+      }, 50);
+    }
+  });
 }
 

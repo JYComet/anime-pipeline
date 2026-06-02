@@ -10,7 +10,7 @@ from enum import Enum
 from dataclasses import dataclass, field
 from typing import Optional, Callable
 
-from config import DOWNLOAD_DIR, SUBTITLE_DIR, CLIPS_DIR, TEMP_DIR
+from config import DOWNLOAD_DIR, SUBTITLE_DIR, CLIPS_DIR, TEMP_DIR, DATA_DIR
 
 
 class StepStatus(Enum):
@@ -89,7 +89,7 @@ class Pipeline:
     def __init__(self):
         self.jobs: dict[str, PipelineJob] = {}
         self._lock = threading.Lock()
-        self._jobs_file = os.path.join(os.path.dirname(DOWNLOAD_DIR), "jobs.json")
+        self._jobs_file = os.path.join(DATA_DIR, "jobs.json")
         self._load_jobs()
 
     def _save_jobs(self):

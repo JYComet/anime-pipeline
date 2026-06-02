@@ -1067,12 +1067,159 @@ def run_asr_on_audio(
                 pass
 
 
+class _CancelPipeline(Exception):
+    """Raised when a pipeline is cancelled mid-processing. Caught by the caller to mark the job as cancelled."""
+    pass
+
+
 # --- ASR Comparison ---
 
+# ---------------------------------------------------------------------------
+# Simplified → Traditional character mapping (common pairs used in ASR output).
+# When either model outputs traditional characters, they map to simplified so
+# the comparison is script-agnostic.
+# ---------------------------------------------------------------------------
+_S2T_MAP: dict[str, str] = {}
+def _build_s2t_map():
+    """Lazily build the simplified→traditional mapping on first use."""
+    if _S2T_MAP:
+        return _S2T_MAP
+    # Each group: first character is the simplified form; ALL subsequent
+    # characters are traditional / regional variants that map to it.
+    # Focused on the ≈300 most frequent characters found in ASR output.
+    groups = """
+        说説 来來 国國 时時 对對 会會 过過 个個 们們
+        为為爲 学學 开開 关關 门門 车車 长長 见見 贝貝
+        页頁 风風 飞飛 马馬 鱼魚 鸟鳥 龙龍 东東 爱愛
+        笔筆 变變 边邊 宾賓 仓倉 产產 尝嘗 厂廠 处处處
+        从從 达達 带帶 当當噹 党黨 导導 灯燈 敌敵 点點
+        电電 动動 独獨 断斷 队隊 尔爾 范範 丰豐 妇婦
+        刚剛 纲綱 给給 广廣 规規 汉漢 号號 后後 华華
+        欢歡 还還 击擊 极極 几幾 计計 济濟 价價 坚堅
+        间間 检檢 简簡 剑劍 节節 紧緊 进進 惊驚 旧舊
+        举舉 剧劇 据據 决決 军軍 蓝藍 乐樂 离離 礼禮
+        连連 练練 两兩 疗療 邻鄰 灵靈 领領 刘劉 录錄
+        绿綠 论論 妈媽 买買 卖賣 满满滿 没沒 梦夢 难難
+        脑腦 宁寧 农農 暖暖暖 盘盤 钱錢 强強 轻轻輕 热熱
+        认認 伤傷 声声聲 师師 实實 识識 势勢 试試 书書
+        术術 树樹 双雙 岁歲 孙孫 体體 条條 铁鐵 听聽
+        头頭 图圖 万万萬 网網 问問 无無 线線 乡鄉 写寫
+        谢謝 兴興 选選 压壓 严嚴 颜顏 业業 医醫 艺藝
+        阴陰 应應 拥擁 优優 邮郵 圆圆圓 运運 杂雜 战戰
+        张張 阵陣 证證 织織 职職 质質 众眾 转轉 装裝
+        资資 总總 组組 讲講 误誤 员員 显顯 调調 议議
+        谈談 读讀 诗詩 词詞 语語 课課 谁誰 让讓 记記
+        话話 请請 胜勝 卫衛 洁潔 显顯 响響 预預 页頁
+        发髮發 回迴 汇匯彙 尽儘盡 历歷曆 台臺颱檯
+        复復複 团團糰 脏脏髒臟 云雲 制製 面麵麪
+        里裡裏 准準 后後 只隻 征徵 系係繫 钟鐘鍾
+    """.split()
+    for group in groups:
+        s = group[0]  # simplified / canonical form
+        for t in group[1:]:  # traditional variants
+            _S2T_MAP[t] = s
+    # Edge cases not covered by groups above
+    _S2T_MAP["喫"] = "吃"
+    _S2T_MAP["鎗"] = "枪"
+    _S2T_MAP["兇"] = "凶"
+    _S2T_MAP["採"] = "采"
+    _S2T_MAP["綵"] = "彩"
+    _S2T_MAP["瀋"] = "沈"
+    _S2T_MAP["誌"] = "志"
+    _S2T_MAP["慾"] = "欲"
+    return _S2T_MAP
+
+
+# ---------------------------------------------------------------------------
+# CJK character variant mapping — normalize equivalent glyphs to a single form
+# ---------------------------------------------------------------------------
+_CJK_VARIANT_MAP: dict[str, str] = {}
+def _build_cjk_variant_map():
+    """Lazily build the CJK variant mapping."""
+    if _CJK_VARIANT_MAP:
+        return _CJK_VARIANT_MAP
+    variants = {
+        # Common variants (same character, different encoding/region)
+        "爲": "為", "峯": "峰", "羣": "群", "峽": "峡",
+        "麪": "面", "祕": "秘", "薑": "姜", "禦": "御",
+        "綫": "线", "跡": "迹", "蹟": "迹",
+        # Japanese kanji → common form
+        "弐": "二", "壱": "一", "弌": "一", "拾": "十",
+    }
+    _CJK_VARIANT_MAP.update(variants)
+    return _CJK_VARIANT_MAP
+
+
 def _normalize_text(text: str) -> str:
-    """Normalize text for comparison: NFKC, strip punctuation, lowercase, collapse whitespace."""
+    """Normalize text for comparison — deep normalization.
+
+    Steps applied in order:
+      1. NFKC — fullwidth/halfwidth, ligatures, compatibility chars
+      2. Simplified-Traditional mapping — unify script variants (说/説 → 说)
+      3. CJK variant characters (爲/為 → 為, 峯/峰 → 峰)
+      4. Japanese katakana → hiragana (カタカナ → かたかな)
+      5. Third-person pronouns (他/她/它/祂/牠 → 他)
+      6. Common ASR homophone pairs (的/得/地 → 的, 在/再 → 在, 做/作 → 做)
+      7. Remove spaces between CJK characters (今天 天气 → 今天天气)
+      8. Strip punctuation — keep only letters, numbers, and spaces
+      9. Lowercase — English case-insensitivity
+     10. Collapse whitespace
+    """
     import unicodedata
+    import re
+
+    # 1. NFKC normalization
     text = unicodedata.normalize("NFKC", text)
+
+    # 2. Simplified-Traditional mapping
+    s2t = _build_s2t_map()
+    text = "".join(s2t.get(ch, ch) for ch in text)
+
+    # 3. CJK variant characters
+    cjk_var = _build_cjk_variant_map()
+    text = "".join(cjk_var.get(ch, ch) for ch in text)
+
+    # 4. Japanese katakana → hiragana (Unicode block shift: 0x60)
+    #    Katakana U+30A1–U+30F6  →  Hiragana U+3041–U+3096
+    #    Katakana U+30F7–U+30FA (small ku/shi/su/to) handled separately
+    def _kana_shift(ch):
+        cp = ord(ch)
+        if 0x30A1 <= cp <= 0x30F6:
+            return chr(cp - 0x60)
+        # Small katakana (ㇰㇱㇲㇳ etc.) — less common, map approximately
+        if 0x30F7 <= cp <= 0x30FA:
+            return chr(0x3041 + (cp - 0x30F7))  # approximate mapping
+        # Katakana punctuation: ・→ (remove), ー→ (keep as is for now)
+        if cp == 0x30FB:  # ・ katakana middle dot
+            return " "
+        if cp == 0x30FC:  # ー long vowel mark
+            return ""  # remove long vowel mark for comparison
+        return ch
+    text = "".join(_kana_shift(ch) for ch in text)
+
+    # 5. Third-person pronouns
+    text = re.sub(r'[他她它祂牠]', '他', text)
+
+    # 6. Common ASR homophone pairs (semantically equivalent in most contexts)
+    text = re.sub(r'[得地]', '的', text)       # 的/得/地 → 的
+    text = re.sub(r'再', '在', text)            # 在/再 → 在
+    text = re.sub(r'作', '做', text)            # 做/作 → 做
+    text = re.sub(r'[吗嘛]', '么', text)         # 吗/嘛/么 → 么 (sentence-final particles)
+
+    # 7. Remove spaces between CJK characters (but preserve word boundaries
+    #    between CJK and Latin scripts).
+    #    CJK: 一-鿿 (unified), 㐀-䶿 (ext-A),
+    #         豈-﫿 (compat), ぀-ゟ (hiragana),
+    #         ゠-ヿ (katakana — already shifted to hiragana above),
+    #         가-힯 (hangul)
+    _CJK = re.compile(
+        r'([一-鿿㐀-䶿豈-﫿぀-ゟ゠-ヿ가-힯])'
+        r'\s+'
+        r'(?=[一-鿿㐀-䶿豈-﫿぀-ゟ゠-ヿ가-힯])'
+    )
+    text = _CJK.sub(r'\1', text)
+
+    # 8. Strip punctuation — keep only letters, numbers, and spaces
     cleaned = []
     for ch in text:
         cat = unicodedata.category(ch)
@@ -1080,7 +1227,10 @@ def _normalize_text(text: str) -> str:
             cleaned.append(ch)
         else:
             cleaned.append(" ")
-    return " ".join("".join(cleaned).split()).lower()
+    text = "".join(cleaned)
+
+    # 9 & 10. Lowercase and collapse whitespace
+    return " ".join(text.split()).lower()
 
 
 def _parse_srt_timestamp(ts: str) -> int:
@@ -1213,10 +1363,19 @@ def _levenshtein(s1: str, s2: str) -> int:
     return prev[-1]
 
 
+_ENGLISH_RE = re.compile(r"[a-zA-Z]{3,}")  # 3+ consecutive Latin letters
+
+def _has_english(text: str) -> bool:
+    """Check if text contains English words (3+ consecutive ASCII letters)."""
+    return bool(_ENGLISH_RE.search(text))
+
+
 def compare_srt_texts(srt_path1: str, srt_path2: str) -> float:
     """Compare two SRT files and return difference percentage (0-100).
 
     Returns 0.0 for identical text, 100.0 for completely different text.
+    If either output contains English text (likely hallucination),
+    returns 100.0 diff regardless of content.
     """
     text1 = srt_to_plain_text(srt_path1)
     text2 = srt_to_plain_text(srt_path2)
@@ -1224,6 +1383,10 @@ def compare_srt_texts(srt_path1: str, srt_path2: str) -> float:
     if not text1 and not text2:
         return 0.0
     if not text1 or not text2:
+        return 100.0
+
+    # English in either output = zero match (model hallucination)
+    if _has_english(text1) or _has_english(text2):
         return 100.0
 
     dist = _levenshtein(text1, text2)
@@ -1414,6 +1577,7 @@ def compare_asr_pipeline(
     model_a: str = "qwen3-asr",
     model_b: str = "cohere-transcribe",
     hotwords: str = "",
+    cancel_check=None,  # callable → bool; if True, abort processing
 ) -> dict:
     """Run two selected ASR models on a single WAV file and compare results.
 
@@ -1443,6 +1607,8 @@ def compare_asr_pipeline(
     # Preloading here also gives the user immediate feedback that models are loading
     # rather than an unexplained hang after VAD completes.
     for model_key in compare_models:
+        if cancel_check and cancel_check():
+            raise _CancelPipeline("Cancelled during model loading")
         model_info = ASR_MODELS.get(model_key)
         if model_info is None:
             raise ValueError(f"Unknown ASR model: {model_key}")
@@ -1453,8 +1619,30 @@ def compare_asr_pipeline(
                 f"Failed to load ASR model '{model_key}' ({model_info['name']}): {e}"
             ) from e
 
+    if cancel_check and cancel_check():
+        raise _CancelPipeline("Cancelled before warm-up")
+
+    # Warm-up: run a short dummy inference on each model to fully initialize
+    # GPU contexts before spawning threads. Critical for firered-asr2 which
+    # must initialize CUDA kernels in the main thread's context.
+    import tempfile as _tempfile2
+    import numpy as _np2
+    _dummy2 = (_np2.sin(2 * _np2.pi * _np2.linspace(300, 3000, 32000) / 16000
+                       * _np2.arange(32000)) * 0.05).astype(_np2.float32)
+    for mk in compare_models:
+        try:
+            with _tempfile2.NamedTemporaryFile(suffix=".wav", delete=False) as _tf2:
+                sf.write(_tf2.name, _dummy2, 16000, subtype="PCM_16")
+                _transcribe_segment(_tf2.name, mk, language, device, "")
+            os.unlink(_tf2.name)
+        except Exception:
+            pass
+
     if progress_callback:
         progress_callback("vad", 8)
+
+    if cancel_check and cancel_check():
+        raise _CancelPipeline("Cancelled before ASR inference")
 
     model_results = {}
     srt_paths = {}
@@ -1463,8 +1651,24 @@ def compare_asr_pipeline(
     # independently. On GPUs with sufficient VRAM (e.g. RTX 4090 24GB), both
     # models can reside in memory and run concurrently, nearly halving the
     # total comparison time.
+    _cuda_dev = 0
+    if device != "cpu" and torch.cuda.is_available():
+        try:
+            _cuda_dev = torch.cuda.current_device()
+        except Exception:
+            _cuda_dev = 0
+
     def _run_one_model(model_key):
         """Run a single ASR model on the audio file. Returns (model_key, segments)."""
+        # Ensure this thread has the correct CUDA device context.
+        # CUDA contexts are thread-local; without this, GPU tensors loaded
+        # in the main thread may be inaccessible from thread-pool workers.
+        if device != "cpu" and torch.cuda.is_available():
+            try:
+                torch.cuda.set_device(_cuda_dev)
+            except Exception:
+                pass
+
         model_info = ASR_MODELS[model_key]
         framework = model_info.get("framework", "funasr")
 
@@ -1486,40 +1690,59 @@ def compare_asr_pipeline(
                                      progress_callback=None, hotwords=hotwords)
         return model_key, segs
 
-    # Execute both models concurrently via thread pool
+    # Execute both models concurrently via thread pool.
+    # Use a timeout loop on wait() so we can check cancellation every second
+    # while the ASR models are running (which may take 10-60+ seconds each).
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as _executor:
         _futures = {
             _executor.submit(_run_one_model, mk): mk
             for mk in compare_models
         }
-        for _future in concurrent.futures.as_completed(_futures):
-            mk, segments = _future.result()
-            model_info = ASR_MODELS[mk]
-            abbr = model_info.get("abbr", mk)
+        _pending = set(_futures.keys())
+        while _pending:
+            if cancel_check and cancel_check():
+                # Don't cancel futures that are already running (Python can't
+                # kill threads), but stop processing results and raise.
+                raise _CancelPipeline("Cancelled during ASR inference")
+            _done, _pending = concurrent.futures.wait(
+                _pending, timeout=1.0, return_when=concurrent.futures.FIRST_COMPLETED
+            )
+            for _future in _done:
+                mk, segments = _future.result()
+                model_info = ASR_MODELS[mk]
+                abbr = model_info.get("abbr", mk)
 
-            if progress_callback:
-                progress_callback(f"asr_{mk}", 10 + len(model_results) * 40)
+                if progress_callback:
+                    progress_callback(f"asr_{mk}", 10 + len(model_results) * 40)
 
-            srt_path = os.path.join(srt_out_dir, f"{base_name}_{abbr}.srt")
-            counter = 1
-            while os.path.exists(srt_path):
-                srt_path = os.path.join(srt_out_dir, f"{base_name}_{abbr}_{counter}.srt")
-                counter += 1
+                srt_path = os.path.join(srt_out_dir, f"{base_name}_{abbr}.srt")
+                counter = 1
+                while os.path.exists(srt_path):
+                    srt_path = os.path.join(srt_out_dir, f"{base_name}_{abbr}_{counter}.srt")
+                    counter += 1
 
-            if segments:
-                segments_to_srt(segments, srt_path)
-            else:
-                with open(srt_path, "w", encoding="utf-8") as f:
-                    f.write("")
+                if segments:
+                    segments_to_srt(segments, srt_path)
+                else:
+                    with open(srt_path, "w", encoding="utf-8") as f:
+                        f.write("")
 
-            model_results[mk] = {
-                "model_key": mk,
-                "model_name": model_info["name"],
-                "abbr": abbr,
-                "segments_count": len(segments) if segments else 0,
-                "srt_path": srt_path,
-            }
-            srt_paths[mk] = srt_path
+                # Save plain-text TXT alongside SRT (no timestamps).
+                # Naming: {base_name}_{abbr}.txt (e.g., xxx_qwen3-asr.txt)
+                txt_path = os.path.join(srt_out_dir, f"{base_name}_{abbr}.txt")
+                plain_text = "\n".join(seg.get("text", "").strip() for seg in segments if seg.get("text", "").strip()) if segments else ""
+                with open(txt_path, "w", encoding="utf-8") as f:
+                    f.write(plain_text)
+
+                model_results[mk] = {
+                    "model_key": mk,
+                    "model_name": model_info["name"],
+                    "abbr": abbr,
+                    "segments_count": len(segments) if segments else 0,
+                    "srt_path": srt_path,
+                    "txt_path": txt_path,
+                }
+                srt_paths[mk] = srt_path
 
     if progress_callback:
         progress_callback("comparing", 90)
@@ -1615,12 +1838,37 @@ def _transcribe_segment(audio_path: str, model_key: str, language: str, device: 
         return " ".join((r.text or "").strip() for r in results if (r.text or "").strip())
 
     elif framework == "firered":
+        # FireRedASR2S requires exactly 16kHz mono int16 WAV — resample if needed
+        work_path = audio_path
+        try:
+            info = sf.info(audio_path)
+            if info.samplerate != 16000 or info.channels != 1:
+                os.makedirs(TEMP_DIR, exist_ok=True)
+                import uuid as _uuid
+                temp_wav = os.path.join(TEMP_DIR, f"firered_seg_{_uuid.uuid4().hex[:8]}.wav")
+                _convert_to_pcm_wav(audio_path, temp_wav)
+                work_path = temp_wav
+        except Exception:
+            work_path = audio_path  # best-effort: try original path
+
         model = _get_asr_model(model_key, device=device)
-        result = model.process(audio_path)
+        result = model.process(work_path)
         segs = result.get("sentences", [])
         if not segs and result.get("text"):
             return result["text"].strip()
-        return " ".join(s.get("text", "").strip() for s in segs if s.get("text", "").strip())
+        text = " ".join(s.get("text", "").strip() for s in segs if s.get("text", "").strip())
+        # Detect silent firered failures — the internal ASR model catches all
+        # exceptions and returns empty text (see FireRedAsr2.transcribe()).
+        # When this happens, log details so the caller can retry or alert.
+        if not text:
+            import logging as _logging
+            _logging.getLogger("asr_pipeline").warning(
+                "firered-asr2 returned empty for %s (VAD segs=%d, dur=%.1fs)",
+                os.path.basename(audio_path),
+                len(result.get("vad_segments_ms", [])),
+                result.get("dur_s", 0),
+            )
+        return text
 
     elif framework in ("transformers", "whisper"):
         import torch
@@ -1674,6 +1922,7 @@ def segment_and_compare_pipeline(
     segment_max_s: float = 16.0,
     progress_callback=None,
     source_dir: str = "",
+    cancel_check=None,  # callable → bool; if True, abort processing
 ) -> dict:
     """Split audio into 10-15s segments via VAD, run two ASR models on each, compare.
 
@@ -1707,6 +1956,8 @@ def segment_and_compare_pipeline(
     # Preloading gives immediate feedback that models are loading.
     compare_models = [model_a, model_b]
     for mk in compare_models:
+        if cancel_check and cancel_check():
+            raise _CancelPipeline("Cancelled during model loading")
         mi = ASR_MODELS.get(mk)
         if mi is None:
             raise ValueError(f"Unknown ASR model: {mk}")
@@ -1716,6 +1967,50 @@ def segment_and_compare_pipeline(
             raise RuntimeError(
                 f"Failed to load ASR model '{mk}' ({mi['name']}): {e}"
             ) from e
+
+    if cancel_check and cancel_check():
+        raise _CancelPipeline("Cancelled before warm-up")
+
+    # Warm-up: run a short dummy inference on each model to fully initialize
+    # GPU contexts and internal components (critical for firered-asr2 which
+    # lazy-loads VAD/LID/ASR/Punc sub-models on first process() call).
+    # Without this, the first parallel segment may fail silently due to CUDA
+    # context conflicts when both models initialize GPU state simultaneously.
+    #
+    # IMPORTANT: We use a short sine-sweep (NOT all-zeros silence) because
+    # firered's process() runs VAD first — silence produces 0 VAD segments,
+    # so the ASR/LID/Punc sub-models are NEVER exercised during warm-up.
+    # A 2-second 300→3000 Hz sweep reliably triggers VAD speech detection,
+    # ensuring the FULL pipeline (VAD→ASR→LID→Punc) initializes GPU state.
+    import tempfile as _tempfile
+    import numpy as _np
+    _dummy_len = 32000  # 2 seconds @ 16kHz
+    _dummy = (_np.sin(2 * _np.pi * _np.linspace(300, 3000, _dummy_len) / 16000
+                      * _np.arange(_dummy_len)) * 0.05).astype(_np.float32)
+    for mk in compare_models:
+        try:
+            with _tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as _tf:
+                sf.write(_tf.name, _dummy, 16000, subtype="PCM_16")
+                _transcribe_segment(_tf.name, mk, language, device, "")
+            os.unlink(_tf.name)
+        except Exception:
+            pass  # warm-up failure is non-fatal
+
+    # For firered-asr2 specifically, verify the warm-up actually exercised the
+    # ASR model. If VAD didn't detect the sweep (unlikely but possible), force
+    # a direct ASR transcribe call to ensure the model is fully initialized.
+    for mk in compare_models:
+        mi = ASR_MODELS.get(mk, {})
+        if mi.get("framework") != "firered":
+            continue
+        try:
+            _fmodel = _get_asr_model(mk, device=device)
+            # Direct ASR warm-up: pass a 1s dummy tensor through the ASR model
+            # to compile CUDA kernels and initialize cuDNN handles in THIS thread.
+            _dummy_asr = _np.random.randn(16000).astype(_np.float32) * 0.001
+            _fmodel.asr.transcribe(["warmup_asr"], [(16000, _dummy_asr)])
+        except Exception:
+            pass  # best-effort; segment processing will retry if needed
 
     if progress_callback:
         progress_callback("vad", 5)
@@ -1771,6 +2066,8 @@ def segment_and_compare_pipeline(
     segment_results = []
 
     for idx, seg in enumerate(segment_files):
+        if cancel_check and cancel_check():
+            raise _CancelPipeline("Cancelled during segment processing")
         if progress_callback:
             progress_callback(f"processing_{idx + 1}", 10 + int((idx / total) * 85))
 
@@ -1780,9 +2077,22 @@ def segment_and_compare_pipeline(
         error_a = None
         error_b = None
 
+        # Determine CUDA device index for per-thread context initialization.
+        # CUDA contexts are thread-local; each thread must set its own device
+        # to ensure GPU tensors are accessible. Without this, firered-asr2 can
+        # silently fail when its first ASR forward pass runs in a sub-thread.
+        _cuda_idx = 0
+        if device != "cpu" and torch.cuda.is_available():
+            try:
+                _cuda_idx = torch.cuda.current_device()
+            except Exception:
+                _cuda_idx = 0
+
         def _transcribe_a():
             nonlocal text_a, error_a
             try:
+                if device != "cpu" and torch.cuda.is_available():
+                    torch.cuda.set_device(_cuda_idx)
                 text_a = _transcribe_segment(seg["wav_path"], model_a, language, device, hotwords)
             except Exception as e:
                 error_a = str(e)
@@ -1790,6 +2100,8 @@ def segment_and_compare_pipeline(
         def _transcribe_b():
             nonlocal text_b, error_b
             try:
+                if device != "cpu" and torch.cuda.is_available():
+                    torch.cuda.set_device(_cuda_idx)
                 text_b = _transcribe_segment(seg["wav_path"], model_b, language, device, hotwords)
             except Exception as e:
                 error_b = str(e)
@@ -1801,6 +2113,47 @@ def segment_and_compare_pipeline(
         t_b.start()
         t_a.join()
         t_b.join()
+
+        # Save TXT transcriptions in a txt/ subfolder alongside segment WAVs.
+        # Naming: {seg_name_without_ext}_{model_abbr}.txt
+        # e.g., xxx_seg001_qwen3-asr.txt, xxx_seg001_firered-asr2.txt
+        txt_dir = os.path.join(seg_out_dir, "txt")
+        os.makedirs(txt_dir, exist_ok=True)
+        seg_base = os.path.splitext(seg["name"])[0]  # e.g., "xxx_seg001"
+        txt_path_a = os.path.join(txt_dir, f"{seg_base}_{model_a_info.get('abbr', model_a)}.txt")
+        txt_path_b = os.path.join(txt_dir, f"{seg_base}_{model_b_info.get('abbr', model_b)}.txt")
+        with open(txt_path_a, "w", encoding="utf-8") as _f:
+            _f.write((text_a or "").strip())
+        with open(txt_path_b, "w", encoding="utf-8") as _f:
+            _f.write((text_b or "").strip())
+
+        # Retry: if firered-asr2 returned empty in a sub-thread (silent GPU
+        # failure — see FireRedAsr2.transcribe() which swallows exceptions),
+        # retry it once in the main thread where the CUDA context is primary.
+        # Only firered has this silent-failure mode; other models raise
+        # exceptions on real errors.
+        for _retry_mk, _is_model_a in ((model_a, True), (model_b, False)):
+            _retry_text = text_a if _is_model_a else text_b
+            _retry_err = error_a if _is_model_a else error_b
+            if _retry_text or _retry_err:
+                continue  # already got a result or a hard error
+            _retry_mi = ASR_MODELS.get(_retry_mk, {})
+            if _retry_mi.get("framework") != "firered":
+                continue  # only firered has known silent-failure mode
+            try:
+                _retry_result = _transcribe_segment(
+                    seg["wav_path"], _retry_mk, language, device, hotwords
+                )
+                if _retry_result:
+                    if _is_model_a:
+                        text_a = _retry_result
+                    else:
+                        text_b = _retry_result
+            except Exception as _retry_exc:
+                if _is_model_a:
+                    error_a = str(_retry_exc)
+                else:
+                    error_b = str(_retry_exc)
 
         # Compare
         norm_a = _normalize_text(text_a)
@@ -1827,6 +2180,8 @@ def segment_and_compare_pipeline(
             "wav_path": seg["wav_path"],
             "text_a": text_a,
             "text_b": text_b,
+            "txt_path_a": txt_path_a,
+            "txt_path_b": txt_path_b,
             "error_a": error_a,
             "error_b": error_b,
             "diff_percent": diff_percent,

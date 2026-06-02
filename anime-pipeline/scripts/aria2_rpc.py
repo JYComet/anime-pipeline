@@ -7,9 +7,12 @@ import time
 import json
 import subprocess
 import requests
-from config import DOWNLOAD_DIR, ARIA2C
+from config import DOWNLOAD_DIR, ARIA2C, DATA_DIR
 
 RPC_URL = "http://127.0.0.1:6800/jsonrpc"
+
+# Session file for persisting download state across restarts
+_ARIA2_SESSION_FILE = os.path.join(DATA_DIR, "aria2.session")
 
 _trackers = [
     "udp://tracker.opentrackr.org:1337/announce",
@@ -51,6 +54,9 @@ def ensure_running() -> bool:
 
     # Start daemon
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+    # Ensure session file exists (aria2c won't create it automatically)
+    if not os.path.exists(_ARIA2_SESSION_FILE):
+        open(_ARIA2_SESSION_FILE, "w").close()
     cmd = [
         ARIA2C,
         "--enable-rpc",
@@ -58,6 +64,9 @@ def ensure_running() -> bool:
         "--rpc-allow-origin-all=true",
         "--rpc-listen-all=false",
         "--dir", DOWNLOAD_DIR,
+        "--save-session", _ARIA2_SESSION_FILE,
+        "--save-session-interval=30",
+        "--input-file", _ARIA2_SESSION_FILE,
         "--seed-time=0",
         "--max-connection-per-server=16",
         "--split=16",

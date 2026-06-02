@@ -388,16 +388,19 @@ def startup_services():
 
     threading.Thread(target=_preload_asr, daemon=True).start()
 
-    # Restore download jobs from aria2c state
+    # Restore download jobs from aria2c state, with fallback to jobs.json
     def restore_jobs():
         import time
         time.sleep(3)
+        restored_magnets = set()
         try:
             from aria2_rpc import list_all
+            from pipeline import StepResult, StepStatus
             for item in list_all():
                 name = item.get("bittorrent", {}).get("info", {}).get("name", "")
                 if not name:
                     continue
+                magnet_uri = item.get("magnetUri", "")
                 total = int(item.get("totalLength", 0))
                 completed = int(item.get("completedLength", 0))
                 pct = (completed / total * 100) if total > 0 else 0
@@ -405,20 +408,68 @@ def startup_services():
                 job = pipeline.create_job(
                     f"aria2_{gid}",
                     title=name,
-                    magnet=item.get("magnetUri", ""),
+                    magnet=magnet_uri,
                 )
                 job.status = "download_submitted"
                 job.progress = 5 + pct * 0.25
                 job.current_step = f"download ({name[:25]}... {pct:.0f}%)" if pct > 0 else "download"
-                from pipeline import StepResult, StepStatus
                 job.steps = [StepResult(
                     step="download",
                     status=StepStatus.COMPLETED,
                     message=f"aria2c 后台下载中 ({completed/1024/1024:.0f}/{total/1024/1024:.0f}MB, {pct:.0f}%)",
                 )]
+                if magnet_uri:
+                    restored_magnets.add(magnet_uri)
                 print(f"[startup] Restored job {job.job_id}: {name[:40]} ({pct:.0f}%)")
         except Exception as e:
-            print(f"[startup] Failed to restore jobs: {e}")
+            print(f"[startup] Failed to restore jobs from aria2c: {e}")
+
+        # Fallback: restore "download_submitted" jobs from jobs.json that weren't
+        # matched by aria2c (e.g. aria2c session file was lost or corrupted).
+        # These are marked as interrupted so the user can retry or discard them.
+        try:
+            import json
+            jobs_file = pipeline._jobs_file
+            if os.path.exists(jobs_file):
+                with open(jobs_file, "r", encoding="utf-8") as f:
+                    raw = json.load(f)
+                restored_fallback = 0
+                for jid, jd in raw.items():
+                    st = jd.get("status", "")
+                    if st != "download_submitted":
+                        continue
+                    magnet = jd.get("magnet", "")
+                    # Skip if already restored from aria2c
+                    if magnet and magnet in restored_magnets:
+                        continue
+                    job = pipeline.create_job(
+                        jid,
+                        title=jd.get("title", ""),
+                        magnet=magnet,
+                    )
+                    job.status = "interrupted"
+                    job.current_step = "interrupted (下载中断：服务器重启且aria2c会话丢失)"
+                    job.gid = jd.get("gid", "")
+                    job.steps = []
+                    for s in jd.get("steps", []):
+                        job.steps.append(StepResult(
+                            step=s["step"],
+                            status=StepStatus(s["status"]),
+                            message=s.get("message", ""),
+                            duration_seconds=s.get("duration", 0),
+                        ))
+                    job.steps.append(StepResult(
+                        step="interrupted",
+                        status=StepStatus.FAILED,
+                        message="服务器重启导致下载中断，aria2c会话已丢失。可选择重新下载或丢弃。",
+                    ))
+                    restored_fallback += 1
+                    print(f"[startup] Fallback restored job {jid}: {jd.get('title', '')[:40]}")
+                if restored_fallback:
+                    print(f"[startup] Fallback restored {restored_fallback} download jobs from jobs.json")
+        except Exception as e:
+            print(f"[startup] Failed to restore jobs from jobs.json fallback: {e}")
+
     threading.Thread(target=restore_jobs, daemon=True).start()
 
 app.add_middleware(
@@ -814,6 +865,7 @@ def start_process_local(
             job.progress = 60
 
             from split_video import split_video_by_subtitle
+            from pipeline import StepResult, StepStatus
             try:
                 clips = split_video_by_subtitle(
                     video_path, subtitle_path, hw_accel=hw_accel,
@@ -824,18 +876,19 @@ def start_process_local(
                     job.clip_dir = os.path.dirname(clips[0])
                 job.progress = 100
                 job.status = "completed"
-                from pipeline import StepResult, StepStatus
                 job.steps = [
                     StepResult("extract_subtitles", StepStatus.SKIPPED, "Used external subtitle"),
                     StepResult("split_video", StepStatus.COMPLETED, f"Created {len(clips)} clips"),
                 ]
             except Exception as e:
                 job.status = "failed"
-                from pipeline import StepResult, StepStatus
                 job.steps = [
                     StepResult("extract_subtitles", StepStatus.SKIPPED, "Used external subtitle"),
                     StepResult("split_video", StepStatus.FAILED, str(e)),
                 ]
+            finally:
+                # Persist final state so restarted server can see completed/failed status
+                pipeline._save_jobs()
         else:
             pipeline.run_extract_and_split(
                 job_id=job_id,
@@ -4673,14 +4726,15 @@ def _save_asr_compare_jobs():
 
 
 def _load_asr_compare_jobs():
-    """Restore ASR compare jobs from disk. Mark running jobs as interrupted."""
+    """Restore ASR compare jobs from disk. Mark running/loading jobs as interrupted."""
     if not os.path.exists(_ASR_COMPARE_JOBS_FILE):
         return
     try:
         with open(_ASR_COMPARE_JOBS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
         for job_id, jd in data.items():
-            if jd.get("status") == "running":
+            status = jd.get("status", "")
+            if status in ("running", "loading"):
                 jd["status"] = "interrupted"
                 jd["current_step"] = "服务器重启中断"
             _asr_compare_jobs[job_id] = jd
@@ -4731,6 +4785,7 @@ def browse_asr_compare_directory(path: str = Query("")):
 
     Defaults to the configured ASR_COMPARE_DEFAULT_PATH, or CLEANED_UNREVIEWED_DIR.
     Supports both local paths and network shares (SMB/NFS mounts).
+    Falls back to CLEANED_UNREVIEWED_DIR if the default path does not exist.
     """
     from config import ASR_COMPARE_DEFAULT_PATH
     if not path:
@@ -4745,12 +4800,23 @@ def browse_asr_compare_directory(path: str = Query("")):
     except Exception:
         real_path = path
 
+    # If the requested path does not exist and we were using the default,
+    # try falling back to CLEANED_UNREVIEWED_DIR as a local alternative
     if not os.path.isdir(real_path):
-        raise HTTPException(status_code=404, detail=f"Directory not found: {path}")
+        if (not path or path == ASR_COMPARE_DEFAULT_PATH) and os.path.isdir(CLEANED_UNREVIEWED_DIR):
+            real_path = os.path.realpath(CLEANED_UNREVIEWED_DIR)
+        else:
+            raise HTTPException(status_code=404, detail=f"Directory not found: {path}")
 
     parent_path = os.path.dirname(real_path)
 
-    entries = sorted(os.scandir(real_path), key=lambda e: e.name)
+    try:
+        entries = sorted(os.scandir(real_path), key=lambda e: e.name)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail=f"Permission denied: {real_path}")
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Cannot read directory: {real_path} ({e.strerror})")
+
     subdirs = []
     audio_files = []
     audio_exts = {".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg", ".wma", ".opus", ".wv"}
@@ -4761,7 +4827,10 @@ def browse_asr_compare_directory(path: str = Query("")):
         elif entry.is_file():
             ext = os.path.splitext(entry.name)[1].lower()
             if ext in audio_exts:
-                size = entry.stat().st_size
+                try:
+                    size = entry.stat().st_size
+                except OSError:
+                    size = 0
                 audio_files.append({
                     "name": entry.name,
                     "ext": ext,
@@ -4852,6 +4921,12 @@ def run_asr_compare_all(
     if not all_files:
         raise HTTPException(status_code=404, detail="No audio files found")
 
+    # Add per-file tracking fields
+    for _f in all_files:
+        _f.setdefault("status", "pending")
+        _f.setdefault("progress", 0)
+        _f.setdefault("current_step", "")
+
     job_id = uuid.uuid4().hex[:12]
 
     with _asr_compare_lock:
@@ -4876,13 +4951,49 @@ def run_asr_compare_all(
         _save_asr_compare_jobs()
 
     def _run():
-        from asr_pipeline import compare_asr_pipeline, ASR_MODELS, COMPARE_MODELS
+        from asr_pipeline import compare_asr_pipeline, _get_asr_model, _CancelPipeline
+        from asr_pipeline import ASR_MODELS, COMPARE_MODELS
+
+        def _cancel_check():
+            with _asr_compare_lock:
+                j = _asr_compare_jobs.get(job_id)
+                return bool(j and j.get("_cancelled"))
+
+        with _asr_compare_lock:
+            job = _asr_compare_jobs.get(job_id)
+            if not job:
+                return
+            job["status"] = "loading"
+            job["current_step"] = "正在加载模型..."
+            _save_asr_compare_jobs()
+
+        # Preload both ASR models before starting processing.
+        # This is critical because FunASR / ModelScope downloads can behave
+        # unpredictably in threads. We run with daemon=False to mitigate this.
+        try:
+            for _mk in (model_a, model_b):
+                with _asr_compare_lock:
+                    job = _asr_compare_jobs.get(job_id)
+                    if job:
+                        job["current_step"] = f"正在加载模型: {_mk}"
+                        _save_asr_compare_jobs()
+                _get_asr_model(_mk, device=device, use_compile=False)
+        except Exception as e:
+            with _asr_compare_lock:
+                job = _asr_compare_jobs.get(job_id)
+                if job:
+                    job["status"] = "failed"
+                    job["error"] = f"模型加载失败: {e}"
+                    job["current_step"] = f"模型加载失败: {e}"
+                    _save_asr_compare_jobs()
+            return
 
         with _asr_compare_lock:
             job = _asr_compare_jobs.get(job_id)
             if not job:
                 return
             job["status"] = "running"
+            job["current_step"] = "模型加载完成，开始处理..."
             _save_asr_compare_jobs()
 
         files = all_files
@@ -4897,6 +5008,9 @@ def run_asr_compare_all(
                         job["current_step"] = "已中止"
                         _save_asr_compare_jobs()
                     return
+                f["status"] = "running"
+                f["progress"] = 0
+                f["current_step"] = "开始处理..."
 
             audio_path = f["path"]
             audio_name = f["name"]
@@ -4906,6 +5020,8 @@ def run_asr_compare_all(
                     j = _asr_compare_jobs.get(job_id)
                     if j:
                         j["current_step"] = f"[{idx + 1}/{total}] {audio_name} — {step}"
+                        f["progress"] = int(pct)
+                        f["current_step"] = step
 
             try:
                 result = compare_asr_pipeline(
@@ -4917,6 +5033,7 @@ def run_asr_compare_all(
                     model_a=model_a,
                     model_b=model_b,
                     hotwords=hotwords,
+                    cancel_check=_cancel_check,
                 )
                 result["source_dir"] = f["source_dir"]
 
@@ -4928,7 +5045,17 @@ def run_asr_compare_all(
                         j["results"][audio_path] = result
                         if result.get("flagged"):
                             j["flagged_count"] += 1
+                    f["status"] = "completed"
+                    f["progress"] = 100
 
+            except _CancelPipeline:
+                with _asr_compare_lock:
+                    j = _asr_compare_jobs.get(job_id)
+                    if j:
+                        j["status"] = "cancelled"
+                        j["current_step"] = "已中止"
+                        _save_asr_compare_jobs()
+                return
             except Exception as e:
                 with _asr_compare_lock:
                     j = _asr_compare_jobs.get(job_id)
@@ -4943,6 +5070,9 @@ def run_asr_compare_all(
                             "flagged": True,
                         }
                         j["flagged_count"] += 1
+                    f["status"] = "error"
+                    f["progress"] = 0
+                    f["error"] = str(e)
 
         with _asr_compare_lock:
             j = _asr_compare_jobs.get(job_id)
@@ -4959,18 +5089,11 @@ def run_asr_compare_all(
                 for path, result in j["results"].items():
                     _asr_compare_results[path] = result
 
-    # Preload ASR models in the main thread BEFORE spawning the daemon thread.
-    # FunASR/ModelScope model downloads can hang indefinitely in daemon threads.
-    # By preloading here, we ensure models are cached and GPU-ready before the
-    # background job starts, and any download errors surface immediately.
-    try:
-        from asr_pipeline import _get_asr_model
-        for _mk in (model_a, model_b):
-            _get_asr_model(_mk, device=device, use_compile=False)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to load ASR model: {e}")
-
-    threading.Thread(target=_run, daemon=True).start()
+    # Return response immediately so the frontend doesn't hang on "启动中...".
+    # Model preloading and processing happen in a background daemon thread.
+    # FunASR/ModelScope model downloads can hang in daemon threads, so we use
+    # a regular (non-daemon) thread and preload models as the first step.
+    threading.Thread(target=_run, daemon=False).start()
 
     return {"job_id": job_id, "status": "started", "total": len(all_files)}
 
@@ -5005,7 +5128,7 @@ def cancel_asr_compare_job(payload: dict = Body(...)):
         job = _asr_compare_jobs.get(job_id)
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
-        if job.get("status") not in ("running", "pending"):
+        if job.get("status") not in ("running", "pending", "loading"):
             return {"status": "error", "detail": f"Job is {job.get('status')}, cannot cancel"}
         job["_cancelled"] = True
         job["current_step"] = "正在中止..."
@@ -5028,7 +5151,11 @@ def asr_compare_discard_job(job_id: str):
 
 @app.post("/api/asr-compare/job/{job_id}/resume")
 def asr_compare_resume_job(job_id: str):
-    """Resume an interrupted ASR compare job."""
+    """Resume an interrupted ASR compare job, skipping already-completed files.
+
+    Mirrors the pipeline-video resume pattern: resets pending files, preloads
+    models with status updates, and runs with daemon=False.
+    """
     with _asr_compare_lock:
         job = _asr_compare_jobs.get(job_id)
         if not job:
@@ -5041,21 +5168,56 @@ def asr_compare_resume_job(job_id: str):
         language = job.get("_language", "ja")
         device = job.get("_device", "cuda")
         hotwords = job.get("_hotwords", "")
+        completed_paths = set(job.get("results", {}).keys())
+        is_segmented = job.get("is_segmented", False)
 
-    def _run():
-        from asr_pipeline import compare_asr_pipeline, ASR_MODELS
+    def _run_resume():
+        from asr_pipeline import compare_asr_pipeline, segment_and_compare_pipeline
+        from asr_pipeline import _get_asr_model, _CancelPipeline, ASR_MODELS
+
+        def _cancel_check():
+            with _asr_compare_lock:
+                j = _asr_compare_jobs.get(job_id)
+                return bool(j and j.get("_cancelled"))
+
+        with _asr_compare_lock:
+            j = _asr_compare_jobs.get(job_id)
+            if not j:
+                return
+            j["status"] = "loading"
+            j["current_step"] = "正在加载模型..."
+            _save_asr_compare_jobs()
+
+        # Preload both ASR models before processing
+        try:
+            for _mk in (model_a, model_b):
+                with _asr_compare_lock:
+                    j = _asr_compare_jobs.get(job_id)
+                    if j:
+                        j["current_step"] = f"正在加载模型: {_mk}"
+                        _save_asr_compare_jobs()
+                _get_asr_model(_mk, device=device, use_compile=False)
+        except Exception as e:
+            with _asr_compare_lock:
+                j = _asr_compare_jobs.get(job_id)
+                if j:
+                    j["status"] = "failed"
+                    j["error"] = f"模型加载失败: {e}"
+                    j["current_step"] = f"模型加载失败: {e}"
+                    _save_asr_compare_jobs()
+            return
 
         with _asr_compare_lock:
             j = _asr_compare_jobs.get(job_id)
             if not j:
                 return
             j["status"] = "running"
-            j["current_step"] = "加载模型中..."
+            j["current_step"] = "模型加载完成，开始处理..."
             _save_asr_compare_jobs()
 
-        # Skip already-processed files
-        completed_paths = set(j.get("results", {}).keys())
         total = len(files)
+        # Count already-completed files for accurate progress tracking
+        already_done = len(completed_paths)
 
         for idx, f in enumerate(files):
             audio_path = f["path"]
@@ -5067,27 +5229,38 @@ def asr_compare_resume_job(job_id: str):
             with _asr_compare_lock:
                 j = _asr_compare_jobs.get(job_id)
                 if not j or j.get("_cancelled") or j.get("status") == "cancelled":
+                    if j:
+                        j["status"] = "cancelled"
+                        j["current_step"] = "已中止"
+                        _save_asr_compare_jobs()
                     return
                 j["current_file"] = audio_name
-                j["progress"] = round((idx / total) * 100)
 
             def on_progress(step, pct):
                 with _asr_compare_lock:
                     jj = _asr_compare_jobs.get(job_id)
                     if jj and jj.get("status") != "cancelled":
-                        jj["current_step"] = f"[{jj['completed'] + 1}/{total}] {audio_name} — {step}"
+                        done = jj.get("completed", 0)
+                        jj["current_step"] = f"[{done + 1}/{total}] {audio_name} — {step}"
 
             try:
-                result = compare_asr_pipeline(
-                    audio_path,
-                    language=language,
-                    device=device,
-                    progress_callback=on_progress,
-                    source_dir=f["source_dir"],
-                    model_a=model_a,
-                    model_b=model_b,
-                    hotwords=hotwords,
-                )
+                if is_segmented:
+                    seg_min = j.get("_segment_min_s", 9.0)
+                    seg_max = j.get("_segment_max_s", 16.0)
+                    result = segment_and_compare_pipeline(
+                        audio_path, language=language, device=device,
+                        model_a=model_a, model_b=model_b, hotwords=hotwords,
+                        segment_min_s=seg_min, segment_max_s=seg_max,
+                        progress_callback=on_progress, source_dir=f["source_dir"],
+                        cancel_check=_cancel_check,
+                    )
+                else:
+                    result = compare_asr_pipeline(
+                        audio_path, language=language, device=device,
+                        progress_callback=on_progress, source_dir=f["source_dir"],
+                        model_a=model_a, model_b=model_b, hotwords=hotwords,
+                        cancel_check=_cancel_check,
+                    )
                 result["source_dir"] = f["source_dir"]
 
                 with _asr_compare_lock:
@@ -5099,6 +5272,14 @@ def asr_compare_resume_job(job_id: str):
                         if result.get("flagged"):
                             jj["flagged_count"] = jj.get("flagged_count", 0) + 1
 
+            except _CancelPipeline:
+                with _asr_compare_lock:
+                    jj = _asr_compare_jobs.get(job_id)
+                    if jj:
+                        jj["status"] = "cancelled"
+                        jj["current_step"] = "已中止"
+                        _save_asr_compare_jobs()
+                return
             except Exception as e:
                 with _asr_compare_lock:
                     jj = _asr_compare_jobs.get(job_id)
@@ -5116,7 +5297,7 @@ def asr_compare_resume_job(job_id: str):
 
         with _asr_compare_lock:
             jj = _asr_compare_jobs.get(job_id)
-            if jj:
+            if jj and jj.get("status") != "cancelled":
                 jj["status"] = "completed"
                 jj["progress"] = 100
                 jj["current_step"] = f"处理完成 — {total} 个文件, {jj['flagged_count']} 个异常"
@@ -5124,7 +5305,7 @@ def asr_compare_resume_job(job_id: str):
                 for path, result in jj["results"].items():
                     _asr_compare_results[path] = result
 
-    threading.Thread(target=_run, daemon=True).start()
+    threading.Thread(target=_run_resume, daemon=False).start()
     return {"status": "resuming"}
 
 
@@ -5303,6 +5484,12 @@ def run_asr_compare_segmented(
     if not all_files:
         raise HTTPException(status_code=404, detail="No audio files found")
 
+    # Add per-file tracking fields
+    for _f in all_files:
+        _f.setdefault("status", "pending")
+        _f.setdefault("progress", 0)
+        _f.setdefault("current_step", "")
+
     job_id = uuid.uuid4().hex[:12]
     with _asr_compare_lock:
         _asr_compare_jobs[job_id] = {
@@ -5329,13 +5516,49 @@ def run_asr_compare_segmented(
         _save_asr_compare_jobs()
 
     def _run():
-        from asr_pipeline import segment_and_compare_pipeline, ASR_MODELS
+        from asr_pipeline import segment_and_compare_pipeline, _get_asr_model, _CancelPipeline
+        from asr_pipeline import ASR_MODELS
+
+        def _cancel_check():
+            with _asr_compare_lock:
+                j = _asr_compare_jobs.get(job_id)
+                return bool(j and j.get("_cancelled"))
+
+        with _asr_compare_lock:
+            job = _asr_compare_jobs.get(job_id)
+            if not job:
+                return
+            job["status"] = "loading"
+            job["current_step"] = "正在加载模型..."
+            _save_asr_compare_jobs()
+
+        # Preload both ASR models before starting processing.
+        # This is critical because FunASR / ModelScope downloads can behave
+        # unpredictably in threads. We run with daemon=False to mitigate this.
+        try:
+            for _mk in (model_a, model_b):
+                with _asr_compare_lock:
+                    job = _asr_compare_jobs.get(job_id)
+                    if job:
+                        job["current_step"] = f"正在加载模型: {_mk}"
+                        _save_asr_compare_jobs()
+                _get_asr_model(_mk, device=device, use_compile=False)
+        except Exception as e:
+            with _asr_compare_lock:
+                job = _asr_compare_jobs.get(job_id)
+                if job:
+                    job["status"] = "failed"
+                    job["error"] = f"模型加载失败: {e}"
+                    job["current_step"] = f"模型加载失败: {e}"
+                    _save_asr_compare_jobs()
+            return
 
         with _asr_compare_lock:
             job = _asr_compare_jobs.get(job_id)
             if not job:
                 return
             job["status"] = "running"
+            job["current_step"] = "模型加载完成，开始处理..."
             _save_asr_compare_jobs()
 
         files = all_files
@@ -5350,6 +5573,9 @@ def run_asr_compare_segmented(
                         job["current_step"] = "已中止"
                         _save_asr_compare_jobs()
                     return
+                f["status"] = "running"
+                f["progress"] = 0
+                f["current_step"] = "开始处理..."
 
             audio_path = f["path"]
             audio_name = f["name"]
@@ -5360,6 +5586,8 @@ def run_asr_compare_segmented(
                     if j:
                         j["current_step"] = f"[{idx + 1}/{total}] {audio_name} — {step}"
                         j["progress"] = int(((idx + pct / 100) / total) * 100)
+                    f["progress"] = int(pct)
+                    f["current_step"] = step
 
             try:
                 result = segment_and_compare_pipeline(
@@ -5373,6 +5601,7 @@ def run_asr_compare_segmented(
                     segment_max_s=segment_max_s,
                     progress_callback=on_progress,
                     source_dir=f["source_dir"],
+                    cancel_check=_cancel_check,
                 )
 
                 with _asr_compare_lock:
@@ -5383,7 +5612,17 @@ def run_asr_compare_segmented(
                         j["results"][audio_path] = result
                         flagged = sum(1 for s in result.get("segments", []) if s.get("flagged"))
                         j["flagged_count"] += flagged
+                    f["status"] = "completed"
+                    f["progress"] = 100
 
+            except _CancelPipeline:
+                with _asr_compare_lock:
+                    j = _asr_compare_jobs.get(job_id)
+                    if j:
+                        j["status"] = "cancelled"
+                        j["current_step"] = "已中止"
+                        _save_asr_compare_jobs()
+                return
             except Exception as e:
                 with _asr_compare_lock:
                     j = _asr_compare_jobs.get(job_id)
@@ -5399,6 +5638,9 @@ def run_asr_compare_segmented(
                             "segments": [],
                         }
                         j["flagged_count"] = j.get("flagged_count", 0) + 1
+                    f["status"] = "error"
+                    f["progress"] = 0
+                    f["error"] = str(e)
 
         with _asr_compare_lock:
             j = _asr_compare_jobs.get(job_id)
@@ -5410,16 +5652,11 @@ def run_asr_compare_segmented(
                 for path, result in j["results"].items():
                     _asr_compare_results[path] = result
 
-    # Preload ASR models in the main thread BEFORE spawning the daemon thread.
-    try:
-        from asr_pipeline import _get_asr_model
-        for _mk in (model_a, model_b):
-            _get_asr_model(_mk, device=device, use_compile=False)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to load ASR model: {e}")
+    # Return response immediately so the frontend doesn't hang on "启动中...".
+    # Model preloading and processing happen in a background thread.
+    threading.Thread(target=_run, daemon=False).start()
 
-    threading.Thread(target=_run, daemon=True).start()
-    return {"status": "started", "job_id": job_id, "total": len(all_files)}
+    return {"job_id": job_id, "status": "started", "total": len(all_files)}
 
 
 @app.post("/api/asr-compare/keep-segments")
@@ -5470,22 +5707,58 @@ def keep_asr_compare_segments(payload: dict = Body(...)):
 @app.post("/api/asr-compare/delete-segments")
 def delete_asr_compare_segments(payload: dict = Body(...)):
     """Permanently delete segment WAV files from the segments folder."""
-    import shutil as _shutil
     wav_paths = payload.get("paths", [])
     if not wav_paths:
         raise HTTPException(status_code=400, detail="No paths provided")
 
-    real_data = os.path.realpath(DATA_DIR)
+    real_data = os.path.normcase(os.path.realpath(DATA_DIR))
     deleted = []
+    deleted_txt = []
+    skipped_security = []
+    skipped_missing = []
     for wav_path in wav_paths:
-        real_path = os.path.realpath(wav_path)
+        real_path = os.path.normcase(os.path.realpath(wav_path))
+        print(f"[delete-segments] wav_path={wav_path!r}")
+        print(f"[delete-segments] real_data={real_data!r} real_path={real_path!r}")
+        print(f"[delete-segments] exists={os.path.exists(wav_path)}")
         if not real_path.startswith(real_data + os.sep) and real_path != real_data:
+            skipped_security.append({"path": wav_path, "real_path": real_path, "real_data": real_data})
+            print(f"[delete-segments] SKIPPED: security check failed")
             continue
+
+        # Find the segment in results to get associated TXT paths
+        found = False
+        for parent_audio_path, result in _asr_compare_results.items():
+            segs = result.get("segments") or []
+            for seg in segs:
+                if seg.get("wav_path") == wav_path:
+                    found = True
+                    # Delete TXT files
+                    for txt_key in ("txt_path_a", "txt_path_b"):
+                        txt_path = seg.get(txt_key)
+                        if txt_path and os.path.exists(txt_path):
+                            os.remove(txt_path)
+                            deleted_txt.append(txt_path)
+                    # Clear in-memory text data
+                    seg["text_a"] = ""
+                    seg["text_b"] = ""
+                    seg["txt_path_a"] = None
+                    seg["txt_path_b"] = None
+                    seg["diff_chunks"] = []
+                    break
+            else:
+                continue
+            break
+        print(f"[delete-segments] found_in_results={found}")
+
         if os.path.exists(wav_path):
             os.remove(wav_path)
             deleted.append(wav_path)
+        else:
+            skipped_missing.append(wav_path)
 
-    return {"status": "ok", "deleted": len(deleted), "paths": deleted}
+    print(f"[delete-segments] deleted={deleted} skipped_security={skipped_security} skipped_missing={skipped_missing}")
+    return {"status": "ok", "deleted": len(deleted), "paths": deleted, "_debug": {"skipped_security": skipped_security, "skipped_missing": skipped_missing}}
 
 
 @app.post("/api/asr-compare/package")
@@ -5959,8 +6232,9 @@ def _run_pipeline_video(job_id: str):
     if not steps_config:
         steps_config = [
             {"key": "duration_split", "enabled": True},
+            {"key": "convert", "enabled": True},
             {"key": "music_separate", "enabled": True},
-            {"key": "enhance", "enabled": False},
+            {"key": "enhance", "enabled": True},
             {"key": "super_resolve", "enabled": False},
             {"key": "asr", "enabled": False},
             {"key": "cut", "enabled": False},
@@ -6154,14 +6428,22 @@ def _run_pipeline_video(job_id: str):
                 _update_pipeline_job_progress(job)
                 return True
         elif ext == ".wav":
-            if f.input_path != out:
-                _shutil.copy2(f.input_path, out)
-            state["wav"] = out
-            f.status = "running"
-            f.progress = 100
-            f.steps.append({"step": "convert", "status": "completed", "message": "已是WAV格式"})
-            _update_pipeline_job_progress(job)
-            return True
+            # Resample to target rate/channels even if already WAV
+            result = subprocess.run(
+                [FFMPEG, "-y", "-i", f.input_path, "-vn",
+                 "-acodec", "pcm_s16le",
+                 "-ar", str(opt_sr), "-ac", str(opt_ch), out],
+                capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=300,
+            )
+            if os.path.exists(out) and os.path.getsize(out) > 0:
+                state["wav"] = out
+                f.status = "running"
+                f.progress = 100
+                f.steps.append({"step": "convert", "status": "completed",
+                                "message": f"WAV统一 ({opt_sr}Hz/{'单声道' if opt_ch == 1 else '立体声'})"})
+                _update_pipeline_job_progress(job)
+                return True
         else:
             wav_path = _convert_to_wav_ffmpeg(f.input_path, sample_rate=opt_sr, channels=opt_ch)
             if wav_path:
@@ -6443,12 +6725,14 @@ def _run_pipeline_video(job_id: str):
         opt_sr, opt_ch = _get_optimal_wav_params(enabled_steps)
 
         if ext == ".wav":
-            # Already WAV — split with -c copy, instant
+            # Already WAV — split and resample to unified format
             seg_pattern = os.path.join(seg_dir, f"{base}_%03d.wav")
             cmd = [
                 FFMPEG, "-y", "-i", src,
                 "-f", "segment", "-segment_time", str(segment_dur),
-                "-c", "copy", seg_pattern,
+                "-acodec", "pcm_s16le",
+                "-ar", str(opt_sr), "-ac", str(opt_ch),
+                seg_pattern,
             ]
             seg_ext = ".wav"
         elif is_video:
@@ -7420,9 +7704,10 @@ def mfa_validate(
     job_id = uuid.uuid4().hex[:12]
     models_root = _get_mfa_config("MFA_MODELS_DIR", MFA_MODELS_DIR)
     temp = temp_dir or _get_mfa_config("MFA_TEMP_DIR", MFA_TEMP_DIR)
+    mfa_exe = _get_mfa_config("MFA_EXECUTABLE", "mfa")
 
     cmd = [
-        "mfa", "validate",
+        mfa_exe, "validate",
         txt_dir,
         dictionary,
         "--acoustic_model_path", acoustic_model,
@@ -7474,9 +7759,10 @@ def mfa_align(
     job_id = uuid.uuid4().hex[:12]
     models_root = _get_mfa_config("MFA_MODELS_DIR", MFA_MODELS_DIR)
     temp = temp_dir or _get_mfa_config("MFA_TEMP_DIR", MFA_TEMP_DIR)
+    mfa_exe = _get_mfa_config("MFA_EXECUTABLE", "mfa")
 
     cmd = [
-        "mfa", "align",
+        mfa_exe, "align",
         txt_dir,
         dictionary,
         acoustic_model,
@@ -7598,6 +7884,7 @@ def mfa_run_all(payload: dict = Body(...)):
         python_exe = _get_mfa_config("MFA_PYTHON", "python")
         model_root = _get_mfa_config("MFA_MODELS_DIR", MFA_MODELS_DIR)
         all_stdout = []
+        skip_step2 = payload.get("skip_step2", False)
 
         steps = [
             {
@@ -7626,13 +7913,28 @@ def mfa_run_all(payload: dict = Body(...)):
             },
         ]
 
+        total_steps = 3 if skip_step2 else 4
+        step_idx = 0
+
         for i, step_info in enumerate(steps):
+            # Skip step 2 when external TXT file is provided
+            if skip_step2 and step_info["name"] == "generate":
+                step_label = "步骤 2/4: 已跳过 (使用外部 TXT)"
+                with _mfa_lock:
+                    j = _mfa_jobs.get(job_id)
+                    if j and not j.get("cancelled"):
+                        j["current_step"] = step_label
+                        j["progress"] = round((1 / total_steps) * 100)
+                        j["stdout"] = "".join(all_stdout) + "\n[跳过] 步骤2: 使用外部 TXT 文件作为对齐语料\n"
+                        all_stdout.append("[跳过] 步骤2: 使用外部 TXT 文件作为对齐语料\n")
+                        _save_mfa_jobs()
+                continue
             with _mfa_lock:
                 j = _mfa_jobs.get(job_id)
                 if not j or j.get("cancelled"):
                     return
                 j["current_step"] = step_info["label"]
-                j["progress"] = (i / 4) * 100
+                j["progress"] = round((step_idx / total_steps) * 100)
                 _save_mfa_jobs()
 
             try:
@@ -7655,7 +7957,7 @@ def mfa_run_all(payload: dict = Body(...)):
                         j = _mfa_jobs.get(job_id)
                         if j:
                             j["stdout"] = "".join(all_stdout[-500:])
-                            j["progress"] = round((i + 0.5) / 4 * 100)
+                            j["progress"] = round((step_idx + 0.5) / total_steps * 100)
                             _save_mfa_jobs()
                     # Check cancellation
                     with _mfa_lock:
@@ -7673,11 +7975,12 @@ def mfa_run_all(payload: dict = Body(...)):
                         j = _mfa_jobs.get(job_id)
                         if j and not j.get("cancelled"):
                             j["status"] = "failed"
-                            j["error"] = f"步骤 {i+1} 失败: exit code {process.returncode}\n" + "".join(step_stdout[-20:])
-                            j["current_step"] = f"步骤 {i+1} 失败"
+                            j["error"] = f"步骤 {step_info['name']} 失败: exit code {process.returncode}\n" + "".join(step_stdout[-20:])
+                            j["current_step"] = f"步骤 {step_info['name']} 失败"
                             j["stdout"] = "".join(all_stdout)
                             _save_mfa_jobs()
                     return
+                step_idx += 1
             except Exception as e:
                 with _mfa_lock:
                     j = _mfa_jobs.get(job_id)
@@ -7754,9 +8057,10 @@ def _build_align_cmd(payload):
     overwrite = payload.get("align_overwrite", True)
     no_tokenization = payload.get("align_no_tokenization", True)
     no_textgrid_cleanup = payload.get("align_no_textgrid_cleanup", True)
+    mfa_exe = _get_mfa_config("MFA_EXECUTABLE", "mfa")
 
     cmd = [
-        "mfa", "align",
+        mfa_exe, "align",
         payload.get("align_txt_dir", ""),
         payload.get("align_dictionary", "japanese_mfa"),
         payload.get("align_acoustic_model", "japanese_mfa"),
@@ -7954,6 +8258,113 @@ def mfa_stream(path: str = Query(..., description="Path to audio file (WAV/MP3)"
     return FileResponse(path, media_type=mt)
 
 
+@app.get("/api/mfa/waveform")
+def mfa_waveform(path: str = Query(..., description="Path to WAV file"),
+                 resolution: int = Query(1000, description="Number of peak data points")):
+    """Return waveform peak data as JSON — much lighter than downloading the full WAV."""
+    import numpy as np
+    import soundfile as sf
+
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    try:
+        info = sf.info(path)
+        total_frames = info.frames
+        sr = info.samplerate
+        duration = total_frames / max(sr, 1)
+
+        # Read only enough data for the requested resolution
+        resolution = min(resolution, 2000)  # cap at 2000 points
+        step = max(1, total_frames // resolution)
+
+        # Read in chunks to keep memory low
+        peaks = []
+        pos = 0
+        block_size = step * 4  # read 4 rows worth per chunk
+        while pos < total_frames:
+            end = min(pos + block_size, total_frames)
+            data, _ = sf.read(path, start=pos, stop=end, dtype="float32", always_2d=False)
+            if data.ndim > 1:
+                data = data.mean(axis=1)  # mix down to mono
+            n = len(data)
+            for i in range(0, n, step):
+                chunk_end = min(i + step, n)
+                chunk = data[i:chunk_end]
+                if len(chunk) > 0:
+                    peaks.append(round(float(np.max(np.abs(chunk))), 6))
+            pos = end
+
+        return {
+            "path": path,
+            "duration": round(duration, 3),
+            "sample_rate": sr,
+            "resolution": len(peaks),
+            "peaks": peaks,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read waveform: {e}")
+
+
+# Auto-find TXT transcript for an audio file
+@app.get("/api/mfa/find-txt")
+def mfa_find_txt(audio_path: str = Query(..., description="Path to audio file")):
+    """Given an audio file path, find matching TXT transcript.
+
+    Directory structure:
+      segments/<name>/<name>_seg001.wav
+      segments/<name>/txt/<name>_seg001_qwen3.txt
+    Looks in <audio_dir>/txt/ for files starting with the audio stem,
+    preferring *_qwen3.txt over *_firered.txt.
+    """
+    if not os.path.isfile(audio_path):
+        return {"txt_path": "", "found": False, "hint": "Audio file not found"}
+
+    audio_dir = os.path.dirname(audio_path)
+    stem = os.path.splitext(os.path.basename(audio_path))[0]
+
+    # Priority: {audio_dir}/txt/{stem}_qwen3.txt > {stem}_firered.txt > {stem}_*.txt
+    txt_dir = os.path.join(audio_dir, "txt")
+    if os.path.isdir(txt_dir):
+        matching = []
+        try:
+            for name in os.listdir(txt_dir):
+                if name.startswith(stem) and name.lower().endswith(".txt"):
+                    matching.append(name)
+        except OSError:
+            pass
+        # Sort: qwen3 first, then firered, then others
+        def _rank(n):
+            low = n.lower()
+            if "_qwen3" in low: return 0
+            if "_firered" in low: return 1
+            return 2
+        matching.sort(key=_rank)
+        if matching:
+            best = matching[0]
+            full = os.path.join(txt_dir, best)
+            try:
+                with open(full, "r", encoding="utf-8") as f:
+                    preview = f.read()[:300]
+            except Exception:
+                preview = ""
+            return {"txt_path": os.path.normpath(full).replace("\\", "/"), "found": True,
+                    "stem": stem, "all_matches": matching,
+                    "preview": preview,
+                    "txt_dir": txt_dir.replace("\\", "/")}
+
+    # Fallback: exact stem.txt in same dir or txt subdir
+    for c in [os.path.join(audio_dir, stem + ".txt"),
+              os.path.join(audio_dir, "txt", stem + ".txt")]:
+        if os.path.isfile(c):
+            return {"txt_path": os.path.normpath(c).replace("\\", "/"), "found": True,
+                    "stem": stem, "all_matches": [],
+                    "txt_dir": os.path.dirname(c).replace("\\", "/")}
+
+    return {"txt_path": "", "found": False, "stem": stem,
+            "hint": f"TXT not found in {txt_dir}"}
+
+
 # MFA directory browser — shows folders + SRT files
 @app.get("/api/mfa/browse-dir")
 def mfa_browse_dir(path: str = Query("", description="Absolute directory path"),
@@ -7980,14 +8391,19 @@ def mfa_browse_dir(path: str = Query("", description="Absolute directory path"),
     folders = []
     files = []
     try:
-        for name in sorted(os.listdir(path)):
-            full = os.path.join(path, name)
-            if os.path.isdir(full) and not name.startswith("."):
-                folders.append({"name": name, "path": full.replace("\\", "/"), "type": "dir"})
-            elif os.path.isfile(full) and name.lower().endswith(exts):
-                size_kb = round(os.path.getsize(full) / 1024, 1)
-                ft = os.path.splitext(name)[1].lower().lstrip(".")
-                files.append({"name": name, "path": full.replace("\\", "/"), "type": ft, "size_kb": size_kb})
+        # Use scandir — DirEntry caches stat from the directory listing,
+        # avoiding a separate syscall per file (big win on NAS / large dirs).
+        with os.scandir(path) as it:
+            for entry in sorted(it, key=lambda e: e.name):
+                if entry.is_dir() and not entry.name.startswith("."):
+                    folders.append({"name": entry.name, "path": entry.path.replace("\\", "/"), "type": "dir"})
+                elif entry.is_file() and entry.name.lower().endswith(exts):
+                    try:
+                        size_kb = round(entry.stat().st_size / 1024, 1)
+                    except OSError:
+                        size_kb = 0.0
+                    ft = os.path.splitext(entry.name)[1].lower().lstrip(".")
+                    files.append({"name": entry.name, "path": entry.path.replace("\\", "/"), "type": ft, "size_kb": size_kb})
 
         parent = os.path.dirname(path)
         if parent == path or not os.path.isdir(parent):
@@ -8001,6 +8417,105 @@ def mfa_browse_dir(path: str = Query("", description="Absolute directory path"),
         }
     except PermissionError:
         raise HTTPException(status_code=403, detail="Permission denied")
+
+
+# MFA text file matching — fuzzy search text files by audio stem fields
+@app.get("/api/mfa/match-text")
+def mfa_match_text(
+    audio_stem: str = Query(..., description="Audio filename stem (without extension)"),
+    text_dir: str = Query(..., description="Directory to search for matching text files"),
+):
+    """Fuzzy match text files whose names contain all fields from the audio stem.
+
+    Splits audio_stem by underscore/hyphen into "fields", then returns files
+    from text_dir whose stem contains every one of those fields (case-insensitive).
+    """
+    import re as _mfa_re2
+    fields = _mfa_re2.split(r'[_\-]+', audio_stem.lower())
+    # Keep fields with at least 2 chars (filter noise like single digits/letters
+    # that would match too broadly)
+    fields = [f for f in fields if len(f) >= 2]
+
+    if not fields:
+        return {"audio_stem": audio_stem, "fields": [], "matches": [],
+                "hint": "Audio stem too short to extract meaningful fields"}
+
+    matches = []
+    if os.path.isdir(text_dir):
+        for name in sorted(os.listdir(text_dir)):
+            full = os.path.join(text_dir, name)
+            if not os.path.isfile(full):
+                continue
+            stem_lower = os.path.splitext(name)[0].lower()
+            if all(f in stem_lower for f in fields):
+                ext = os.path.splitext(name)[1].lower()
+                size_kb = round(os.path.getsize(full) / 1024, 1)
+                matches.append({
+                    "name": name,
+                    "path": full.replace("\\", "/"),
+                    "ext": ext,
+                    "size_kb": size_kb,
+                    "is_txt": ext == ".txt",
+                })
+
+    return {"audio_stem": audio_stem, "fields": fields, "matches": matches}
+
+
+# Copy a matched text file to MFA TXT directory with audio stem naming
+@app.post("/api/mfa/copy-text-for-align")
+def mfa_copy_text_for_align(
+    text_path: str = Query(..., description="Source text file path"),
+    audio_stem: str = Query(..., description="Target audio stem for naming"),
+    output_dir: str = Query(..., description="MFA TXT output directory"),
+):
+    """Copy text file content to the MFA TXT directory, renamed to match audio stem.
+
+    This allows using an external text file directly as the MFA alignment corpus
+    without going through Step 2 (TXT generation from JSONL).
+    """
+    if not os.path.exists(text_path):
+        raise HTTPException(status_code=404, detail=f"Text file not found: {text_path}")
+
+    try:
+        with open(text_path, "r", encoding="utf-8-sig") as f:
+            content = f.read()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read text file: {e}")
+
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="Text file is empty")
+
+    os.makedirs(output_dir, exist_ok=True)
+    out_path = os.path.join(output_dir, audio_stem + ".txt")
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    preview = content[:500] if len(content) > 500 else content
+    return {
+        "status": "ok",
+        "output_path": out_path.replace("\\", "/"),
+        "content_preview": preview,
+        "content_length": len(content),
+    }
+
+
+# Read text file content for display in UI
+@app.get("/api/mfa/read-text-content")
+def mfa_read_text_content(path: str = Query(..., description="Path to text file")):
+    """Read a text file's content for display in the post-processing section."""
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"File not found: {path}")
+    if not path.lower().endswith((".txt", ".lab", ".text", ".transcription")):
+        raise HTTPException(status_code=400, detail="File must be a text file (.txt/.lab/.text)")
+
+    try:
+        with open(path, "r", encoding="utf-8-sig") as f:
+            content = f.read()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read file: {e}")
+
+    return {"path": path.replace("\\", "/"), "content": content, "size": len(content)}
 
 
 # SRT to JSONL import helper
