@@ -174,7 +174,7 @@ _CONFIG_KEYS = {
     'FIRERED_ASR2_MODELS_DIR': os.path.join(DATA_DIR, "models", "firered_asr2"),
     'FIRERED_ASR2S_PATH': os.path.join(COMICUT_ROOT, "FireRedASR2S"),
     'MFA_PYTHON': sys.executable,
-    'MFA_EXECUTABLE': 'mfa',
+    'MFA_EXECUTABLE': _find_tool('mfa'),
     'MFA_DEFAULT_ACOUSTIC': 'japanese_mfa',
     'MFA_DEFAULT_DICTIONARY': 'japanese_mfa',
     'MFA_DEFAULT_NUM_JOBS': '8',

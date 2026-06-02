@@ -5219,6 +5219,13 @@ def asr_compare_resume_job(job_id: str):
         # Count already-completed files for accurate progress tracking
         already_done = len(completed_paths)
 
+        # Reset per-file status for non-completed files (they may be stuck in "running")
+        for _f in files:
+            if _f["path"] not in completed_paths:
+                _f["status"] = "pending"
+                _f["progress"] = 0
+                _f["current_step"] = ""
+
         for idx, f in enumerate(files):
             audio_path = f["path"]
             if audio_path in completed_paths:
@@ -5235,6 +5242,9 @@ def asr_compare_resume_job(job_id: str):
                         _save_asr_compare_jobs()
                     return
                 j["current_file"] = audio_name
+                f["status"] = "running"
+                f["progress"] = 0
+                f["current_step"] = "开始处理..."
 
             def on_progress(step, pct):
                 with _asr_compare_lock:
@@ -5242,6 +5252,8 @@ def asr_compare_resume_job(job_id: str):
                     if jj and jj.get("status") != "cancelled":
                         done = jj.get("completed", 0)
                         jj["current_step"] = f"[{done + 1}/{total}] {audio_name} — {step}"
+                    f["progress"] = int(pct)
+                    f["current_step"] = step
 
             try:
                 if is_segmented:
@@ -5271,6 +5283,8 @@ def asr_compare_resume_job(job_id: str):
                         jj["results"][audio_path] = result
                         if result.get("flagged"):
                             jj["flagged_count"] = jj.get("flagged_count", 0) + 1
+                f["status"] = "completed"
+                f["progress"] = 100
 
             except _CancelPipeline:
                 with _asr_compare_lock:
@@ -5294,6 +5308,9 @@ def asr_compare_resume_job(job_id: str):
                             "flagged": True,
                         }
                         jj["flagged_count"] = jj.get("flagged_count", 0) + 1
+                f["status"] = "error"
+                f["progress"] = 0
+                f["error"] = str(e)
 
         with _asr_compare_lock:
             jj = _asr_compare_jobs.get(job_id)
@@ -8353,7 +8370,54 @@ def mfa_find_txt(audio_path: str = Query(..., description="Path to audio file"))
                     "preview": preview,
                     "txt_dir": txt_dir.replace("\\", "/")}
 
-    # Fallback: exact stem.txt in same dir or txt subdir
+    # Shared ranking helper
+    def _rank_mfa(n):
+        low = n.lower()
+        if "_qwen3" in low: return 0
+        if "_firered" in low: return 1
+        return 2
+
+    # Fallback 1: look in <audio_dir>/<stem>/txt/ (audio and folder are siblings)
+    fb_dir = os.path.join(audio_dir, stem, "txt")
+    if os.path.isdir(fb_dir):
+        matching = []
+        try:
+            for name in os.listdir(fb_dir):
+                if name.startswith(stem) and name.lower().endswith(".txt"):
+                    matching.append(name)
+        except OSError: pass
+        matching.sort(key=_rank_mfa)
+        if matching:
+            full = os.path.join(fb_dir, matching[0])
+            return {"txt_path": os.path.normpath(full).replace("\\", "/"), "found": True,
+                    "stem": stem, "all_matches": matching,
+                    "txt_dir": fb_dir.replace("\\", "/")}
+
+    # Fallback 2: search sibling dirs for a folder matching the stem base
+    #   (strip _segNNN suffix), then check its txt/ subdir
+    import re as _mfa_re
+    base_m = _mfa_re.match(r'^(.+?)(_seg\d+)?$', stem)
+    if base_m:
+        base = base_m.group(1)
+        try:
+            for entry in os.listdir(audio_dir):
+                entry_path = os.path.join(audio_dir, entry)
+                if os.path.isdir(entry_path) and entry == base:
+                    stxt = os.path.join(entry_path, "txt")
+                    if os.path.isdir(stxt):
+                        matching = []
+                        for name in os.listdir(stxt):
+                            if name.startswith(stem) and name.lower().endswith(".txt"):
+                                matching.append(name)
+                        matching.sort(key=_rank_mfa)
+                        if matching:
+                            full = os.path.join(stxt, matching[0])
+                            return {"txt_path": os.path.normpath(full).replace("\\", "/"), "found": True,
+                                    "stem": stem, "all_matches": matching,
+                                    "txt_dir": stxt.replace("\\", "/")}
+        except OSError: pass
+
+    # Fallback 3: exact stem.txt in same dir or txt subdir
     for c in [os.path.join(audio_dir, stem + ".txt"),
               os.path.join(audio_dir, "txt", stem + ".txt")]:
         if os.path.isfile(c):
@@ -8362,7 +8426,7 @@ def mfa_find_txt(audio_path: str = Query(..., description="Path to audio file"))
                     "txt_dir": os.path.dirname(c).replace("\\", "/")}
 
     return {"txt_path": "", "found": False, "stem": stem,
-            "hint": f"TXT not found in {txt_dir}"}
+            "hint": f"TXT not found, searched: {txt_dir}, {fb_dir}"}
 
 
 # MFA directory browser — shows folders + SRT files

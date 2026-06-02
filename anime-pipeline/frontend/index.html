@@ -2094,6 +2094,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
           <div style="display:flex;align-items:center;gap:8px;padding-top:4px;">
             <input type="checkbox" id="mfa-align-no-cleanup" checked><label style="font-size:12px;color:var(--text2);">--no_textgrid_cleanup</label></div>
         </div>
+        <button class="btn btn-secondary" onclick="mfaUseOriginalPaths()" style="font-size:11px;padding:4px 10px;margin-top:10px;">📂 使用音频原路径</button>
         <button class="btn btn-primary" onclick="mfaRunStep('align')" id="btn-mfa-align" style="margin-top:10px;">执行 Align</button>
       </div>
 
@@ -2147,6 +2148,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
         <div style="display:flex;align-items:center;gap:8px;padding-top:4px;">
           <input type="checkbox" id="mfa-post-copy-errors"><label style="font-size:12px;color:var(--text2);">错误时复制到filtered</label></div>
       </div>
+      <button class="btn btn-secondary" onclick="mfaUseOriginalPaths()" style="font-size:11px;padding:4px 10px;margin-top:10px;">📂 使用音频原路径</button>
       <button class="btn btn-primary" onclick="mfaRunStep('postprocess')" id="btn-mfa-post" style="margin-top:10px;">执行步骤 4</button>
       <!-- Matched text content preview -->
       <div id="mfa-post-text-preview" style="display:none;margin-top:8px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px;">
@@ -12029,13 +12031,19 @@ function mfaAudioSelectFile(path, name, sizeKb) {
   mfaAudioMatchText();
 }
 
+var _mfaMatchedTxtPath = '';
+var _mfaMatchedTxtDir = '';
+
 async function mfaAudioMatchText() {
   if (!_mfaAudioSelected) return;
+  _mfaMatchedTxtPath = ''; _mfaMatchedTxtDir = '';
   try {
     var resp = await fetch(API + '/api/mfa/find-txt?audio_path=' + encodeURIComponent(_mfaAudioSelected));
     var data = await resp.json();
     var info = document.getElementById('mfa-audio-selected-info');
     if (data.found) {
+      _mfaMatchedTxtPath = data.txt_path;
+      _mfaMatchedTxtDir = data.txt_dir;
       info.textContent = '✓ 文本已匹配: ' + data.txt_path.split('/').pop();
       info.style.color = 'var(--success)';
       // Auto-fill the TXT dir into Step 2 output and Step 3/4 txt_dir
@@ -12049,10 +12057,17 @@ async function mfaAudioMatchText() {
         if (!el4.value.trim() || el4.value === 'data/mfa/txt') el4.value = d;
       }
     } else {
-      info.textContent = '⚠ 未找到匹配文本';
+      var reason = data.hint || data.detail || '未知错误';
+      info.textContent = '⚠ 未匹配: ' + reason;
       info.style.color = 'var(--warning)';
+      console.log('find-txt failed:', data);
     }
-  } catch(e) { console.error(e); }
+  } catch(e) {
+    console.error('mfaAudioMatchText error:', e);
+    var info = document.getElementById('mfa-audio-selected-info');
+    info.textContent = '⚠ 匹配异常: ' + (e.message || e);
+    info.style.color = 'var(--danger)';
+  }
 }
 
 function mfaAudioSyncToPipeline() {
@@ -12373,6 +12388,24 @@ function mfaTextShowInPostprocess(audioStem) {
         document.getElementById('mfa-post-text-preview-content').textContent = preview;
       }
     }).catch(function() {});
+}
+
+// -- Use original audio/text paths in Step 3/4 ---
+function mfaUseOriginalPaths() {
+  if (!_mfaAudioSelected) { toast('请先在顶部选择音频文件', 'info'); return; }
+  var audioDir = _mfaAudioSelected.substring(0, _mfaAudioSelected.lastIndexOf('/'));
+  // Step 3 Align: overwrite wav_dir and txt_dir with original paths
+  document.getElementById('mfa-align-wav-dir').value = audioDir;
+  document.getElementById('mfa-align-txt-dir').value = _mfaMatchedTxtDir || audioDir + '/txt';
+  // Step 4 Postprocess: overwrite wav_dir and txt_dir
+  document.getElementById('mfa-post-wav-dir').value = audioDir;
+  document.getElementById('mfa-post-txt-dir').value = _mfaMatchedTxtDir || audioDir + '/txt';
+  // Step 4 JSONL: try to generate from matched txt
+  if (_mfaMatchedTxtPath) {
+    var stem = _mfaAudioSelectedName.replace(/\.(wav|mp3|flac|m4a)$/i, '');
+    document.getElementById('mfa-post-jsonl').value = 'data/mfa/jsonl/' + stem + '.jsonl';
+  }
+  toast('已切换为原路径: ' + audioDir.split('/').pop(), 'success');
 }
 
 // -- SRT Import (directory browser) ---
