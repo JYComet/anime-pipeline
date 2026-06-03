@@ -57,6 +57,7 @@ import argparse
 import array
 import json
 import math
+import re
 import shutil
 import unicodedata
 import wave
@@ -1014,7 +1015,7 @@ def process_one(
     stem = textgrid_path.stem
     report = {"stem": stem, "status": "ok", "warnings": []}
     if stem not in raw_texts:
-        raise ValueError(f"No JSONL text for {stem}")
+        raise ValueError(f"No text for {stem} (have {len(raw_texts)} TXT files)")
     txt_path = txt_dir / f"{stem}.txt"
     if not txt_path.exists():
         raise ValueError(f"Missing txt file: {txt_path}")
@@ -1121,16 +1122,15 @@ def process_one(
 
     new_textgrid = relabel_all_silences(new_textgrid)
 
-    filter_reasons = get_filter_reasons(new_textgrid)
+    filter_reasons = get_filter_reasons(new_textgrid)  # spn only, sp3 is kept
     if alignment_filter_issues:
         filter_reasons.append("suspicious_alignment")
+        report["alignment_filter_issues"] = alignment_filter_issues
     if filter_reasons:
         output_path = filtered_dir / textgrid_path.name
         stale_path = output_dir / textgrid_path.name
         report["status"] = "filtered_" + "_".join(filter_reasons)
         report["filter_reasons"] = filter_reasons
-        if alignment_filter_issues:
-            report["alignment_filter_issues"] = alignment_filter_issues
     else:
         output_path = output_dir / textgrid_path.name
         stale_path = filtered_dir / textgrid_path.name
@@ -1151,7 +1151,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Add raw text, tokenized text, and romaji tiers to MFA TextGrid files."
     )
-    parser.add_argument("--jsonl", type=Path, default=Path("data/wav/generated.jsonl"))
+    parser.add_argument("--jsonl", type=str, default="",
+                        help="[deprecated] No longer required. Texts are read from --txt-dir.")
     parser.add_argument("--txt-dir", type=Path, default=Path("data/txt_c"))
     parser.add_argument("--textgrid-dir", type=Path, default=Path("data/aligned_c"))
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -1189,7 +1190,7 @@ def main() -> int:
     parser.add_argument(
         "--language",
         choices=["zh", "jp"],
-        default="jp",
+        default="zh",
         help="Language for pronunciation tier: zh (pinyin) or jp (romaji). Default: jp",
     )
     args = parser.parse_args()
@@ -1197,8 +1198,18 @@ def main() -> int:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     args.filtered_dir.mkdir(parents=True, exist_ok=True)
 
-    raw_texts = load_texts(args.jsonl, args.text_key, args.wav_key)
-    wav_paths = load_wav_paths(args.jsonl, args.wav_key)
+    # Derive raw_texts from TXT directory, wav_paths from WAV directory
+    raw_texts = {}
+    wav_paths = {}
+    if args.txt_dir.exists():
+        for txt_file in args.txt_dir.glob("*.txt"):
+            raw_texts[txt_file.stem] = txt_file.read_text(encoding="utf-8").strip()
+    if args.wav_dir and args.wav_dir.exists():
+        for wav_file in args.wav_dir.glob("*.wav"):
+            wav_paths[wav_file.stem] = wav_file
+        for wav_file in args.wav_dir.glob("*.mp3"):
+            wav_paths[wav_file.stem] = wav_file
+    print(f"TXT texts: {len(raw_texts)}, WAV paths: {len(wav_paths)}")
     kakasi_converter = kakasi()
     reports = []
     textgrid_paths = sorted(args.textgrid_dir.glob("*.TextGrid"))

@@ -592,12 +592,13 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
     <button data-tab="local-files">本地文件</button>
     <button data-tab="jobs">任务</button>
     <button data-tab="review">审核</button>
-    <button data-tab="results">输出结果</button>
+
     <button data-tab="denoise">降噪</button>
     <button data-tab="denoise-review">降噪审核</button>
     <button data-tab="extract">字幕提取</button>
     <button data-tab="asr">ASR提取</button>
     <button data-tab="asr-compare">ASR对比</button>
+    <button data-tab="txt-compare">文本对比</button>
     <button data-tab="stitch">音频拼接</button>
     <button data-tab="split">视频切割</button>
     <button data-tab="pipelinevideo">视频管线</button>
@@ -1024,64 +1025,6 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
         <h4 style="margin:0 0 6px 0;font-size:13px;color:var(--danger);">已删除的音频 <span id="dreview-deleted-count" style="font-size:11px;"></span></h4>
         <div id="dreview-deleted-list" class="file-list" style="max-height:200px;"></div>
       </div>
-    </div>
-  </div>
-
-  <!-- 输出结果 -->
-  <div id="tab-results" class="tab">
-    <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px;flex-wrap:wrap;">
-      <h3 style="margin:0;">输出结果</h3>
-      <select id="results-video-select" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:12px;" onchange="loadResultsForVideo()">
-        <option value="">选择视频...</option>
-      </select>
-      <span id="results-stats" style="font-size:12px;color:var(--text2);"></span>
-      <span id="results-progress" style="font-size:12px;color:#4ecca3;margin-left:4px;"></span>
-    </div>
-
-    <!-- Sub-tabs -->
-    <div style="display:flex;gap:4px;margin-bottom:12px;">
-      <button id="results-subtab-sub" class="btn btn-secondary" style="font-size:13px;" onclick="switchResultsSubtab('sub')">字幕</button>
-      <button id="results-subtab-audio" class="btn btn-primary" style="font-size:13px;" onclick="switchResultsSubtab('audio')">音频</button>
-    </div>
-
-    <!-- 字幕 sub-panel -->
-    <div id="results-panel-sub" style="display:none;">
-      <div id="subtitles-list" class="file-list" style="max-height:400px;">
-        <div class="empty-state"><p>选择视频后显示</p></div>
-      </div>
-    </div>
-
-    <!-- 音频 sub-panel -->
-    <div id="results-panel-audio" style="display:block;">
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;margin-bottom:8px;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:6px;">
-        <div id="results-toolbar" style="display:none;flex-direction:column;gap:6px;">
-          <div style="display:flex;gap:6px;align-items:center;">
-            <span style="font-size:12px;color:var(--text2);" id="results-select-count">未选中</span>
-            <button class="btn btn-secondary" id="btn-select-all" style="font-size:11px;padding:4px 10px;">全选</button>
-            <button class="btn btn-secondary" id="btn-deselect-all" style="font-size:11px;padding:4px 10px;">取消</button>
-          </div>
-          <div style="display:flex;gap:6px;">
-            <button class="btn btn-primary" id="btn-delete-selected" style="font-size:11px;padding:4px 10px;background:var(--danger);">删除选中</button>
-            <button id="btn-exit-select" class="btn btn-secondary" style="font-size:12px;padding:4px 10px;" onclick="exitSelectMode()">退出选择</button>
-          </div>
-        </div>
-        <div style="display:flex;gap:6px;align-items:center;">
-          <span id="results-audio-hint" style="font-size:12px;color:var(--text2);">点击文件名播放</span>
-          <button id="btn-enter-select" class="btn btn-secondary" style="font-size:12px;display:none;" onclick="enterSelectMode()">选择音频</button>
-        </div>
-      </div>
-      <div id="approved-list" class="file-list" style="max-height:450px;">
-        <div class="empty-state"><p>选择视频后显示</p></div>
-      </div>
-    </div>
-
-    <!-- Results player bar -->
-    <div id="results-player-bar" style="display:none;position:sticky;bottom:0;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 16px;margin-top:12px;">
-      <div style="display:flex;align-items:center;gap:12px;">
-        <audio id="results-audio-player" controls style="flex:1;min-width:250px;"></audio>
-        <button class="btn btn-secondary" onclick="closeResultsPlayer()" style="font-size:11px;padding:4px 8px;flex-shrink:0;">关闭</button>
-      </div>
-      <div id="results-playing-name" style="font-size:11px;color:var(--text2);margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
     </div>
   </div>
 
@@ -1538,6 +1481,147 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
     </div>
   </div>
 
+  <!-- 文本对比 -->
+  <div id="tab-txt-compare" class="tab">
+    <div style="display:flex;gap:16px;flex-wrap:wrap;">
+      <!-- Left: Folder browser -->
+      <div style="flex:0 0 380px;min-width:300px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <h3 style="margin:0;">音频文件夹</h3>
+          <button class="btn btn-secondary" onclick="loadTxtFolderBrowser(_txtFolderPath)" style="font-size:11px;padding:4px 10px;">刷新</button>
+        </div>
+        <!-- Path input bar -->
+        <div id="txt-folder-breadcrumb" style="display:flex;align-items:center;gap:6px;margin-bottom:8px;padding:6px 10px;border-radius:6px;background:var(--bg2);border:1px solid var(--border);font-size:12px;">
+          <button class="btn btn-secondary" onclick="txtFolderGoUp()" style="font-size:11px;padding:2px 8px;flex-shrink:0;" id="btn-txt-folder-up" disabled>⬆ 上级</button>
+          <input id="txt-folder-path-input" type="text" onkeydown="if(event.key==='Enter')loadTxtFolderBrowser(this.value)" placeholder="输入文件夹路径，按回车跳转..." style="flex:1;font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);min-width:0;">
+          <button class="btn btn-secondary" onclick="loadTxtFolderBrowser(document.getElementById('txt-folder-path-input').value)" style="font-size:11px;padding:2px 8px;flex-shrink:0;">跳转</button>
+        </div>
+        <!-- Subdirectory list -->
+        <div id="txt-folder-subdirs" class="file-list" style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;">
+          <div class="empty-state"><p>加载中...</p></div>
+        </div>
+        <!-- File info bar -->
+        <div id="txt-folder-file-info" style="display:none;margin-top:6px;padding:6px 10px;border-radius:6px;background:var(--bg2);border:1px solid var(--border);font-size:12px;color:var(--text2);"></div>
+        <!-- Selection bar -->
+        <div id="txt-folder-select-bar" style="display:none;margin-top:6px;align-items:center;gap:8px;">
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;">
+            <input type="checkbox" id="txt-folder-select-all-cb" onchange="txtFolderToggleSelectAll()" style="cursor:pointer;">
+            全选
+          </label>
+          <span id="txt-folder-selected-count" style="font-size:11px;color:var(--text2);"></span>
+        </div>
+        <!-- File list -->
+        <div id="txt-folder-file-list" class="file-list" style="display:none;max-height:250px;overflow-y:auto;margin-top:4px;border:1px solid var(--border);border-radius:8px;"></div>
+        <!-- Pair detection info -->
+        <div id="txt-pair-info" style="display:none;margin-top:6px;padding:8px 10px;border-radius:6px;background:var(--bg2);border:1px solid #4a9eff;font-size:12px;color:var(--text);"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;">
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;">
+            <input type="checkbox" id="txt-filter-english" checked style="cursor:pointer;">
+            <span style="color:var(--text2);">英文过滤（含英文 → 匹配率 0%）</span>
+          </label>
+        </div>
+        <!-- Run button -->
+        <button class="btn btn-primary" id="btn-txt-run" onclick="runTxtCompare()" style="width:100%;padding:10px;font-size:14px;margin-top:8px;" disabled>
+          开始比较
+        </button>
+      </div>
+
+      <!-- Right: Progress + Results -->
+      <div style="flex:1;min-width:400px;">
+        <!-- Progress -->
+        <div id="txt-progress" style="display:none;margin-bottom:12px;padding:12px;border-radius:8px;background:var(--bg2);border:1px solid var(--border);">
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text2);margin-bottom:4px;">
+            <span id="txt-progress-text">准备中...</span>
+            <span id="txt-progress-pct">0%</span>
+          </div>
+          <div class="progress-bar" style="margin-bottom:8px;">
+            <div id="txt-progress-fill" class="progress-fill" style="width:0%;background:var(--success);"></div>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <span style="font-size:11px;color:var(--text2);" id="txt-progress-detail"></span>
+            <button class="btn" id="btn-txt-stop" onclick="stopTxtCompare()" style="display:none;font-size:11px;padding:4px 12px;background:var(--danger);color:#fff;">中止</button>
+          </div>
+          <div id="txt-file-progress-list" style="max-height:40vh;overflow-y:auto;"></div>
+        </div>
+
+        <!-- Summary -->
+        <div id="txt-summary" style="display:none;">
+          <div class="cmp-summary-bar">
+            <div class="cmp-summary-item">
+              <div class="num" id="txt-total-num" style="color:var(--text);">0</div>
+              <div style="font-size:11px;color:var(--text2);">总计</div>
+            </div>
+            <div class="cmp-summary-item">
+              <div class="num" id="txt-good-num" style="color:var(--success);">0</div>
+              <div style="font-size:11px;color:var(--text2);">匹配率≥阈值</div>
+            </div>
+            <div class="cmp-summary-item">
+              <div class="num" id="txt-low-num" style="color:var(--danger);">0</div>
+              <div style="font-size:11px;color:var(--text2);">匹配率&lt;阈值</div>
+            </div>
+            <div class="cmp-summary-item">
+              <div class="num" id="txt-deleted-num" style="color:var(--warning);">0</div>
+              <div style="font-size:11px;color:var(--text2);">已删除</div>
+            </div>
+          </div>
+
+          <!-- Filter bar -->
+          <div id="txt-filter-bar" style="display:flex;align-items:center;gap:10px;padding:8px 12px;margin-bottom:8px;border-radius:8px;background:var(--bg2);border:1px solid var(--border);flex-wrap:wrap;">
+            <label style="font-size:12px;color:var(--text2);white-space:nowrap;">
+              <input type="checkbox" id="txt-filter-cb" onchange="renderTxtResults()" style="cursor:pointer;">
+              筛选
+            </label>
+            <select id="txt-filter-dir" onchange="renderTxtResults()"
+              style="font-size:11px;padding:2px 4px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);">
+              <option value="below">低于</option>
+              <option value="above">高于</option>
+            </select>
+            <input id="txt-filter-threshold" type="number" value="80" min="0" max="100" step="1"
+              onchange="renderTxtResults()" oninput="renderTxtResults()"
+              style="width:56px;padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;text-align:center;">
+            <span style="font-size:12px;color:var(--text2);">% 匹配率</span>
+            <span id="txt-filter-count" style="font-size:11px;color:var(--accent);"></span>
+            <button class="btn" id="btn-txt-batch-delete" onclick="txtBatchDelete()"
+              style="font-size:11px;padding:4px 14px;background:var(--danger);color:#fff;display:none;">
+              删除筛选结果
+            </button>
+          </div>
+
+          <div style="max-height:45vh;overflow-y:auto;border:1px solid var(--border);border-radius:8px;">
+            <table class="cmp-result-table">
+              <thead>
+                <tr>
+                  <th style="width:22%;">文件名</th>
+                  <th style="width:10%;">匹配率</th>
+                  <th style="width:10%;">状态</th>
+                  <th style="width:58%;">操作</th>
+                </tr>
+              </thead>
+              <tbody id="txt-result-tbody">
+                <tr><td colspan="4" style="text-align:center;color:var(--text2);padding:20px;">等待处理完成...</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Segment audio player bar -->
+          <div id="txt-seg-player-bar" style="display:none;margin-top:8px;padding:8px 12px;border-radius:8px;background:var(--bg2);border:1px solid var(--accent2);align-items:center;gap:10px;">
+            <span style="font-size:13px;color:var(--accent);">🔊</span>
+            <span id="txt-seg-playing-name" style="flex:1;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+            <button class="btn btn-secondary" onclick="closeTxtSegPlayer()" style="font-size:10px;padding:2px 8px;">停止</button>
+          </div>
+          <audio id="txt-seg-audio-player" style="display:none;"></audio>
+        </div>
+
+        <!-- Empty state -->
+        <div id="txt-empty-state" style="text-align:center;padding:80px 20px;color:var(--text2);">
+          <p style="font-size:48px;margin-bottom:12px;">📝</p>
+          <p>选择左侧音频文件夹，点击"开始比较"进行批量文本对比</p>
+          <p style="font-size:12px;margin-top:8px;">自动匹配 txt/ 目录下的文本文件并与音频对应</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- 视频切割 -->
   <div id="tab-split" class="tab">
     <div class="split-layout">
@@ -1953,6 +2037,129 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
         <div style="font-size:11px;color:var(--accent);margin-bottom:4px;">提取的文本预览:</div>
         <pre id="mfa-srt-preview-text" style="white-space:pre-wrap;word-break:break-all;font-size:13px;margin:0;max-height:120px;overflow-y:auto;"></pre>
         <div style="font-size:11px;color:var(--text2);margin-top:6px;">JSONL 路径: <span id="mfa-srt-jsonl-out"></span> | 总条目: <span id="mfa-srt-jsonl-count"></span></div>
+      </div>
+    </details>
+
+    <!-- ============================================================
+         Batch MFA Pipeline — 批量对齐 + 异常检测
+         ============================================================ -->
+    <details id="mfa-batch-section" style="margin-bottom:12px;background:var(--bg2);border:2px solid var(--accent);border-radius:8px;padding:14px 18px;">
+      <summary style="cursor:pointer;font-size:16px;font-weight:700;color:var(--accent);">🚀 批量 MFA 对齐 + 异常检测 (新)</summary>
+      <p style="font-size:12px;color:var(--text2);margin:8px 0 12px 0;">
+        选择多个音频文件 → 自动匹配文本 → 自动分词 → 自动 MFA 对齐 → 自动异常检测 → 可选择删除异常音频。
+        任务进度持久化保存，刷新/重启页面不丢失，可随时中止或恢复。
+      </p>
+
+      <!-- Step A: Select Audio Files -->
+      <div style="margin-bottom:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px;">步骤 A: 选择音频文件</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+          <button id="mfa-batch-audio-back" class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="batchMfaAudioNav('..')" disabled>⬆ 上级</button>
+          <div id="mfa-batch-audio-breadcrumb" style="flex:1;font-size:11px;color:var(--text2);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;"></div>
+          <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="batchMfaAudioBrowseOther()">浏览其他</button>
+        </div>
+        <div id="mfa-batch-audio-list" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;background:var(--bg);margin-bottom:8px;">
+          <div class="empty-state" style="padding:20px;"><p>加载中...</p></div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          <button class="btn btn-secondary" style="font-size:11px;padding:3px 10px;" onclick="batchMfaSelectAll()">全选 WAV</button>
+          <button class="btn btn-secondary" style="font-size:11px;padding:3px 10px;" onclick="batchMfaDeselectAll()">取消全选</button>
+          <span id="mfa-batch-selected-count" style="font-size:11px;color:var(--accent);">已选 0 个文件</span>
+          <span id="mfa-batch-audio-info" style="font-size:11px;color:var(--text2);margin-left:auto;"></span>
+        </div>
+      </div>
+
+      <!-- Step B: Text Source & Settings -->
+      <div style="margin-bottom:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px;">步骤 B: 文本来源 & 设置</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;">
+          <div>
+            <label style="font-size:11px;color:var(--text2);">语言</label>
+            <select id="mfa-batch-lang" class="mfa-input" style="width:100%;">
+              <option value="jp">日本語</option>
+              <option value="zh" selected>中文</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text2);">文本来源</label>
+            <select id="mfa-batch-text-src" class="mfa-input" style="width:100%;" onchange="batchMfaToggleTextSrc()">
+              <option value="jsonl">JSONL 文件</option>
+              <option value="txtdir" selected>TXT 目录</option>
+            </select>
+          </div>
+          <div id="batch-jsonl-row" style="display:none;">
+            <label style="font-size:11px;color:var(--text2);">JSONL 文件路径</label>
+            <div style="display:flex;gap:4px;"><input id="mfa-batch-jsonl" class="mfa-input" style="flex:1;" placeholder="data/mfa/jsonl/generated.jsonl"><button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaPickFolder('mfa-batch-jsonl')">浏览</button></div>
+          </div>
+          <div id="batch-txtdir-row">
+            <label style="font-size:11px;color:var(--text2);">TXT 目录</label>
+            <div style="display:flex;gap:4px;"><input id="mfa-batch-txtdir" class="mfa-input" style="flex:1;" placeholder="data/mfa/txt"><button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaPickFolder('mfa-batch-txtdir')">浏览</button></div>
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text2);">字典路径 (可选)</label>
+            <div style="display:flex;gap:4px;"><input id="mfa-batch-dict" class="mfa-input" style="flex:1;" placeholder="自动选择"><button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="mfaPickFolder('mfa-batch-dict')">浏览</button></div>
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text2);">文本字段名</label><input id="mfa-batch-text-key" class="mfa-input" value="text" style="width:100%;">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text2);">WAV路径字段名</label><input id="mfa-batch-wav-key" class="mfa-input" value="wav_file" style="width:100%;">
+          </div>
+        </div>
+      </div>
+
+      <!-- Step C: Actions -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">
+        <button class="btn btn-primary" onclick="batchMfaPreviewMatch()" id="btn-batch-preview" style="font-size:12px;padding:6px 16px;">🔍 预览匹配</button>
+        <button class="btn btn-success" onclick="batchMfaStart()" id="btn-batch-start" style="font-size:13px;padding:8px 22px;">▶ 开始批量处理</button>
+        <span id="mfa-batch-action-status" style="font-size:11px;color:var(--text2);"></span>
+      </div>
+
+      <!-- Preview Match Results -->
+      <div id="mfa-batch-preview-panel" style="display:none;margin-bottom:12px;border:1px solid var(--success);border-radius:8px;background:rgba(78,204,163,0.05);padding:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <span style="font-size:13px;font-weight:600;color:var(--success);">📋 匹配预览</span>
+          <span id="mfa-batch-preview-summary" style="font-size:11px;color:var(--text2);"></span>
+        </div>
+        <div id="mfa-batch-preview-list" style="max-height:250px;overflow-y:auto;font-size:11px;"></div>
+      </div>
+
+      <!-- Progress Panel -->
+      <div id="mfa-batch-progress-panel" style="display:none;background:var(--bg);border:1px solid var(--accent);border-radius:8px;padding:14px;margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <strong id="mfa-batch-progress-title" style="font-size:14px;">批量任务状态</strong>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <span id="mfa-batch-progress-pct" style="font-size:12px;color:var(--text2);">0%</span>
+            <button class="btn btn-secondary" style="font-size:10px;padding:2px 8px;" onclick="batchMfaCancel()" id="btn-batch-cancel" title="中止任务">⏹ 中止</button>
+          </div>
+        </div>
+        <div class="progress-bar"><div id="mfa-batch-progress-fill" class="progress-fill" style="width:0;"></div></div>
+        <div id="mfa-batch-progress-status" style="font-size:12px;color:var(--text2);margin-top:6px;">等待开始...</div>
+        <div id="mfa-batch-progress-file" style="font-size:11px;color:var(--text2);"></div>
+      </div>
+
+      <!-- Results Panel -->
+      <div id="mfa-batch-results-panel" style="display:none;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+          <strong style="font-size:14px;">📊 检测结果</strong>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <span id="mfa-batch-result-summary" style="font-size:11px;color:var(--text2);"></span>
+            <button class="btn btn-danger" style="font-size:11px;padding:4px 12px;" onclick="batchMfaDeleteAnomalous()" id="btn-batch-delete-anom">🗑 删除异常音频</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:4px 12px;" onclick="batchMfaDeleteAnomalousDryRun()" id="btn-batch-dryrun">👁 预览删除</button>
+          </div>
+        </div>
+        <div id="mfa-batch-results-list" style="max-height:400px;overflow-y:auto;font-size:11px;"></div>
+      </div>
+
+      <!-- Batch Job History -->
+      <div style="margin-top:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <span style="font-size:12px;font-weight:600;">批量任务历史</span>
+          <button class="btn btn-secondary" style="font-size:10px;padding:2px 8px;" onclick="batchMfaLoadJobs()">刷新</button>
+        </div>
+        <div id="mfa-batch-jobs-list" style="font-size:11px;">
+          <div class="empty-state"><p>暂无批量任务</p></div>
+        </div>
       </div>
     </details>
 
@@ -2655,13 +2862,14 @@ function switchTab(name) {
   if (name === 'local') loadLocalFiles();
   if (name === 'local-files') loadLocalFilesBrowser();
   if (name === 'jobs') { loadJobs(); startJobPolling(); } else stopJobPolling();
-  if (name === 'results') loadResults();
+
   if (name === 'review') { loadReviewDirs(); loadEmotionCounts('review-emotion-bar', '/api/review/emotion-counts'); }
   if (name === 'denoise') { loadDenoiseDirs(); loadUnreviewedDirs(); }
   if (name === 'denoise-review') { loadDreviewBaseDirs(); loadEmotionCounts('dreview-emotion-bar', '/api/denoise-review/emotion-counts'); }
   if (name === 'extract') { loadExtractFiles(); loadExtractedSubs(); }
   if (name === 'asr') { loadAsrVideos(); loadAsrModels(); loadAsrResults(); restoreAsrInterruptedJobs(); loadHotwordConfigs(); loadFolderBrowser(_asrFolderPath || ''); }
   if (name === 'asr-compare') { if (!_cmpLoaded) { loadCmpFolderBrowser(_cmpFolderPath); loadAsrCompareModels(); _cmpLoaded = true; } if (!_cmpRestored) { restoreAsrCompareInterruptedJobs(); _cmpRestored = true; } loadHotwordConfigs(); }
+  if (name === 'txt-compare') { if (!_txtLoaded) { loadTxtFolderBrowser(_txtFolderPath); _txtLoaded = true; } if (!_txtRestored) { restoreTxtCompareInterruptedJobs(); _txtRestored = true; } }
   if (name === 'stitch') loadStitchVideos();
   if (name === 'split') {
     if (!window._splitLoaded) { loadSplitFolderBrowser(_serverPaths.SPLIT_DIR || ''); loadSplitClipDirs(); window._splitLoaded = true; }
@@ -3348,7 +3556,6 @@ async function filterClips(jobId, minDuration) {
       toast(data.message || '没有需要删除的片段', 'info');
     }
     loadJobs();
-    loadResults();
   } catch (e) {
     toast('筛选失败: ' + e.message, 'error');
   }
@@ -5355,222 +5562,10 @@ async function dreviewRemoveMale() {
   } catch(e) { toast('操作失败: ' + e.message, 'error'); btn.disabled = false; btn.textContent = '去除男声'; }
 }
 
-// ============================================================
-// Results
-// ============================================================
-var _resultsSelected = {};
-var _resultsSelectMode = false;
-var _resultsAllSubs = [];
-var _resultsAllAudio = [];
-
-function switchResultsSubtab(tab) {
-  var subBtn = document.getElementById('results-subtab-sub');
-  var audioBtn = document.getElementById('results-subtab-audio');
-  var subPanel = document.getElementById('results-panel-sub');
-  var audioPanel = document.getElementById('results-panel-audio');
-
-  subBtn.className = tab === 'sub' ? 'btn btn-primary' : 'btn btn-secondary';
-  audioBtn.className = tab === 'audio' ? 'btn btn-primary' : 'btn btn-secondary';
-  subPanel.style.display = tab === 'sub' ? 'block' : 'none';
-  audioPanel.style.display = tab === 'audio' ? 'block' : 'none';
-
-  if (tab === 'audio') renderApprovedAudio();
-}
-
-function enterSelectMode() {
-  _resultsSelectMode = true;
-  renderApprovedAudio();
-}
-
-function exitSelectMode() {
-  _resultsSelectMode = false;
-  _resultsSelected = {};
-  renderApprovedAudio();
-}
-
-function renderApprovedAudio() {
-  var aCont = document.getElementById('approved-list');
-  var toolbar = document.getElementById('results-toolbar');
-  var btnEnter = document.getElementById('btn-enter-select');
-  var btnExit = document.getElementById('btn-exit-select');
-  var data = _resultsAllAudio;
-
-  if (!data.length) {
-    aCont.innerHTML = '<div class="empty-state"><p>暂无审核通过的音频</p></div>';
-    toolbar.style.display = 'none';
-    btnEnter.style.display = 'none';
-    btnExit.style.display = 'none';
-    return;
-  }
-
-  var hint = document.getElementById('results-audio-hint');
-  if (_resultsSelectMode) {
-    toolbar.style.display = 'flex';
-    btnEnter.style.display = 'none';
-    btnExit.style.display = 'inline-block';
-    hint.style.display = 'none';
-  } else {
-    toolbar.style.display = 'none';
-    btnEnter.style.display = 'inline-block';
-    btnExit.style.display = 'none';
-    hint.style.display = 'inline';
-  }
-
-  var html = '';
-  for (var j = 0; j < data.length; j++) {
-    var a = data[j];
-    var durStr = a.duration_s > 0 ? formatDuration(a.duration_s) : '?';
-    var checked = _resultsSelected[a.path] ? ' checked' : '';
-
-    html += '<div class="file-item" data-path="' + safeAttr(a.path) + '" style="flex-wrap:wrap;">';
-    // Checkbox only visible in select mode
-    if (_resultsSelectMode) {
-      html += '<input type="checkbox" value="' + safeAttr(a.path) + '" style="flex-shrink:0;"' + checked + ' data-result-check="1">';
-    }
-    html += '<span style="font-size:14px;flex-shrink:0;cursor:pointer;" data-play="' + safeAttr(a.path) + '" data-playname="' + safeAttr(a.name) + '">🎵</span>' +
-      '<span class="file-name" style="cursor:pointer;font-size:13px;" data-play="' + safeAttr(a.path) + '" data-playname="' + safeAttr(a.name) + '">' + escapeHtml(a.name) + '</span>' +
-      '<span class="file-size">' + a.size_mb + ' MB | ' + durStr + (a.codec ? ' | ' + a.codec : '') + (a.sample_rate ? ' | ' + a.sample_rate + 'Hz' : '') + (a.bitrate ? ' | ' + a.bitrate : '') + '</span>' +
-    '</div>';
-  }
-  aCont.innerHTML = html;
-
-  // Wire checkbox changes + update count
-  if (_resultsSelectMode) {
-    var checks = aCont.querySelectorAll('input[data-result-check]');
-    var countEl = document.getElementById('results-select-count');
-    function updateCount() {
-      var n = Object.values(_resultsSelected).filter(function(v) { return v; }).length;
-      countEl.textContent = n > 0 ? '已选 ' + n + ' 个' : '未选中';
-    }
-    updateCount();
-    for (var i = 0; i < checks.length; i++) {
-      checks[i].onchange = function() {
-        _resultsSelected[this.value] = this.checked;
-        updateCount();
-      };
-    }
-  }
-
-  // Re-highlight playing item after list rebuild
-  if (_playingEl) {
-    var curPath = _playingEl.getAttribute('data-path');
-    _playingEl = null;
-    var items = aCont.querySelectorAll('.file-item');
-    for (var k = 0; k < items.length; k++) {
-      if (items[k].getAttribute('data-path') === curPath) {
-        items[k].classList.add('playing');
-        _playingEl = items[k];
-        break;
-      }
-    }
-  }
-}
-
-async function loadResults() {
-  try {
-    var resp = await fetch(API + '/api/results/videos');
-    var data = await resp.json();
-    var sel = document.getElementById('results-video-select');
-    var curVal = sel.value;
-    var selHtml = '<option value="">选择视频...</option>';
-    for (var i = 0; i < data.videos.length; i++) {
-      var v = data.videos[i];
-      selHtml += '<option value="' + escapeHtml(v.name) + '" data-approved="' + v.approved + '" data-total="' + v.total_clips + '">' + escapeHtml(v.name) + '</option>';
-    }
-    sel.innerHTML = selHtml;
-    if (curVal) {
-      for (var j = 0; j < sel.options.length; j++) {
-        if (sel.options[j].value === curVal) { sel.selectedIndex = j; break; }
-      }
-    }
-    if (data.videos.length > 0 && !curVal) { sel.selectedIndex = 1; loadResultsForVideo(); }
-    else if (curVal) loadResultsForVideo();
-  } catch(e) { console.error(e); }
-
-  document.getElementById('btn-select-all').onclick = function() {
-    var checks = document.querySelectorAll('#approved-list input[data-result-check]');
-    for (var i = 0; i < checks.length; i++) { checks[i].checked = true; _resultsSelected[checks[i].value] = true; }
-    document.getElementById('results-select-count').textContent = '已选 ' + checks.length + ' 个';
-  };
-  document.getElementById('btn-deselect-all').onclick = function() {
-    var checks = document.querySelectorAll('#approved-list input[data-result-check]');
-    for (var i = 0; i < checks.length; i++) { checks[i].checked = false; _resultsSelected = {}; }
-    document.getElementById('results-select-count').textContent = '未选中';
-  };
-  document.getElementById('btn-delete-selected').onclick = deleteSelected;
-}
-
-async function loadResultsForVideo() {
-  var sel = document.getElementById('results-video-select');
-  var name = sel.value;
-  _resultsSelected = {};
-  _resultsSelectMode = false;
-  _resultsAllSubs = [];
-  _resultsAllAudio = [];
-  if (!name) {
-    document.getElementById('subtitles-list').innerHTML = '<div class="empty-state"><p>选择视频后显示</p></div>';
-    document.getElementById('approved-list').innerHTML = '<div class="empty-state"><p>选择视频后显示</p></div>';
-    document.getElementById('btn-enter-select').style.display = 'none';
-    document.getElementById('btn-exit-select').style.display = 'none';
-    document.getElementById('results-toolbar').style.display = 'none';
-    document.getElementById('results-stats').textContent = '';
-    document.getElementById('results-progress').textContent = '';
-    return;
-  }
-  // Show progress from option data
-  var opt = sel.options[sel.selectedIndex];
-  var approved = opt.getAttribute('data-approved') || '0';
-  var total = opt.getAttribute('data-total') || '0';
-  document.getElementById('results-progress').textContent = '审核 ' + approved + '/' + total + ' 通过';
-
-  // Subtitles
-  try {
-    var sResp = await fetch(API + '/api/results/video/' + encodeURIComponent(name) + '/subtitles');
-    var sData = await sResp.json();
-    _resultsAllSubs = sData.subtitles;
-    var sCont = document.getElementById('subtitles-list');
-    if (!sData.subtitles.length) {
-      sCont.innerHTML = '<div class="empty-state"><p>未找到字幕</p></div>';
-    } else {
-      var sHtml = '';
-      for (var i = 0; i < sData.subtitles.length; i++) {
-        var s = sData.subtitles[i];
-        sHtml += '<div class="file-item"><span>📝</span><span class="file-name">' + escapeHtml(s.name) + '</span><span class="file-size">' + s.size_kb + ' KB</span></div>';
-      }
-      sCont.innerHTML = sHtml;
-    }
-  } catch(e) { console.error(e); }
-
-  // Approved audio
-  try {
-    var aResp = await fetch(API + '/api/results/video/' + encodeURIComponent(name) + '/approved');
-    var aData = await aResp.json();
-    _resultsAllAudio = aData.approved;
-    document.getElementById('results-stats').textContent = aData.count + ' 个通过音频';
-    if (!aData.approved.length) {
-      document.getElementById('results-player-bar').style.display = 'none';
-    }
-    // Render based on current sub-tab
-    var audioPanel = document.getElementById('results-panel-audio');
-    if (audioPanel.style.display !== 'none') {
-      renderApprovedAudio();
-    } else {
-      // Audio tab not active, just show the enter-select button
-      document.getElementById('btn-enter-select').style.display = aData.approved.length ? 'inline-block' : 'none';
-    }
-  } catch(e) { console.error(e); }
-}
-
 var _playingEl = null;
 
 function _getActivePlayerInfo() {
-  // Detect which tab is visible and return the right player/bar/name IDs
-  var resultsTab = document.getElementById('tab-results');
-  var denoiseTab = document.getElementById('tab-denoise');
-  if (denoiseTab && denoiseTab.classList.contains('active')) {
-    return { player: 'denoise-audio-player', bar: 'denoise-player-bar', name: 'denoise-playing-name' };
-  }
-  return { player: 'results-audio-player', bar: 'results-player-bar', name: 'results-playing-name' };
+  return { player: 'denoise-audio-player', bar: 'denoise-player-bar', name: 'denoise-playing-name' };
 }
 
 function playResultAudio(path, name) {
@@ -5585,7 +5580,7 @@ function playResultAudio(path, name) {
 
   if (_playingEl) _playingEl.classList.remove('playing');
   _playingEl = null;
-  var containers = ['#approved-list', '#denoise-file-list', '#denoise-result-list'];
+  var containers = ['#denoise-file-list', '#denoise-result-list'];
   for (var c = 0; c < containers.length; c++) {
     var items = document.querySelectorAll(containers[c] + ' .file-item');
     for (var i = 0; i < items.length; i++) {
@@ -5626,7 +5621,7 @@ var _denoiseResultSelected = {};
 var STEP_DEFAULTS = [
   {key: 'music_separate', label: 'BGM分离', enabled: false},
   {key: 'male_voice', label: '去除男声', enabled: true},
-  {key: 'enhance', label: '语音增强', enabled: true},
+  {key: 'enhance', label: '语音增强', enabled: false},
   {key: 'super_resolve', label: '超分辨率', enabled: true},
   {key: 'reverb', label: '混响检测', enabled: false},
   {key: 'silence', label: '静音过滤', enabled: false},
@@ -6276,26 +6271,6 @@ function formatDuration(sec) {
   return m + ':' + (s < 10 ? '0' : '') + s;
 }
 
-async function deleteSelected() {
-  var paths = Object.keys(_resultsSelected).filter(function(k) { return _resultsSelected[k]; });
-  if (!paths.length) { toast('请先选择要删除的音频', 'info'); return; }
-  if (!confirm('确定删除 ' + paths.length + ' 个音频文件？此操作不可恢复。')) return;
-
-  try {
-    var resp = await fetch(API + '/api/results/delete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paths: paths })
-    });
-    var data = await resp.json();
-    toast('已删除 ' + data.deleted + ' 个文件', 'success');
-    if (data.failed && data.failed.length) toast('失败 ' + data.failed.length + ' 个', 'error');
-    exitSelectMode();
-    loadResultsForVideo();
-  } catch(e) {
-    toast('删除失败: ' + e.message, 'error');
-  }
-}
 
 // ============================================================
 // Subtitle Extraction
@@ -7678,7 +7653,7 @@ function restoreUiState() {
 var _cmpLoaded = false;
 var _cmpRestored = false;    // only restore interrupted jobs once per page load
 var _cmpMode = 'seg';         // 'seg' (VAD split) or 'file' (whole file)
-var _cmpFolderPath = '';     // current browsing path for compare
+var _cmpFolderPath = '/mnt/project/ComicCut/anime-pipeline/data/asr_compare/segments';
 var _cmpFolderFiles = [];    // audio files in current folder
 var _cmpFolderSelected = {}; // selected file names
 var _cmpJobId = null;
@@ -7925,7 +7900,7 @@ function runAsrCompareAll() {
   if (!selectedFiles.length) { toast('请至少选择一个音频文件', 'info'); return; }
 
   var models = getCmpSelectedModels();
-  var lang = document.getElementById('cmp-lang-select').value || 'ja';
+  var lang = document.getElementById('cmp-lang-select').value || 'zh';
   var device = document.getElementById('cmp-device-select').value || 'cuda';
   var hotwords = document.getElementById('cmp-hotwords').value.trim();
   var filterEnglish = document.getElementById('cmp-filter-english').checked;
@@ -8883,6 +8858,540 @@ async function discardAsrCompareJob(jobId) {
   } catch(e) { toast('丢弃失败: ' + e.message, 'error'); }
 }
 
+// ============================================================
+// Text Comparison
+// ============================================================
+var _txtLoaded = false;
+var _txtRestored = false;
+var _txtFolderPath = '';
+var _txtFolderFiles = [];
+var _txtFolderSelected = {};
+var _txtPairs = [];
+var _txtModelAbbrs = [];
+var _txtJobId = null;
+var _txtPollTimer = null;
+var _txtResults = {};
+var _txtDefaultPath = '';
+
+async function loadTxtFolderBrowser(path) {
+  if (!path) path = _txtDefaultPath || '';
+  try {
+    var resp = await fetch(API + '/api/txt-compare/dir-browse?path=' + encodeURIComponent(path));
+    if (!resp.ok) {
+      var errMsg = '目录访问失败: ' + resp.status;
+      try { var errDetail = await resp.json(); if (errDetail && errDetail.detail) errMsg += '\n' + errDetail.detail; } catch(_) {}
+      toast(errMsg, 'error'); return;
+    }
+    var data = await resp.json();
+    _txtFolderPath = data.current_path;
+    _txtFolderFiles = data.audio_files || [];
+    _txtFolderSelected = {};
+    for (var i = 0; i < _txtFolderFiles.length; i++) {
+      _txtFolderSelected[_txtFolderFiles[i].name] = true;
+    }
+
+    var pathInput = document.getElementById('txt-folder-path-input');
+    if (pathInput) pathInput.value = _txtFolderPath || '';
+    var upBtn = document.getElementById('btn-txt-folder-up');
+    upBtn.disabled = !data.parent_path;
+
+    // Subdirs list
+    var subdirsHtml = '';
+    if (data.subdirs.length) {
+      for (var i = 0; i < data.subdirs.length; i++) {
+        var subPath = (_txtFolderPath ? _txtFolderPath + '/' + data.subdirs[i] : data.subdirs[i]);
+        subdirsHtml += '<div class="file-item" onclick="loadTxtFolderBrowser(\'' + safeAttr(subPath) + '\')" style="cursor:pointer;display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--accent);">';
+        subdirsHtml += '<span style="font-size:14px;">📁</span>';
+        subdirsHtml += '<span style="font-size:12px;">' + escapeHtml(data.subdirs[i]) + '</span>';
+        subdirsHtml += '</div>';
+      }
+    } else {
+      subdirsHtml = '<div class="empty-state" style="padding:16px;"><p style="font-size:12px;">此目录下没有子文件夹</p></div>';
+    }
+    document.getElementById('txt-folder-subdirs').innerHTML = subdirsHtml;
+
+    // Audio files list
+    var infoEl = document.getElementById('txt-folder-file-info');
+    var barEl = document.getElementById('txt-folder-select-bar');
+    var listEl = document.getElementById('txt-folder-file-list');
+    if (_txtFolderFiles.length) {
+      infoEl.style.display = 'block';
+      var totalMb = 0;
+      for (var i = 0; i < _txtFolderFiles.length; i++) { totalMb += _txtFolderFiles[i].size_mb || 0; }
+      infoEl.textContent = '发现 ' + _txtFolderFiles.length + ' 个音频文件 (' + totalMb.toFixed(1) + ' MB)' +
+        (data.has_txt_dir ? '  |  txt/ 子目录存在' : '');
+      barEl.style.display = 'flex';
+      document.getElementById('btn-txt-run').disabled = false;
+      _txtRenderFolderFileList();
+      detectTxtPairs();
+    } else {
+      infoEl.style.display = 'block';
+      infoEl.textContent = data.has_audio ? '' : '此目录下没有音频文件（支持 wav, mp3, flac 等）';
+      barEl.style.display = 'none';
+      listEl.style.display = 'none';
+      document.getElementById('btn-txt-run').disabled = true;
+    }
+  } catch(e) { console.error('loadTxtFolderBrowser:', e); toast('加载目录失败: ' + (e.message || e), 'error'); }
+}
+
+function txtFolderGoUp() {
+  var parentPath = '';
+  var sep = _txtFolderPath.lastIndexOf('/');
+  if (sep >= 0) parentPath = _txtFolderPath.substring(0, sep);
+  if (!parentPath && _txtFolderPath.indexOf('\\') >= 0) {
+    sep = _txtFolderPath.lastIndexOf('\\');
+    if (sep >= 0) parentPath = _txtFolderPath.substring(0, sep);
+  }
+  loadTxtFolderBrowser(parentPath);
+}
+
+function _txtRenderFolderFileList() {
+  var html = '';
+  for (var i = 0; i < _txtFolderFiles.length; i++) {
+    var f = _txtFolderFiles[i];
+    var chk = _txtFolderSelected[f.name] ? ' checked' : '';
+    html += '<div class="file-item" style="display:flex;align-items:center;gap:8px;padding:4px 10px;border-bottom:1px solid var(--border);font-size:11px;">';
+    html += '<input type="checkbox" ' + chk + ' onchange="txtFolderToggleItem(this)" data-name="' + safeAttr(f.name) + '" style="cursor:pointer;flex-shrink:0;">';
+    html += '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + safeAttr(f.name) + '">' + escapeHtml(f.name) + '</span>';
+    html += '<span style="color:var(--text2);flex-shrink:0;font-size:10px;">' + f.size_mb.toFixed(1) + ' MB</span>';
+    html += '</div>';
+  }
+  var listEl = document.getElementById('txt-folder-file-list');
+  listEl.innerHTML = html;
+  listEl.style.display = 'block';
+  _txtUpdateSelectCount();
+}
+
+function _txtUpdateSelectCount() {
+  var count = 0;
+  var keys = Object.keys(_txtFolderSelected);
+  for (var i = 0; i < keys.length; i++) { if (_txtFolderSelected[keys[i]]) count++; }
+  document.getElementById('txt-folder-selected-count').textContent = '已选 ' + count + ' / ' + _txtFolderFiles.length;
+  var cb = document.getElementById('txt-folder-select-all-cb');
+  cb.checked = count === _txtFolderFiles.length && count > 0;
+  cb.indeterminate = count > 0 && count < _txtFolderFiles.length;
+}
+
+function txtFolderToggleSelectAll() {
+  var checked = document.getElementById('txt-folder-select-all-cb').checked;
+  for (var i = 0; i < _txtFolderFiles.length; i++) {
+    _txtFolderSelected[_txtFolderFiles[i].name] = checked;
+  }
+  _txtRenderFolderFileList();
+}
+
+function txtFolderToggleItem(cb) {
+  _txtFolderSelected[cb.getAttribute('data-name')] = cb.checked;
+  _txtUpdateSelectCount();
+}
+
+async function detectTxtPairs() {
+  if (!_txtFolderPath) return;
+  try {
+    var resp = await fetch(API + '/api/txt-compare/detect-pairs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folder_path: _txtFolderPath })
+    });
+    if (!resp.ok) return;
+    var data = await resp.json();
+    _txtPairs = data.pairs || [];
+    _txtModelAbbrs = data.model_abbrs || [];
+
+    var infoEl = document.getElementById('txt-pair-info');
+    if (_txtPairs.length) {
+      infoEl.style.display = 'block';
+      var modelStr = _txtModelAbbrs.length >= 2 ? ' 模型: ' + _txtModelAbbrs[0] + ' vs ' + _txtModelAbbrs[1] : '';
+      infoEl.innerHTML = '<strong>已配对 ' + _txtPairs.length + ' 组音频+文本</strong>' + escapeHtml(modelStr) +
+        (data.unpaired_count ? '<br><span style="color:var(--warning);">未配对: ' + data.unpaired_count + ' 个音频缺少文本</span>' : '');
+      document.getElementById('btn-txt-run').disabled = false;
+    } else if (data.has_txt_dir) {
+      infoEl.style.display = 'block';
+      infoEl.innerHTML = '<strong>发现 ' + (data.audio_count || 0) + ' 个音频</strong>，但 txt/ 目录下未检测到可配对的文件组';
+      document.getElementById('btn-txt-run').disabled = true;
+    }
+  } catch(e) { console.error('detectTxtPairs:', e); }
+}
+
+function runTxtCompare() {
+  if (!_txtFolderPath) { toast('请选择音频文件夹', 'error'); return; }
+
+  // Collect selected audio files
+  var selectedFiles = [];
+  for (var i = 0; i < _txtFolderFiles.length; i++) {
+    if (_txtFolderSelected[_txtFolderFiles[i].name]) selectedFiles.push(_txtFolderFiles[i].name);
+  }
+  if (!selectedFiles.length) { toast('请至少选择一个音频文件', 'info'); return; }
+
+  var filterEnglish = document.getElementById('txt-filter-english').checked;
+
+  document.getElementById('txt-progress').style.display = 'block';
+  document.getElementById('txt-progress-fill').style.width = '0%';
+  document.getElementById('txt-progress-text').textContent = '启动中...';
+  document.getElementById('txt-progress-pct').textContent = '0%';
+  document.getElementById('txt-progress-detail').textContent = '';
+  document.getElementById('txt-file-progress-list').innerHTML = '';
+  document.getElementById('btn-txt-stop').style.display = 'inline-block';
+  document.getElementById('txt-summary').style.display = 'none';
+  document.getElementById('txt-empty-state').style.display = 'none';
+  document.getElementById('btn-txt-run').disabled = true;
+  document.getElementById('btn-txt-run').textContent = '处理中...';
+  _txtResults = {};
+
+  fetch(API + '/api/txt-compare/compare', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ folder_path: _txtFolderPath, selected_files: selectedFiles, filter_english: filterEnglish }),
+  }).then(function(resp) { return resp.json(); }).then(function(data) {
+    if (data.status !== 'started') {
+      toast('启动对比失败', 'error');
+      document.getElementById('btn-txt-run').disabled = false;
+      document.getElementById('btn-txt-run').textContent = '开始比较';
+      return;
+    }
+    _txtJobId = data.job_id;
+    toast('文本对比任务已启动，共 ' + data.total + ' 个文件', 'success');
+    startTxtPolling();
+  }).catch(function(e) {
+    toast('启动失败: ' + e.message, 'error');
+    document.getElementById('btn-txt-run').disabled = false;
+    document.getElementById('btn-txt-run').textContent = '开始比较';
+  });
+}
+
+function startTxtPolling() {
+  if (_txtPollTimer) clearInterval(_txtPollTimer);
+  _txtPollTimer = setInterval(pollTxtJob, 800);
+  pollTxtJob();
+}
+
+function stopTxtPolling() {
+  if (_txtPollTimer) { clearInterval(_txtPollTimer); _txtPollTimer = null; }
+}
+
+function _txtRenderFileCards(job) {
+  var pairs = job.pairs || [];
+  if (!pairs.length) return;
+  var html = '';
+  for (var i = 0; i < pairs.length; i++) {
+    var pk = pairs[i].pair_key;
+    var r = (job.results || {})[pk];
+    var cls = r ? (r.error ? 'error' : 'completed') : (i <= job.completed ? 'completed' : 'pending');
+    var statusText = {pending: '等待中', completed: '完成', error: '出错'}[cls] || cls;
+    html += '<div class="cmp-progress-card ' + (cls === 'completed' ? 'completed' : cls === 'error' ? 'error' : '') + '">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+        '<span style="font-size:11px;font-weight:500;">' + escapeHtml(pairs[i].name_a) + ' ↔ ' + escapeHtml(pairs[i].name_b) + '</span>' +
+        '<span style="font-size:10px;padding:1px 6px;border-radius:3px;' +
+          (cls === 'completed' ? 'background:#1a3a2a;color:var(--success);' :
+           cls === 'error' ? 'background:#3a1a1a;color:var(--danger);' :
+           'background:#2a2a3a;color:#666;') + '">' + statusText + '</span>' +
+      '</div></div>';
+  }
+  document.getElementById('txt-file-progress-list').innerHTML = html;
+}
+
+function pollTxtJob() {
+  if (!_txtJobId) { stopTxtPolling(); return; }
+  fetch(API + '/api/txt-compare/job/' + _txtJobId).then(function(resp) { return resp.json(); }).then(function(job) {
+    if (!job || job.error === 'Job not found') { stopTxtPolling(); return; }
+    document.getElementById('txt-progress-fill').style.width = Math.round(job.progress || 0) + '%';
+    document.getElementById('txt-progress-pct').textContent = Math.round(job.progress || 0) + '%';
+    document.getElementById('txt-progress-text').textContent = job.current_step || '';
+    document.getElementById('txt-progress-detail').textContent = (job.completed || 0) + '/' + job.total + ' 组';
+    _txtRenderFileCards(job);
+
+    if (job.status === 'completed') {
+      stopTxtPolling();
+      _txtResults = job.results || {};
+      document.getElementById('btn-txt-stop').style.display = 'none';
+      document.getElementById('btn-txt-run').disabled = false;
+      document.getElementById('btn-txt-run').textContent = '重新比较';
+      document.getElementById('btn-txt-batch-delete').style.display = 'inline-block';
+      renderTxtSummary();
+      renderTxtResults();
+      toast('文本对比完成', 'success');
+    } else if (job.status === 'cancelled') {
+      stopTxtPolling();
+      _txtResults = job.results || {};
+      document.getElementById('btn-txt-stop').style.display = 'none';
+      document.getElementById('btn-txt-run').disabled = false;
+      document.getElementById('btn-txt-run').textContent = '重新比较';
+      renderTxtSummary();
+      renderTxtResults();
+      toast('任务已取消', 'info');
+    } else if (job.status === 'failed') {
+      stopTxtPolling();
+      document.getElementById('btn-txt-stop').style.display = 'none';
+      document.getElementById('btn-txt-run').disabled = false;
+      document.getElementById('btn-txt-run').textContent = '重新比较';
+      toast('任务失败: ' + (job.error || '未知错误'), 'error');
+    }
+  }).catch(function(e) { console.error('pollTxtJob:', e); });
+}
+
+function stopTxtCompare() {
+  if (!_txtJobId) return;
+  fetch(API + '/api/txt-compare/cancel', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ job_id: _txtJobId })
+  }).catch(function() {});
+}
+
+function _txtGetThreshold() {
+  var el = document.getElementById('txt-filter-threshold');
+  return el ? parseFloat(el.value) || 80 : 80;
+}
+
+function _txtGetMatchRate(r) {
+  if (r.match_rate != null) return r.match_rate;
+  if (r.diff_percent != null) return Math.round((100 - r.diff_percent) * 10) / 10;
+  if (r.overall_diff_percent != null) return Math.round((100 - r.overall_diff_percent) * 10) / 10;
+  return 0;
+}
+
+function renderTxtSummary() {
+  var threshold = _txtGetThreshold();
+  var keys = Object.keys(_txtResults);
+  var total = keys.length;
+  var good = 0, low = 0, deleted = 0;
+  for (var i = 0; i < keys.length; i++) {
+    var r = _txtResults[keys[i]];
+    if (r.user_action === 'deleted' || r.user_action === 'discarded') { deleted++; }
+    else if (_txtGetMatchRate(r) < threshold) { low++; }
+    else { good++; }
+  }
+  document.getElementById('txt-total-num').textContent = total;
+  document.getElementById('txt-good-num').textContent = good;
+  document.getElementById('txt-low-num').textContent = low;
+  document.getElementById('txt-deleted-num').textContent = deleted;
+  document.getElementById('txt-summary').style.display = 'block';
+}
+
+function renderTxtResults() {
+  var keys = Object.keys(_txtResults);
+  var filterOn = document.getElementById('txt-filter-cb').checked;
+  var filterAbove = document.getElementById('txt-filter-dir').value === 'above';
+  var threshold = _txtGetThreshold();
+  var filterCount = 0;
+
+  var rowsHtml = '';
+  for (var i = 0; i < keys.length; i++) {
+    var pk = keys[i];
+    var r = _txtResults[pk];
+    if (r.user_action === 'deleted' || r.user_action === 'discarded') continue;
+    var mr = _txtGetMatchRate(r);
+    if (filterOn) {
+      if (filterAbove ? mr < threshold : mr >= threshold) continue;
+    }
+    filterCount++;
+    var badgeCls = mr >= threshold ? 'normal' : 'flagged';
+    var sentCount = (r.sentence_results || []).length;
+    var statusLabel = r.user_action === 'kept' ? '已保留' : (r.error ? '出错' : '');
+    var rowId = 'txt-row-' + i;
+
+    rowsHtml += '<tr id="' + rowId + '" class="cmp-main-row" style="cursor:pointer;" onclick="txtToggleSentences(\'' + rowId + '\')">';
+    rowsHtml += '<td style="font-size:11px;" title="' + safeAttr(r.file_a || r.name_a || '') + '">' + escapeHtml((r.name_a || '文件A').substring(0, 40)) + '</td>';
+    rowsHtml += '<td style="font-size:11px;" title="' + safeAttr(r.file_b || r.name_b || '') + '">' + escapeHtml((r.name_b || '文件B').substring(0, 40)) + '</td>';
+    rowsHtml += '<td><span class="cmp-diff-badge ' + badgeCls + '">' + mr.toFixed(1) + '%</span></td>';
+    rowsHtml += '<td style="font-size:11px;">' + sentCount + ' 行</td>';
+    rowsHtml += '<td style="font-size:10px;">' + escapeHtml(statusLabel) + '</td>';
+    rowsHtml += '<td class="actions-cell">';
+    rowsHtml += '<button class="btn btn-secondary" onclick="event.stopPropagation();txtViewFile(\'' + safeAttr(r.file_a) + '\')" style="font-size:9px;padding:2px 6px;">查看A</button> ';
+    rowsHtml += '<button class="btn btn-secondary" onclick="event.stopPropagation();txtViewFile(\'' + safeAttr(r.file_b) + '\')" style="font-size:9px;padding:2px 6px;">查看B</button> ';
+    if (mr < threshold) {
+      rowsHtml += '<button class="btn btn-danger" onclick="event.stopPropagation();txtDeletePair(\'' + safeAttr(pk) + '\',\'' + safeAttr(r.file_a || '') + '\',\'' + safeAttr(r.file_b || '') + '\')" style="font-size:9px;padding:2px 6px;background:var(--danger);color:#fff;">删除</button>';
+    }
+    rowsHtml += '</td></tr>';
+
+    // Detail row
+    rowsHtml += '<tr id="' + rowId + '-sent" class="cmp-sent-row" style="display:none;"><td colspan="6">';
+    rowsHtml += '<div style="padding:8px;font-size:11px;max-height:300px;overflow-y:auto;">';
+    rowsHtml += '<table style="width:100%;border-collapse:collapse;">';
+    rowsHtml += '<tr style="font-size:10px;color:var(--text2);"><th style="padding:4px;text-align:left;width:50%;">文件 A</th><th style="padding:4px;text-align:left;width:50%;">文件 B</th></tr>';
+    var sents = r.sentence_results || [];
+    for (var s = 0; s < sents.length; s++) {
+      var sent = sents[s];
+      var chunks = sent.diff_chunks || [];
+      var sideA = _renderDiffSide(chunks, 'a');
+      var sideB = _renderDiffSide(chunks, 'b');
+      var sentMr = sent.match_rate != null ? sent.match_rate : 100;
+      var sentBadgeCls = sentMr >= 90 ? 'normal' : 'flagged';
+      rowsHtml += '<tr style="border-top:1px solid var(--border);">';
+      rowsHtml += '<td style="padding:4px;vertical-align:top;font-size:10px;">' + sideA + '</td>';
+      rowsHtml += '<td style="padding:4px;vertical-align:top;font-size:10px;">' + sideB + '</td>';
+      rowsHtml += '</tr>';
+    }
+    rowsHtml += '</table></div></td></tr>';
+  }
+
+  document.getElementById('txt-filter-count').textContent = filterOn ? '(' + filterCount + ' 个结果)' : '';
+  document.getElementById('txt-result-tbody').innerHTML = rowsHtml || '<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:20px;">无匹配结果</td></tr>';
+}
+
+function txtToggleSentences(rowId) {
+  var row = document.getElementById(rowId + '-sent');
+  if (!row) return;
+  row.style.display = row.style.display === 'none' ? '' : 'none';
+}
+
+function txtKeepPair(pairKey) {
+  fetch(API + '/api/txt-compare/keep', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pair_key: pairKey })
+  }).then(function(resp) { return resp.json(); }).then(function(data) {
+    if (data.status === 'ok') {
+      if (_txtResults[pairKey]) { _txtResults[pairKey].user_action = 'kept'; _txtResults[pairKey].flagged = false; }
+      renderTxtSummary();
+      renderTxtResults();
+      toast('已保留', 'success');
+    }
+  }).catch(function(e) { toast('操作失败: ' + e.message, 'error'); });
+}
+
+function txtDeletePair(pairKey, fileA, fileB) {
+  if (!confirm('确认删除此文件对？\n\n两个文本文件将被永久删除，无法恢复。')) return;
+  fetch(API + '/api/txt-compare/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pair_key: pairKey, file_a: fileA, file_b: fileB })
+  }).then(function(resp) { return resp.json(); }).then(function(data) {
+    if (data.status === 'ok') {
+      if (_txtResults[pairKey]) { _txtResults[pairKey].user_action = 'deleted'; _txtResults[pairKey].flagged = false; }
+      renderTxtSummary();
+      renderTxtResults();
+      loadTxtFolderBrowser(_txtFolderPath);
+      toast('已删除 ' + (data.files || []).length + ' 个文件', 'success');
+    }
+  }).catch(function(e) { toast('删除失败: ' + e.message, 'error'); });
+}
+
+function txtBatchDelete() {
+  var threshold = _txtGetThreshold();
+  var items = [];
+  var keys = Object.keys(_txtResults);
+  for (var i = 0; i < keys.length; i++) {
+    var r = _txtResults[keys[i]];
+    if (r.user_action === 'deleted' || r.user_action === 'discarded') continue;
+    if (_txtGetMatchRate(r) < threshold) {
+      items.push({ pair_key: keys[i], file_a: r.file_a || '', file_b: r.file_b || '' });
+    }
+  }
+  if (!items.length) { toast('没有需要删除的文件', 'info'); return; }
+  if (!confirm('确认一键删除 ' + items.length + ' 组文件？\n\n所有匹配率低于 ' + threshold + '% 的文本文件将被永久删除，无法恢复。')) return;
+
+  fetch(API + '/api/txt-compare/batch-delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items: items })
+  }).then(function(resp) { return resp.json(); }).then(function(data) {
+    if (data.status === 'ok') {
+      for (var j = 0; j < (data.results || []).length; j++) {
+        var dr = data.results[j];
+        if (dr.status === 'deleted' && _txtResults[dr.pair_key]) {
+          _txtResults[dr.pair_key].user_action = 'deleted';
+          _txtResults[dr.pair_key].flagged = false;
+        }
+      }
+      renderTxtSummary();
+      renderTxtResults();
+      loadTxtFolderBrowser(_txtFolderPath);
+      toast('已批量删除', 'success');
+    }
+  }).catch(function(e) { toast('批量删除失败: ' + e.message, 'error'); });
+}
+
+function txtViewFile(path) {
+  if (!path) return;
+  window.open(API + '/api/txt-compare/stream?path=' + encodeURIComponent(path), '_blank');
+}
+
+async function restoreTxtCompareInterruptedJobs() {
+  try {
+    var resp = await fetch(API + '/api/txt-compare/jobs');
+    if (!resp.ok) return;
+    var data = await resp.json();
+    var jobs = data.jobs || [];
+    if (!jobs.length) return;
+
+    var running = null, interrupted = null, lastCompleted = null;
+    for (var i = 0; i < jobs.length; i++) {
+      var j = jobs[i];
+      if ((j.status === 'running' || j.status === 'pending' || j.status === 'loading') && !running) running = j;
+      if (j.status === 'interrupted' && !interrupted) interrupted = j;
+      if (j.status === 'completed' && !lastCompleted) lastCompleted = j;
+    }
+
+    if (running) {
+      _txtJobId = running.job_id;
+      document.getElementById('txt-progress').style.display = 'block';
+      document.getElementById('txt-progress-fill').style.width = (running.progress || 0) + '%';
+      document.getElementById('txt-progress-pct').textContent = Math.round(running.progress || 0) + '%';
+      document.getElementById('txt-progress-text').textContent = running.current_step || '处理中...';
+      document.getElementById('txt-progress-detail').textContent = (running.completed || 0) + '/' + running.total + ' 组';
+      document.getElementById('btn-txt-stop').style.display = 'inline-block';
+      document.getElementById('btn-txt-run').disabled = true;
+      document.getElementById('btn-txt-run').textContent = '处理中...';
+      _txtRenderFileCards(running);
+      if (running.results && Object.keys(running.results).length) {
+        _txtResults = running.results;
+        renderTxtSummary();
+        renderTxtResults();
+      }
+      startTxtPolling();
+      return;
+    }
+
+    if (interrupted) {
+      var panel = document.getElementById('tab-txt-compare');
+      var existing = document.getElementById('txt-interrupted-section');
+      if (existing) existing.remove();
+
+      var j = interrupted;
+      var total = j.total || 0;
+      var completed = j.completed || 0;
+      var pending = total - completed;
+      var progress = j.progress || 0;
+      var html = '<div id="txt-interrupted-section" style="margin:12px 0;">';
+      html += '<div style="background:var(--bg2);border:1px solid #ff6b6b;border-radius:8px;padding:16px;margin-bottom:12px;">';
+      html += '<div style="font-size:16px;font-weight:bold;color:#ff6b6b;margin-bottom:8px;">⚠ 任务因服务器重启中断</div>';
+      html += '<div style="font-size:13px;color:var(--text2);margin-bottom:4px;">总文件组: ' + total + ' | 已完成: ' + completed + ' | 待处理: ' + pending + '</div>';
+      html += '<div style="font-size:13px;color:var(--text2);margin-bottom:4px;">进度: ' + progress + '%</div>';
+      html += '<div style="margin-top:8px;background:var(--bg);border-radius:4px;height:6px;overflow:hidden;">';
+      html += '<div style="width:' + progress + '%;height:100%;background:linear-gradient(90deg,#ff6b6b,#ff4444);border-radius:4px;"></div>';
+      html += '</div>';
+      html += '<div style="display:flex;gap:8px;margin-top:12px;">';
+      html += '<button class="btn btn-secondary" onclick="discardTxtCompareJob(\'' + j.job_id + '\')" style="background:var(--danger);color:#fff;">丢弃任务</button>';
+      html += '</div></div></div>';
+      panel.insertAdjacentHTML('afterbegin', html);
+      return;
+    }
+
+    if (lastCompleted && lastCompleted.results && Object.keys(lastCompleted.results).length) {
+      _txtResults = lastCompleted.results;
+      document.getElementById('txt-summary').style.display = 'block';
+      document.getElementById('txt-empty-state').style.display = 'none';
+      document.getElementById('btn-txt-run').disabled = false;
+      document.getElementById('btn-txt-run').textContent = '重新比较';
+      document.getElementById('btn-txt-batch-delete').style.display = 'inline-block';
+      renderTxtSummary();
+      renderTxtResults();
+    }
+  } catch(e) { console.error('restoreTxtCompareInterruptedJobs:', e); }
+}
+
+async function discardTxtCompareJob(jobId) {
+  if (!confirm('确定丢弃此中断的任务？')) return;
+  try {
+    var resp = await fetch(API + '/api/txt-compare/job/' + jobId + '/discard', { method: 'POST' });
+    if (!resp.ok) { var err = await resp.json(); toast('丢弃失败: ' + (err.detail || ''), 'error'); return; }
+    toast('任务已丢弃', 'info');
+    var section = document.getElementById('txt-interrupted-section');
+    if (section) section.remove();
+  } catch(e) { toast('丢弃失败: ' + e.message, 'error'); }
+}
+
 var _stitchClips = [];
 var _stitchSelected = {};
 var _stitchOutputPath = '';
@@ -9083,7 +9592,7 @@ async function fetchFansubTeams() {
 }
 
 // Auto-remove highlight when audio finishes
-document.getElementById('results-audio-player').addEventListener('ended', function() {
+document.getElementById('denoise-audio-player').addEventListener('ended', function() {
   if (_playingEl) { _playingEl.classList.remove('playing'); _playingEl = null; }
 });
 
@@ -10266,6 +10775,18 @@ function renderSettings() {
   html += '<span class="settings-label">模型 B</span>';
   html += '<select data-setting-config="ASR_COMPARE_MODEL_B" style="flex:1;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;">';
   html += '<option value="">— 加载中 —</option></select>';
+  html += '</div>';
+  html += '</div>';
+
+  html += '<div class="settings-section">';
+  html += '<div class="settings-section-title">阿里云百炼 API（用于 ASR 云端模型）</div>';
+  html += '<div class="settings-row">';
+  html += '<span class="settings-label">API Key</span>';
+  html += '<input type="password" data-setting-config="DASHSCOPE_API_KEY" value="' + escapeHtml(cfg.DASHSCOPE_API_KEY || '') + '" placeholder="sk-xxxxxxxxxxxxxxxx" style="flex:1;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;">';
+  html += '</div>';
+  html += '<div class="settings-row">';
+  html += '<span class="settings-label">API 地址</span>';
+  html += '<input type="text" data-setting-config="DASHSCOPE_API_BASE" value="' + escapeHtml(cfg.DASHSCOPE_API_BASE || 'https://dashscope.aliyuncs.com') + '" placeholder="https://dashscope.aliyuncs.com" style="flex:1;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;">';
   html += '</div>';
   html += '</div>';
 
@@ -12955,18 +13476,16 @@ async function mfaRunStep(step) {
     label = '步骤 3: MFA Validate';
   } else if (step === 'postprocess') {
     url = API + '/api/mfa/postprocess';
-    params.set('jsonl_path', document.getElementById('mfa-post-jsonl').value);
     params.set('txt_dir', document.getElementById('mfa-post-txt-dir').value);
     params.set('textgrid_dir', document.getElementById('mfa-post-textgrid-dir').value);
     params.set('output_dir', document.getElementById('mfa-post-output').value);
     params.set('filtered_dir', document.getElementById('mfa-post-filtered').value);
     if (document.getElementById('mfa-post-wav-dir').value) params.set('wav_dir', document.getElementById('mfa-post-wav-dir').value);
-    params.set('text_key', document.getElementById('mfa-post-text-key').value || 'text');
-    params.set('wav_key', document.getElementById('mfa-post-wav-key').value || 'wav_file');
     params.set('overwrite', document.getElementById('mfa-post-overwrite').checked ? 'true' : 'false');
     params.set('fix_short_multi_unit', document.getElementById('mfa-post-fix-short').checked ? 'true' : 'false');
     params.set('filter_suspicious_alignment', document.getElementById('mfa-post-filter-suspicious').checked ? 'true' : 'false');
     params.set('copy_errors', document.getElementById('mfa-post-copy-errors').checked ? 'true' : 'false');
+    params.set('language', _mfaLang || 'zh');
     label = '步骤 4: 后处理';
   }
 
@@ -12976,7 +13495,25 @@ async function mfaRunStep(step) {
     var resp = await fetch(url + '?' + params.toString(), { method: 'POST' });
     var data = await resp.json();
     if (data.status !== 'ok') { toast('启动失败', 'error'); return; }
-    if (data.already_done) { toast(data.message || 'TextGrid 已存在，无需重复生成', 'info'); return; }
+    if (data.already_done) {
+      toast(data.message || 'TextGrid 已存在，无需重复生成', 'info');
+      document.getElementById('mfa-progress-panel').style.display = 'block';
+      document.getElementById('mfa-progress-title').textContent = label;
+      document.getElementById('mfa-progress-status').textContent = data.message || 'TextGrid 已存在，无需重复生成';
+      document.getElementById('mfa-progress-pct').textContent = '✓';
+      document.getElementById('mfa-progress-fill').style.width = '100%';
+      document.getElementById('mfa-progress-fill').style.background = 'var(--success)';
+      var container = document.getElementById('mfa-progress-actions');
+      if (container) {
+        container.style.display = 'block';
+        var outDir = document.getElementById('mfa-align-output').value;
+        var wDir = document.getElementById('mfa-align-wav-dir').value;
+        var tDir = document.getElementById('mfa-align-txt-dir').value;
+        var tgPath = (data.tg_path || '').replace(/'/g, "\\'");
+        container.innerHTML = '<button class="btn btn-primary" style="font-size:12px;padding:6px 14px;" onclick="mfaOpenViewerWithContext(\'' + outDir.replace(/'/g, "\\'") + '\', \'' + wDir.replace(/'/g, "\\'") + '\', \'' + tDir.replace(/'/g, "\\'") + '\', \'' + tgPath + '\')">在 TextGrid 查看器中查看对齐结果</button>';
+      }
+      return;
+    }
     _mfaJobId = data.job_id;
     // Hide stale results when starting new jobs
     if (step === 'validate') document.getElementById('mfa-val-result').style.display = 'none';
@@ -13160,6 +13697,414 @@ async function mfaCancelJob(jobId) {
 }
 
 // ============================================================
+// Batch MFA Pipeline — JavaScript
+// ============================================================
+var _batchMfaJobId = null;
+var _batchMfaPollTimer = null;
+var _batchMfaSelectedAudio = {};  // {path: name}
+var _batchMfaAudioDir = '';
+var _batchMfaAudioFiles = [];  // [{name, path, is_wav}]
+
+function batchMfaAudioBrowse(dir) {
+  _batchMfaAudioDir = dir || '';
+  var url = API + '/api/mfa/browse-dir?path=' + encodeURIComponent(dir || '.') + '&ext=.wav';
+  fetch(url).then(function(resp) { return resp.json(); }).then(function(data) {
+    _batchMfaAudioDir = data.path || dir;
+    document.getElementById('mfa-batch-audio-breadcrumb').textContent = _batchMfaAudioDir || '/';
+    document.getElementById('mfa-batch-audio-back').disabled = !data.parent;
+    _batchMfaAudioFiles = data.files || [];
+    var html = '';
+    var wavFiles = [];
+    for (var i = 0; i < data.folders.length; i++) {
+      var f = data.folders[i];
+      html += '<div class="file-item folder-item" onclick="batchMfaAudioBrowse(\'' + escapeHtmlAttr(f.path) + '\')" style="padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;">';
+      html += '<span style="color:var(--accent);">📁</span> <span>' + escapeHtml(f.name) + '</span></div>';
+    }
+    for (var i = 0; i < data.files.length; i++) {
+      var ff = data.files[i];
+      var isWav = ff.name.toLowerCase().endsWith('.wav');
+      if (isWav) wavFiles.push(ff);
+      var sel = _batchMfaSelectedAudio[ff.path] ? 'background:rgba(78,204,163,0.15);' : '';
+      html += '<div class="file-item" onclick="batchMfaToggleAudio(\'' + escapeHtmlAttr(ff.path) + '\',\'' + escapeHtmlAttr(ff.name) + '\')" style="padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;' + sel + '">';
+      html += '<input type="checkbox" ' + (_batchMfaSelectedAudio[ff.path] ? 'checked' : '') + ' style="pointer-events:none;" />';
+      html += '<span>' + (isWav ? '🎵' : '📄') + '</span>';
+      html += '<span style="flex:1;">' + escapeHtml(ff.name) + '</span>';
+      html += '<span style="font-size:10px;color:var(--text2);">' + (ff.size_kb != null ? (ff.size_kb >= 1024 ? (ff.size_kb/1024).toFixed(1)+' MB' : ff.size_kb+' KB') : '') + '</span>';
+      html += '</div>';
+    }
+    document.getElementById('mfa-batch-audio-list').innerHTML = html || '<div class="empty-state"><p>无文件</p></div>';
+    document.getElementById('mfa-batch-audio-info').textContent = wavFiles.length + ' 个 WAV 文件';
+  }).catch(function(e) {
+    document.getElementById('mfa-batch-audio-list').innerHTML = '<div class="empty-state"><p>浏览失败: ' + escapeHtml(e.message) + '</p></div>';
+  });
+}
+
+function batchMfaAudioBrowseOther() {
+  var initial = _batchMfaAudioDir || 'data/mfa/wav';
+  mfaPickFolderGeneric(initial, function(selectedPath) {
+    batchMfaAudioBrowse(selectedPath);
+  });
+}
+
+function batchMfaAudioNav(dir) {
+  var parts = _batchMfaAudioDir.replace(/\\/g, '/').split('/').filter(Boolean);
+  if (dir === '..') { parts.pop(); }
+  batchMfaAudioBrowse(parts.join('/') || (_batchMfaAudioDir.charAt(0) === '/' ? '/' : ''));
+}
+
+function batchMfaToggleAudio(path, name) {
+  if (_batchMfaSelectedAudio[path]) {
+    delete _batchMfaSelectedAudio[path];
+  } else {
+    _batchMfaSelectedAudio[path] = name;
+  }
+  var count = Object.keys(_batchMfaSelectedAudio).length;
+  document.getElementById('mfa-batch-selected-count').textContent = '已选 ' + count + ' 个文件';
+  batchMfaAudioBrowse(_batchMfaAudioDir);
+}
+
+function batchMfaSelectAll() {
+  for (var i = 0; i < _batchMfaAudioFiles.length; i++) {
+    var f = _batchMfaAudioFiles[i];
+    if (f.name.toLowerCase().endsWith('.wav')) {
+      _batchMfaSelectedAudio[f.path] = f.name;
+    }
+  }
+  var count = Object.keys(_batchMfaSelectedAudio).length;
+  document.getElementById('mfa-batch-selected-count').textContent = '已选 ' + count + ' 个文件';
+  batchMfaAudioBrowse(_batchMfaAudioDir);
+}
+
+function batchMfaDeselectAll() {
+  _batchMfaSelectedAudio = {};
+  document.getElementById('mfa-batch-selected-count').textContent = '已选 0 个文件';
+  batchMfaAudioBrowse(_batchMfaAudioDir);
+}
+
+function batchMfaToggleTextSrc() {
+  var src = document.getElementById('mfa-batch-text-src').value;
+  document.getElementById('batch-jsonl-row').style.display = src === 'jsonl' ? '' : 'none';
+  document.getElementById('batch-txtdir-row').style.display = src === 'txtdir' ? '' : 'none';
+}
+
+async function batchMfaPreviewMatch() {
+  var paths = Object.keys(_batchMfaSelectedAudio);
+  if (!paths.length) { toast('请先选择音频文件', 'warn'); return; }
+  var txtSrc = document.getElementById('mfa-batch-text-src').value;
+  var payload = {
+    audio_paths: paths,
+    jsonl_path: txtSrc === 'jsonl' ? document.getElementById('mfa-batch-jsonl').value.trim() : '',
+    txt_dir: txtSrc === 'txtdir' ? document.getElementById('mfa-batch-txtdir').value.trim() : '',
+    text_key: document.getElementById('mfa-batch-text-key').value.trim() || 'text',
+    wav_key: document.getElementById('mfa-batch-wav-key').value.trim() || 'wav_file',
+  };
+  document.getElementById('btn-batch-preview').disabled = true;
+  document.getElementById('btn-batch-preview').textContent = '匹配中...';
+  try {
+    var resp = await fetch(API + '/api/mfa/batch/match-preview', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+    });
+    var data = await resp.json();
+    var results = data.results || [];
+    var html = '';
+    for (var i = 0; i < results.length; i++) {
+      var r = results[i];
+      var icon = r.matched ? '✅' : '❌';
+      var color = r.matched ? 'var(--success)' : 'var(--danger)';
+      html += '<div style="padding:4px 8px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;">';
+      html += '<span>' + icon + '</span>';
+      html += '<span style="flex:1;color:' + color + ';">' + escapeHtml(r.audio_name) + '</span>';
+      if (r.matched) {
+        html += '<span style="font-size:10px;color:var(--text2);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(r.text_preview) + '</span>';
+      } else {
+        html += '<span style="font-size:10px;color:var(--danger);">未匹配</span>';
+      }
+      html += '</div>';
+    }
+    document.getElementById('mfa-batch-preview-list').innerHTML = html || '<div class="empty-state"><p>无结果</p></div>';
+    document.getElementById('mfa-batch-preview-summary').textContent = '共 ' + data.total + ' 个, 匹配 ' + data.matched + ' 个';
+    document.getElementById('mfa-batch-preview-panel').style.display = 'block';
+  } catch(e) {
+    toast('预览失败: ' + e.message, 'error');
+  }
+  document.getElementById('btn-batch-preview').disabled = false;
+  document.getElementById('btn-batch-preview').textContent = '🔍 预览匹配';
+}
+
+async function batchMfaStart() {
+  var paths = Object.keys(_batchMfaSelectedAudio);
+  if (!paths.length) { toast('请先选择音频文件', 'warn'); return; }
+  var txtSrc = document.getElementById('mfa-batch-text-src').value;
+  var payload = {
+    audio_paths: paths,
+    language: document.getElementById('mfa-batch-lang').value,
+    jsonl_path: txtSrc === 'jsonl' ? document.getElementById('mfa-batch-jsonl').value.trim() : '',
+    txt_dir: txtSrc === 'txtdir' ? document.getElementById('mfa-batch-txtdir').value.trim() : '',
+    text_key: document.getElementById('mfa-batch-text-key').value.trim() || 'text',
+    wav_key: document.getElementById('mfa-batch-wav-key').value.trim() || 'wav_file',
+    dict_path: document.getElementById('mfa-batch-dict').value.trim(),
+  };
+  try {
+    var resp = await fetch(API + '/api/mfa/batch/start', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+    });
+    var data = await resp.json();
+    if (data.status !== 'ok') { toast('启动失败', 'error'); return; }
+    _batchMfaJobId = data.job_id;
+    try { localStorage.setItem('mfa_batch_job_id', _batchMfaJobId); } catch(e) {}
+    document.getElementById('mfa-batch-progress-panel').style.display = 'block';
+    document.getElementById('mfa-batch-results-panel').style.display = 'none';
+    document.getElementById('mfa-batch-progress-title').textContent = '批量 MFA - 启动中';
+    document.getElementById('mfa-batch-progress-status').textContent = '启动中...';
+    document.getElementById('mfa-batch-progress-pct').textContent = '0%';
+    document.getElementById('mfa-batch-progress-fill').style.width = '0%';
+    document.getElementById('btn-batch-start').disabled = true;
+    document.getElementById('btn-batch-cancel').style.display = '';
+    batchMfaStartPolling();
+    toast('批量任务已启动 (' + data.file_count + ' 个文件)', 'info');
+  } catch(e) {
+    toast('启动失败: ' + e.message, 'error');
+  }
+}
+
+function batchMfaStartPolling() {
+  batchMfaStopPolling();
+  _batchMfaPollTimer = setInterval(batchMfaPollJob, 2000);
+  batchMfaPollJob();
+}
+
+function batchMfaStopPolling() {
+  if (_batchMfaPollTimer) { clearInterval(_batchMfaPollTimer); _batchMfaPollTimer = null; }
+}
+
+async function batchMfaPollJob() {
+  if (!_batchMfaJobId) { batchMfaStopPolling(); return; }
+  try {
+    var resp = await fetch(API + '/api/mfa/batch/job/' + _batchMfaJobId);
+    if (!resp.ok) { batchMfaStopPolling(); return; }
+    var job = await resp.json();
+    var pct = job.progress || 0;
+    document.getElementById('mfa-batch-progress-fill').style.width = pct + '%';
+    document.getElementById('mfa-batch-progress-pct').textContent = pct + '%';
+    document.getElementById('mfa-batch-progress-status').textContent = job.current_step || '';
+    document.getElementById('mfa-batch-progress-file').textContent = job.current_file || '';
+    document.getElementById('mfa-batch-progress-title').textContent = '批量 MFA - ' + job.status;
+    if (job.status === 'completed') {
+      batchMfaStopPolling();
+      document.getElementById('btn-batch-start').disabled = false;
+      document.getElementById('btn-batch-cancel').style.display = 'none';
+      batchMfaShowResults(job);
+      toast('批量 MFA 完成', 'success');
+      batchMfaLoadJobs();
+    } else if (job.status === 'failed') {
+      batchMfaStopPolling();
+      document.getElementById('btn-batch-start').disabled = false;
+      document.getElementById('btn-batch-cancel').style.display = 'none';
+      toast('批量 MFA 失败: ' + (job.current_step || ''), 'error');
+      batchMfaLoadJobs();
+    } else if (job.status === 'cancelled') {
+      batchMfaStopPolling();
+      document.getElementById('btn-batch-start').disabled = false;
+      document.getElementById('btn-batch-cancel').style.display = 'none';
+      toast('任务已取消', 'info');
+      batchMfaLoadJobs();
+    }
+  } catch(e) { console.error(e); }
+}
+
+async function batchMfaCancel() {
+  if (!_batchMfaJobId) return;
+  if (!confirm('确定要中止此批量任务吗？')) return;
+  try {
+    var resp = await fetch(API + '/api/mfa/batch/job/' + _batchMfaJobId, { method: 'DELETE' });
+    var data = await resp.json();
+    if (data.status === 'ok') toast('任务已中止', 'info');
+  } catch(e) { toast('中止失败: ' + e.message, 'error'); }
+}
+
+function batchMfaShowResults(job) {
+  var panel = document.getElementById('mfa-batch-results-panel');
+  panel.style.display = 'block';
+  var summary = job.result_summary || {};
+  document.getElementById('mfa-batch-result-summary').innerHTML =
+    '总计: <b>' + (summary.total || 0) + '</b> | 匹配: <b>' + (summary.matched || 0) + '</b> | 对齐: <b>' + (summary.aligned || 0) +
+    '</b> | <span style="color:var(--success);">正常: <b>' + (summary.normal || 0) + '</b></span> | <span style="color:var(--danger);">异常: <b>' + (summary.anomalous || 0) + '</b></span>';
+  var files = job.files || [];
+  var html = '<div style="font-size:11px;">';
+  html += '<div style="display:flex;padding:6px 8px;background:var(--bg2);border-bottom:2px solid var(--border);font-weight:600;">';
+  html += '<span style="width:30px;">#</span><span style="flex:1;">文件名</span><span style="width:80px;">状态</span><span style="width:180px;">异常原因</span></div>';
+  for (var i = 0; i < files.length; i++) {
+    var f = files[i];
+    var bg = '';
+    var statusColor = 'var(--text2)';
+    var statusText = f.status || 'pending';
+    if (f.status === 'completed') { statusColor = 'var(--success)'; statusText = '✅ 正常'; }
+    else if (f.status === 'anomalous') { bg = 'background:rgba(233,69,96,0.08);'; statusColor = 'var(--danger)'; statusText = '⚠ 异常'; }
+    else if (f.status === 'error') { bg = 'background:rgba(233,69,96,0.05);'; statusColor = 'var(--danger)'; statusText = '❌ 错误'; }
+    else if (f.status === 'skipped') { statusColor = '#888'; statusText = '⏭ 跳过'; }
+    else if (f.status === 'deleted') { statusColor = '#888'; statusText = '🗑 已删除'; }
+    else { statusText = '... ' + f.status; }
+    var reasons = (f.anomaly_reasons || []).join(', ') || (f.error || '');
+    html += '<div style="display:flex;padding:5px 8px;border-bottom:1px solid var(--border);align-items:center;' + bg + '">';
+    html += '<span style="width:30px;font-size:10px;color:var(--text2);">' + (i+1) + '</span>';
+    html += '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(f.audio_name) + '">' + escapeHtml(f.audio_name) + '</span>';
+    html += '<span style="width:80px;color:' + statusColor + ';">' + statusText + '</span>';
+    html += '<span style="width:180px;font-size:10px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(reasons) + '">' + escapeHtml(reasons) + '</span>';
+    html += '</div>';
+  }
+  html += '</div>';
+  document.getElementById('mfa-batch-results-list').innerHTML = html;
+  var hasAnomalous = (summary.anomalous || 0) > 0;
+  document.getElementById('btn-batch-delete-anom').style.display = hasAnomalous ? '' : 'none';
+  document.getElementById('btn-batch-dryrun').style.display = hasAnomalous ? '' : 'none';
+}
+
+async function batchMfaDeleteAnomalous() {
+  if (!_batchMfaJobId) return;
+  if (!confirm('确定要删除所有异常音频文件及其关联输出吗？此操作不可撤销！')) return;
+  await _batchMfaDoDelete(false);
+}
+
+async function batchMfaDeleteAnomalousDryRun() {
+  if (!_batchMfaJobId) return;
+  await _batchMfaDoDelete(true);
+}
+
+async function _batchMfaDoDelete(dryRun) {
+  try {
+    var resp = await fetch(API + '/api/mfa/batch/job/' + _batchMfaJobId + '/delete-anomalous', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({delete_all: true, dry_run: dryRun})
+    });
+    var data = await resp.json();
+    if (dryRun) {
+      var msg = '预览: 将删除 ' + data.deleted + ' 个异常文件';
+      if (data.items && data.items.length) {
+        msg += '\n\n文件列表:\n' + data.items.map(function(it) { return it.audio_name; }).join('\n');
+      }
+      alert(msg);
+    } else {
+      toast('已删除 ' + data.deleted + ' 个异常文件', 'info');
+      if (data.errors && data.errors.length) {
+        toast('部分删除失败: ' + data.errors.length + ' 个', 'warn');
+      }
+      batchMfaPollJob();
+    }
+  } catch(e) {
+    toast('操作失败: ' + e.message, 'error');
+  }
+}
+
+async function batchMfaLoadJobs() {
+  try {
+    var resp = await fetch(API + '/api/mfa/batch/jobs');
+    var data = await resp.json();
+    var jobs = data.jobs || [];
+    var container = document.getElementById('mfa-batch-jobs-list');
+    if (!jobs.length) { container.innerHTML = '<div class="empty-state"><p>暂无批量任务</p></div>'; return; }
+    var html = '';
+    for (var i = 0; i < jobs.length; i++) {
+      var j = jobs[i];
+      var statusClass = 'status-pending';
+      if (j.status === 'completed') statusClass = 'status-completed';
+      else if (j.status === 'running') statusClass = 'status-running';
+      else if (j.status === 'failed') statusClass = 'status-failed';
+      else if (j.status === 'cancelled' || j.status === 'interrupted') statusClass = 'status-cancelled';
+      var summary = j.result_summary || {};
+      var summaryText = '';
+      if (summary.total) {
+        summaryText = '总' + summary.total + ' | 匹配' + (summary.matched||0) + ' | 对齐' + (summary.aligned||0) +
+                      ' | 正常' + (summary.normal||0) + ' | 异常' + (summary.anomalous||0);
+      }
+      html += '<div class="job-card" style="padding:8px 12px;margin-bottom:4px;">' +
+        '<div class="job-header">' +
+          '<div><span class="job-title" style="font-size:12px;">批量MFA</span>' +
+          '<span style="font-size:10px;color:var(--text2);margin-left:6px;">' + escapeHtml(j.job_id) + '</span>' +
+          '<span style="font-size:10px;color:var(--text2);margin-left:6px;">' + (j.language === 'zh' ? '中文' : '日本語') + '</span></div>' +
+          '<div style="display:flex;gap:4px;align-items:center;">' +
+            '<span class="job-status ' + statusClass + '">' + escapeHtml(j.status) + '</span>';
+      if (j.status === 'running' || j.status === 'pending') {
+        html += '<button class="btn btn-secondary" style="font-size:10px;padding:2px 6px;" onclick="batchMfaCancelJob(\'' + j.job_id + '\')">取消</button>';
+      }
+      if (j.status === 'interrupted') {
+        html += '<button class="btn btn-primary" style="font-size:10px;padding:2px 6px;" onclick="batchMfaResumeJob(\'' + j.job_id + '\')">恢复</button>';
+      }
+      html += '</div></div>';
+      html += '<div style="font-size:11px;color:var(--text2);">' + escapeHtml(j.current_step || '') + '</div>';
+      if (summaryText) html += '<div style="font-size:10px;color:var(--text2);margin-top:2px;">' + summaryText + '</div>';
+      html += '<div class="progress-bar" style="margin-top:4px;"><div class="progress-fill" style="width:' + (j.progress || 0) + '%;"></div></div>';
+      html += '</div>';
+    }
+    container.innerHTML = html;
+  } catch(e) { console.error(e); }
+}
+
+async function batchMfaCancelJob(jobId) {
+  try {
+    var resp = await fetch(API + '/api/mfa/batch/job/' + jobId, { method: 'DELETE' });
+    var data = await resp.json();
+    if (data.status === 'ok') { toast('任务已取消', 'info'); batchMfaLoadJobs(); }
+  } catch(e) { toast('取消失败: ' + e.message, 'error'); }
+}
+
+async function batchMfaResumeJob(jobId) {
+  try {
+    var resp = await fetch(API + '/api/mfa/batch/job/' + jobId + '/resume', { method: 'POST' });
+    var data = await resp.json();
+    if (data.status === 'ok') {
+      toast('任务已恢复', 'info');
+      _batchMfaJobId = jobId;
+      try { localStorage.setItem('mfa_batch_job_id', jobId); } catch(e) {}
+      document.getElementById('mfa-batch-progress-panel').style.display = 'block';
+      document.getElementById('btn-batch-start').disabled = true;
+      document.getElementById('btn-batch-cancel').style.display = '';
+      batchMfaStartPolling();
+      batchMfaLoadJobs();
+    }
+  } catch(e) { toast('恢复失败: ' + e.message, 'error'); }
+}
+
+function batchMfaResumeOnLoad() {
+  try {
+    var savedId = localStorage.getItem('mfa_batch_job_id');
+    if (!savedId) return;
+    fetch(API + '/api/mfa/batch/job/' + savedId).then(function(resp) {
+      if (!resp.ok) { localStorage.removeItem('mfa_batch_job_id'); return; }
+      return resp.json();
+    }).then(function(job) {
+      if (!job) return;
+      if (job.status === 'running' || job.status === 'pending' || job.status === 'interrupted') {
+        _batchMfaJobId = job.job_id;
+        document.getElementById('mfa-batch-progress-panel').style.display = 'block';
+        document.getElementById('btn-batch-start').disabled = true;
+        document.getElementById('btn-batch-cancel').style.display = job.status === 'running' ? '' : 'none';
+        batchMfaStartPolling();
+        document.getElementById('mfa-batch-progress-fill').style.width = (job.progress || 0) + '%';
+        document.getElementById('mfa-batch-progress-pct').textContent = (job.progress || 0) + '%';
+        document.getElementById('mfa-batch-progress-status').textContent = job.current_step || '';
+        document.getElementById('mfa-batch-progress-title').textContent = '批量 MFA - ' + job.status;
+      } else if (job.status === 'completed') {
+        _batchMfaJobId = job.job_id;
+        batchMfaShowResults(job);
+      }
+    }).catch(function() {});
+  } catch(e) {}
+}
+
+function mfaPickFolderGeneric(initialDir, callback) {
+  fetch(API + '/api/browse-folder?title=选择文件夹&initialdir=' + encodeURIComponent(initialDir || ''))
+    .then(function(r) { return r.json(); })
+    .then(function(data) { if (data.path && callback) callback(data.path); })
+    .catch(function(e) { toast('浏览失败: ' + e.message, 'error'); });
+}
+
+// Initialize batch MFA on page load
+batchMfaResumeOnLoad();
+batchMfaLoadJobs();
+batchMfaAudioBrowse('data/mfa/wav');
+batchMfaToggleTextSrc();
+
+// ============================================================
 // Progress panel action buttons — shown when job completes
 // ============================================================
 function mfaUpdateProgressActions(job) {
@@ -13220,9 +14165,9 @@ function mfaUpdateProgressActions(job) {
 }
 
 // Open viewer with full context (dir, wav, txt)
-function mfaOpenViewerWithContext(outputDir, wavDir, txtDir) {
+function mfaOpenViewerWithContext(outputDir, wavDir, txtDir, tgPath) {
   _mfaViewerTxtDir = txtDir || '';
-  mfaAutoOpenViewer(outputDir, wavDir, txtDir);
+  mfaAutoOpenViewer(outputDir, wavDir, txtDir, tgPath);
 }
 
 // Quick-view postprocess results from current form values
@@ -13523,7 +14468,7 @@ async function mfaViewLogFiles(outputDir) {
 // ============================================================
 // Auto-open TextGrid viewer after align completes
 // ============================================================
-function mfaAutoOpenViewer(outputDir, wavDir, txtDir) {
+function mfaAutoOpenViewer(outputDir, wavDir, txtDir, tgPath) {
   if (!outputDir) return;
   if (txtDir) _mfaViewerTxtDir = txtDir;
   if (wavDir) _mfaViewerWavDirHint = wavDir;
@@ -13536,9 +14481,14 @@ function mfaAutoOpenViewer(outputDir, wavDir, txtDir) {
     return;
   }
 
-  // Load TextGrid directory; if audio is already selected, load it
+  // Load TextGrid directory; if tgPath provided, load it directly
   mfaViewerLoadDir(outputDir, function() {
-    if (_mfaAudioSelected) mfaViewerSetAudio(_mfaAudioSelected);
+    if (tgPath && _mfaAudioSelected) {
+      mfaViewerSetAudio(_mfaAudioSelected);
+      mfaViewerSelectTg(tgPath, '');
+    } else if (_mfaAudioSelected) {
+      mfaViewerSetAudio(_mfaAudioSelected);
+    }
   });
   toast('对齐完成，TextGrid 文件已加载到查看器', 'success');
 }
@@ -13565,11 +14515,65 @@ var _mfaViewerRefDur = 0;
 var _mfaViewerTxtContent = null;
 
 // --- Audio picker — the driver for TextGrid matching ---
-async function mfaViewerPickAudio() {
-  var current = _mfaViewerWavPath || _mfaAudioSelected || '';
-  if (current) current = current.replace(/\\/g, '/').split('/').slice(0, -1).join('/');
-  var path = await openFolderPicker('选择音频文件', current);
-  if (path) mfaViewerSetAudio(path);
+function mfaViewerPickAudio() {
+  var currentDir = '';
+  if (_mfaViewerWavPath) {
+    currentDir = _mfaViewerWavPath.replace(/\\/g, '/').split('/').slice(0, -1).join('/');
+  } else if (_mfaViewerWavDirHint) {
+    currentDir = _mfaViewerWavDirHint;
+  } else if (_mfaAudioSelected) {
+    currentDir = _mfaAudioSelected.replace(/\\/g, '/').split('/').slice(0, -1).join('/');
+  }
+  _mfaViewerShowAudioPopup(currentDir);
+}
+
+var _mfaViewerAudioDir = '';
+
+async function _mfaViewerShowAudioPopup(dir) {
+  if (!dir) dir = '';
+  _mfaViewerAudioDir = dir;
+  var existing = document.getElementById('mfa-viewer-audio-popup');
+  if (existing) existing.remove();
+  var popup = document.createElement('div');
+  popup.id = 'mfa-viewer-audio-popup';
+  popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--bg2);border:1px solid var(--accent);border-radius:10px;padding:14px;z-index:3000;min-width:360px;max-width:520px;max-height:70vh;display:flex;flex-direction:column;box-shadow:0 4px 24px rgba(0,0,0,.6);';
+  document.body.appendChild(popup);
+  _mfaViewerRenderAudioPopup(dir);
+}
+
+async function _mfaViewerRenderAudioPopup(dir) {
+  var popup = document.getElementById('mfa-viewer-audio-popup');
+  if (!popup) return;
+  popup.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><span style="font-size:14px;font-weight:600;">选择音频文件</span><button onclick="document.getElementById(\'mfa-viewer-audio-popup\').remove()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:18px;">&times;</button></div>' +
+    '<div style="font-size:11px;color:var(--text2);margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(dir || '/') + '</div>' +
+    '<div style="flex:1;overflow-y:auto;min-height:150px;border:1px solid var(--border);border-radius:6px;"><div style="padding:20px;text-align:center;color:var(--text2);">加载中...</div></div>';
+  try {
+    var resp = await fetch(API + '/api/mfa/browse-dir?ext=.wav,.mp3,.flac,.m4a,.ogg,.opus,.aac&path=' + encodeURIComponent(dir || ''));
+    var data = await resp.json();
+    var html = '';
+    if (data.parent || data.parent === '') {
+      html += '<div style="padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--border);color:var(--accent);" onclick="_mfaViewerRenderAudioPopup(\'' + (data.parent || '').replace(/'/g, "\\'") + '\')">📁 ..</div>';
+    }
+    var folders = data.folders || [];
+    for (var i = 0; i < folders.length; i++) {
+      var f = folders[i];
+      html += '<div style="padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--border);" onclick="_mfaViewerRenderAudioPopup(\'' + f.path.replace(/'/g, "\\'") + '\')">📁 ' + escapeHtml(f.name) + '</div>';
+    }
+    var files = data.files || [];
+    for (var j = 0; j < files.length; j++) {
+      var af = files[j];
+      html += '<div style="padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--border);" onclick="mfaViewerSetAudio(\'' + af.path.replace(/'/g, "\\'") + '\');document.getElementById(\'mfa-viewer-audio-popup\').remove();">🔊 ' + escapeHtml(af.name) + '</div>';
+    }
+    if (!folders.length && !files.length) {
+      html += '<div style="padding:20px;text-align:center;color:var(--text2);">此目录下没有音频文件</div>';
+    }
+    popup.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><span style="font-size:14px;font-weight:600;">选择音频文件</span><button onclick="document.getElementById(\'mfa-viewer-audio-popup\').remove()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:18px;">&times;</button></div>' +
+      '<div style="font-size:11px;color:var(--text2);margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(data.path) + '</div>' +
+      '<div style="flex:1;overflow-y:auto;min-height:150px;max-height:400px;border:1px solid var(--border);border-radius:6px;">' + html + '</div>';
+  } catch(e) {
+    popup.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><span style="font-size:14px;font-weight:600;">选择音频文件</span><button onclick="document.getElementById(\'mfa-viewer-audio-popup\').remove()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:18px;">&times;</button></div>' +
+      '<div style="padding:20px;text-align:center;color:var(--danger);">加载失败: ' + escapeHtml(e.message) + '</div>';
+  }
 }
 
 function mfaViewerSetAudio(audioPath) {
@@ -13589,7 +14593,7 @@ function mfaViewerSetAudio(audioPath) {
   for (var i = 0; i < items.length; i++) {
     var itemPath = items[i].getAttribute('data-path') || '';
     var itemStem = itemPath.replace(/\\/g, '/').split('/').pop().replace(/\.(textgrid|TextGrid)$/i, '');
-    if (itemStem.indexOf(audioStem) === 0) {
+    if (itemStem === audioStem) {
       mfaViewerSelectTg(itemPath, '');
       return;
     }
@@ -13922,22 +14926,35 @@ function mfaViewerDrawWaveform(wavUrl, epoch) {
 }
 
 function _mfaViewerSetupAudioLazy(url) {
+  _mfaViewerStopAnim();
   if (_mfaViewerAudio) {
     _mfaViewerAudio.pause();
-    _mfaViewerAudio.removeEventListener('timeupdate', _mfaViewerOnTimeUpdate);
     _mfaViewerAudio = null;
   }
   _mfaViewerAudioUrl = url;
   _mfaViewerAudioLoaded = false;
 }
 
-function _mfaViewerOnTimeUpdate() {
-  if (!_mfaViewerAudio) return;
+function _mfaViewerAnimLoop() {
+  if (!_mfaViewerAudio) { _mfaViewerAnimId = null; return; }
   var t = _mfaViewerAudio.currentTime;
-  var dur = _mfaViewerAudio.duration || 0;
+  var dur = _mfaViewerAudio.duration || _mfaViewerAudioDuration || 0;
   document.getElementById('mfa-viewer-time').textContent = t.toFixed(2) + 's / ' + dur.toFixed(2) + 's';
   document.getElementById('mfa-viewer-seek').value = Math.round(t * 1000);
   _mfaViewerDrawPlayhead(t);
+  _mfaViewerAnimId = requestAnimationFrame(_mfaViewerAnimLoop);
+}
+
+function _mfaViewerStartAnim() {
+  if (_mfaViewerAnimId) cancelAnimationFrame(_mfaViewerAnimId);
+  _mfaViewerAnimLoop();
+}
+
+function _mfaViewerStopAnim() {
+  if (_mfaViewerAnimId) {
+    cancelAnimationFrame(_mfaViewerAnimId);
+    _mfaViewerAnimId = null;
+  }
 }
 
 function _mfaViewerDrawPlayhead(t) {
@@ -13983,19 +15000,19 @@ function _mfaViewerEnsureAudio(callback) {
   if (!_mfaViewerAudioUrl) return;
 
   // Clean up any stale Audio reference before creating a new one
+  _mfaViewerStopAnim();
   if (_mfaViewerAudio) {
     _mfaViewerAudio.pause();
-    _mfaViewerAudio.removeEventListener('timeupdate', _mfaViewerOnTimeUpdate);
     _mfaViewerAudio = null;
   }
 
   var url = API + '/api/mfa/stream?path=' + encodeURIComponent(_mfaViewerAudioUrl);
   var audio = new Audio(url);
-  audio.addEventListener('timeupdate', _mfaViewerOnTimeUpdate);
   audio.addEventListener('loadedmetadata', function() {
     document.getElementById('mfa-viewer-seek').max = Math.round(audio.duration * 1000);
   });
   audio.addEventListener('ended', function() {
+    _mfaViewerStopAnim();
     document.getElementById('mfa-viewer-play').textContent = '▶ 播放';
   });
   audio.addEventListener('canplaythrough', function() {
@@ -14014,9 +15031,11 @@ function mfaViewerTogglePlay() {
     if (_mfaViewerAudio.paused) {
       _mfaViewerAudio.play();
       btn.textContent = '⏸ 暂停';
+      _mfaViewerStartAnim();
     } else {
       _mfaViewerAudio.pause();
       btn.textContent = '▶ 播放';
+      _mfaViewerStopAnim();
     }
   });
 }
@@ -14035,10 +15054,11 @@ function mfaViewerPlaySegment(xmin, xmax) {
       _mfaViewerAudio.currentTime = xmin;
       _mfaViewerAudio.play();
       document.getElementById('mfa-viewer-play').textContent = '⏸ 暂停';
+      _mfaViewerStartAnim();
       var stopAt = xmax;
       var check = setInterval(function() {
         if (!_mfaViewerAudio || _mfaViewerAudio.currentTime >= stopAt) {
-          if (_mfaViewerAudio) _mfaViewerAudio.pause();
+          if (_mfaViewerAudio) { _mfaViewerAudio.pause(); _mfaViewerStopAnim(); }
           clearInterval(check);
           document.getElementById('mfa-viewer-play').textContent = '▶ 播放';
         }

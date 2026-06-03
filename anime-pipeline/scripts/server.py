@@ -23,6 +23,8 @@ from config import (
     ASR_COMPARE_DIR, ASR_COMPARE_SUBTITLE_DIR, ASR_COMPARE_AUDIO_DIR,
     ASR_COMPARE_OUTPUT_DIR, ASR_COMPARE_DISCARD_DIR,
     ASR_COMPARE_SEGMENTS_DIR, ASR_COMPARE_KEPT_DIR,
+    TXT_COMPARE_DIR, TXT_COMPARE_OUTPUT_DIR, TXT_COMPARE_DISCARD_DIR,
+    TXT_COMPARE_DEFAULT_PATH,
     HF_CACHE_DIR, MS_CACHE_DIR, MODELS_DIR, ASR_MODELS_DIR,
     EMOTION_DIR, EMOTION_DENOISE_DIR,
     MFA_SCRIPTS_DIR, MFA_MODELS_DIR, MFA_TEMP_DIR, MFA_DICT_PATH, MFA_DICT_PATH_ZH,
@@ -147,6 +149,135 @@ def _load_denoise_jobs():
         except Exception as e:
             print(f"[startup] Failed to restore denoise job {job_id}: {e}")
     print(f"[startup] Restored {restored} denoise jobs from disk")
+
+
+# ============================================================
+# Batch MFA Pipeline — job tracking
+# ============================================================
+
+@dataclass
+class BatchMfaFileItem:
+    audio_path: str
+    audio_name: str
+    status: str = "pending"  # pending/matching/tokenizing/aligning/detecting/completed/error/anomalous/skipped
+    matched_text_path: str = ""
+    matched_text_content: str = ""
+    tokenized_path: str = ""
+    textgrid_path: str = ""
+    post_textgrid_path: str = ""
+    anomaly_reasons: list = field(default_factory=list)
+    is_anomalous: bool = False
+    error: str = ""
+
+    def to_dict(self):
+        return {
+            "audio_path": self.audio_path,
+            "audio_name": self.audio_name,
+            "status": self.status,
+            "matched_text_path": self.matched_text_path,
+            "tokenized_path": self.tokenized_path,
+            "textgrid_path": self.textgrid_path,
+            "post_textgrid_path": self.post_textgrid_path,
+            "anomaly_reasons": self.anomaly_reasons,
+            "is_anomalous": self.is_anomalous,
+            "error": self.error,
+        }
+
+
+@dataclass
+class BatchMfaJob:
+    job_id: str
+    language: str  # "jp" or "zh"
+    files: list  # list[BatchMfaFileItem]
+    status: str = "pending"  # pending/running/completed/failed/cancelled/interrupted
+    progress: float = 0.0
+    current_step: str = ""
+    current_file: str = ""
+    created_at: float = field(default_factory=time.time)
+    params: dict = field(default_factory=dict)
+    cancelled: bool = False
+    result_summary: dict = field(default_factory=dict)  # {total, matched, aligned, anomalous, normal}
+
+    def to_dict(self):
+        return {
+            "job_id": self.job_id,
+            "language": self.language,
+            "files": [f.to_dict() for f in self.files],
+            "status": self.status,
+            "progress": self.progress,
+            "current_step": self.current_step,
+            "current_file": self.current_file,
+            "created_at": self.created_at,
+            "params": self.params,
+            "cancelled": self.cancelled,
+            "result_summary": self.result_summary,
+        }
+
+
+_BATCH_MFA_JOBS_FILE = os.path.join(DATA_DIR, "batch_mfa_jobs.json")
+_batch_mfa_jobs: dict[str, BatchMfaJob] = {}
+_batch_mfa_lock = threading.RLock()
+
+
+def _save_batch_mfa_jobs():
+    """Persist batch MFA jobs to disk."""
+    try:
+        with _batch_mfa_lock:
+            data = {k: v.to_dict() for k, v in _batch_mfa_jobs.items()}
+        tmp = _BATCH_MFA_JOBS_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, _BATCH_MFA_JOBS_FILE)
+    except Exception as e:
+        print(f"[batch-mfa] Failed to save jobs: {e}")
+
+
+def _load_batch_mfa_jobs():
+    """Restore batch MFA jobs from disk on startup."""
+    if not os.path.exists(_BATCH_MFA_JOBS_FILE):
+        return
+    try:
+        with open(_BATCH_MFA_JOBS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        restored = 0
+        for job_id, jd in data.items():
+            try:
+                files = [BatchMfaFileItem(
+                    audio_path=f.get("audio_path", ""),
+                    audio_name=f.get("audio_name", ""),
+                    status=f.get("status", "pending"),
+                    matched_text_path=f.get("matched_text_path", ""),
+                    matched_text_content=f.get("matched_text_content", ""),
+                    tokenized_path=f.get("tokenized_path", ""),
+                    textgrid_path=f.get("textgrid_path", ""),
+                    post_textgrid_path=f.get("post_textgrid_path", ""),
+                    anomaly_reasons=f.get("anomaly_reasons", []),
+                    is_anomalous=f.get("is_anomalous", False),
+                    error=f.get("error", ""),
+                ) for f in jd.get("files", [])]
+                job = BatchMfaJob(
+                    job_id=job_id,
+                    language=jd.get("language", "jp"),
+                    files=files,
+                    status=jd.get("status", "pending"),
+                    progress=jd.get("progress", 0.0),
+                    current_step=jd.get("current_step", ""),
+                    current_file=jd.get("current_file", ""),
+                    created_at=jd.get("created_at", time.time()),
+                    params=jd.get("params", {}),
+                    cancelled=jd.get("cancelled", False),
+                    result_summary=jd.get("result_summary", {}),
+                )
+                if job.status == "running":
+                    job.status = "interrupted"
+                    job.current_step = "服务器重启中断"
+                _batch_mfa_jobs[job_id] = job
+                restored += 1
+            except Exception as e:
+                print(f"[startup] Failed to restore batch MFA job {job_id}: {e}")
+        print(f"[startup] Restored {restored} batch MFA jobs from disk")
+    except Exception as e:
+        print(f"[startup] Failed to load batch MFA jobs: {e}")
 
 
 # ============================================================
@@ -408,7 +539,9 @@ def startup_services():
     _load_pv_jobs()
     _load_asr_jobs()
     _load_asr_compare_jobs()
+    _load_txt_compare_jobs()
     _load_mfa_jobs()
+    _load_batch_mfa_jobs()
 
     # Preload ASR models in background so first request is fast
     def _preload_asr():
@@ -4019,6 +4152,7 @@ def list_asr_models():
             "name": info["name"],
             "description": info["description"],
             "languages": info["languages"],
+            "framework": info.get("framework", "funasr"),
         })
     return {"models": models}
 
@@ -4738,6 +4872,801 @@ def get_asr_folder_output_dir():
 
 
 # ============================================================
+# Text Comparison endpoints
+# ============================================================
+
+_txt_compare_jobs: dict[str, dict] = {}
+_txt_compare_lock = threading.RLock()
+_txt_compare_results: dict[str, dict] = {}  # keyed by pair key "file_a|file_b"
+
+_TXT_COMPARE_JOBS_FILE = os.path.join(DATA_DIR, "txt_compare_jobs.json")
+
+# Known ASR model suffixes to strip when auto-pairing files
+_TXT_COMPARE_MODEL_SUFFIXES = [
+    "_qwen3-asr", "_firered-asr2", "_firered-asr2s", "_cohere-transcribe",
+    "_sensevoice", "_sensevoice-small", "_whisper", "_whisper-large-v3",
+    "_whisper-large-v3-turbo", "_whisper-medium", "_whisper-small",
+    "_whisper-base", "_paraformer", "_paraformer-large",
+]
+
+
+def _save_txt_compare_jobs():
+    try:
+        with _txt_compare_lock:
+            data = dict(_txt_compare_jobs)
+        os.makedirs(os.path.dirname(_TXT_COMPARE_JOBS_FILE), exist_ok=True)
+        tmp = _TXT_COMPARE_JOBS_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, _TXT_COMPARE_JOBS_FILE)
+    except Exception as e:
+        print(f"[txt-compare] Failed to save jobs: {e}")
+
+
+def _sync_txt_user_action_to_jobs(pair_key: str):
+    """Copy user_action from results into all jobs that reference this pair."""
+    with _txt_compare_lock:
+        result = _txt_compare_results.get(pair_key, {})
+    if not result:
+        return
+    ua = result.get("user_action")
+    flagged = result.get("flagged")
+    with _txt_compare_lock:
+        for j in _txt_compare_jobs.values():
+            for pk, r in j.get("results", {}).items():
+                if pk == pair_key:
+                    if ua is not None:
+                        r["user_action"] = ua
+                    if flagged is not None:
+                        r["flagged"] = flagged
+        _save_txt_compare_jobs()
+
+
+def _load_txt_compare_jobs():
+    if not os.path.exists(_TXT_COMPARE_JOBS_FILE):
+        return
+    try:
+        with open(_TXT_COMPARE_JOBS_FILE, "r", encoding="utf-8") as f:
+            data = json.loads(f.read())
+    except Exception:
+        return
+    restored = 0
+    with _txt_compare_lock:
+        for job_id, job in data.items():
+            status = job.get("status", "")
+            if status in ("running", "loading", "pending"):
+                job["status"] = "interrupted"
+                job["current_step"] = "服务器重启中断"
+            _txt_compare_jobs[job_id] = job
+            restored += 1
+    if restored:
+        print(f"[txt-compare] Restored {restored} jobs from disk")
+
+
+def _strip_model_suffix(filename_no_ext: str) -> str:
+    """Strip known ASR model suffixes from a filename to find the base name."""
+    base = filename_no_ext
+    changed = True
+    while changed:
+        changed = False
+        for suffix in _TXT_COMPARE_MODEL_SUFFIXES:
+            if base.lower().endswith(suffix.lower()) and len(base) > len(suffix):
+                base = base[: -len(suffix)]
+                changed = True
+                break
+    return base
+
+
+@app.get("/api/txt-compare/dir-browse")
+def browse_txt_compare_directory(path: str = Query("")):
+    """Browse a directory for sub-folders and audio files (same as ASR compare).
+
+    Also checks if a txt/ subdirectory exists with matching text files.
+    """
+    if not path:
+        path = TXT_COMPARE_DEFAULT_PATH or CLEANED_UNREVIEWED_DIR
+
+    path = path.replace("\\", "/")
+    try:
+        real_path = os.path.realpath(path)
+    except Exception:
+        real_path = path
+
+    if not os.path.isdir(real_path):
+        if (not path or path == TXT_COMPARE_DEFAULT_PATH) and os.path.isdir(CLEANED_UNREVIEWED_DIR):
+            real_path = os.path.realpath(CLEANED_UNREVIEWED_DIR)
+        else:
+            raise HTTPException(status_code=404, detail=f"Directory not found: {path}")
+
+    parent_path = os.path.dirname(real_path)
+
+    try:
+        entries = sorted(os.scandir(real_path), key=lambda e: e.name)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail=f"Permission denied: {real_path}")
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Cannot read directory: {real_path} ({e.strerror})")
+
+    subdirs = []
+    audio_files = []
+    audio_exts = {".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg", ".wma", ".opus", ".wv"}
+    text_exts_in_dir = {".srt", ".txt", ".ass", ".ssa", ".vtt"}
+
+    for entry in entries:
+        if entry.is_dir() and not entry.name.startswith('.'):
+            subdirs.append(entry.name)
+        elif entry.is_file():
+            ext = os.path.splitext(entry.name)[1].lower()
+            if ext in audio_exts:
+                try:
+                    size = entry.stat().st_size
+                except OSError:
+                    size = 0
+                audio_files.append({
+                    "name": entry.name,
+                    "ext": ext,
+                    "size_mb": round(size / 1024 / 1024, 1),
+                })
+
+    # Check if txt/ subdirectory exists and has paired text files
+    has_txt_dir = False
+    txt_pair_models = []
+    txt_dir_path = os.path.join(real_path, "txt")
+    if os.path.isdir(txt_dir_path):
+        has_txt_dir = True
+        # Detect model suffixes from text files in txt/
+        model_suffixes = set()
+        try:
+            for te in os.scandir(txt_dir_path):
+                if te.is_file():
+                    name_no_ext = os.path.splitext(te.name)[0]
+                    # Extract model suffix by stripping known suffixes
+                    base = _strip_model_suffix(name_no_ext)
+                    if base != name_no_ext:
+                        suffix = name_no_ext[len(base):]
+                        if suffix:
+                            model_suffixes.add(suffix)
+        except Exception:
+            pass
+        txt_pair_models = sorted(model_suffixes)[:4]
+
+    return {
+        "current_path": real_path,
+        "parent_path": parent_path,
+        "subdirs": subdirs,
+        "audio_files": audio_files,
+        "has_audio": len(audio_files) > 0,
+        "has_txt_dir": has_txt_dir,
+        "txt_pair_models": txt_pair_models,
+    }
+
+
+@app.post("/api/txt-compare/detect-pairs")
+def detect_txt_compare_pairs(payload: dict = Body(...)):
+    """Scan a folder for audio files and match them with text pairs in txt/ subdirectory.
+
+    For each audio file, looks in txt/ for text files with matching base name
+    (after stripping model suffixes). Pairs are formed when exactly 2 text files
+    share the same audio base name.
+    """
+    folder_path = payload.get("folder_path", "").strip()
+    if not folder_path:
+        raise HTTPException(status_code=400, detail="Missing folder_path")
+
+    folder_path = folder_path.replace("\\", "/")
+    try:
+        real_path = os.path.realpath(folder_path)
+    except Exception:
+        real_path = folder_path
+
+    if not os.path.isdir(real_path):
+        raise HTTPException(status_code=404, detail=f"Directory not found: {folder_path}")
+
+    txt_dir = os.path.join(real_path, "txt")
+    if not os.path.isdir(txt_dir):
+        return {
+            "folder_path": real_path,
+            "pairs": [],
+            "unpaired": [],
+            "all_files": [],
+            "pair_count": 0,
+            "unpaired_count": 0,
+            "has_txt_dir": False,
+        }
+
+    # List audio files
+    audio_exts = {".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg", ".wma", ".opus", ".wv"}
+    audio_files = []
+    try:
+        for entry in sorted(os.scandir(real_path), key=lambda e: e.name):
+            if entry.is_file():
+                ext = os.path.splitext(entry.name)[1].lower()
+                if ext in audio_exts:
+                    audio_files.append({
+                        "name": entry.name,
+                        "path": entry.path.replace("\\", "/"),
+                        "ext": ext,
+                        "name_no_ext": os.path.splitext(entry.name)[0],
+                    })
+    except PermissionError:
+        raise HTTPException(status_code=403, detail=f"Permission denied: {real_path}")
+
+    # List text files in txt/
+    text_files = []
+    text_exts = {".txt", ".srt", ".ass", ".ssa", ".vtt"}
+    try:
+        for entry in sorted(os.scandir(txt_dir), key=lambda e: e.name):
+            if entry.is_file():
+                ext = os.path.splitext(entry.name)[1].lower()
+                if ext in text_exts:
+                    text_files.append({
+                        "name": entry.name,
+                        "path": entry.path.replace("\\", "/"),
+                        "ext": ext,
+                        "name_no_ext": os.path.splitext(entry.name)[0],
+                    })
+    except PermissionError:
+        raise HTTPException(status_code=403, detail=f"Permission denied: {txt_dir}")
+
+    if not audio_files or not text_files:
+        return {
+            "folder_path": real_path,
+            "pairs": [],
+            "unpaired": [],
+            "all_files": [],
+            "pair_count": 0,
+            "unpaired_count": 0,
+            "has_txt_dir": True,
+            "audio_count": len(audio_files),
+            "text_count": len(text_files),
+        }
+
+    # For each audio, find matching text files by base name
+    pairs = []
+    unpaired_audio = []
+    matched_text_paths = set()
+
+    for af in audio_files:
+        matching_texts = []
+        for tf in text_files:
+            # Check if text file name starts with audio base name
+            # e.g., audio: "seg000.wav", text: "seg000_qwen3-asr.txt"
+            tf_base = _strip_model_suffix(tf["name_no_ext"])
+            if tf_base == af["name_no_ext"]:
+                matching_texts.append(tf)
+
+        if len(matching_texts) >= 2:
+            # Sort by name for consistent A/B ordering
+            matching_texts.sort(key=lambda x: x["name"])
+            # Take first two (or all pairs if more than 2)
+            for j in range(0, len(matching_texts) - 1, 2):
+                pairs.append({
+                    "audio": af,
+                    "file_a": matching_texts[j],
+                    "file_b": matching_texts[j + 1],
+                })
+                matched_text_paths.add(matching_texts[j]["path"])
+                matched_text_paths.add(matching_texts[j + 1]["path"])
+        elif len(matching_texts) == 1:
+            # Single match — still record it but as unpaired
+            unpaired_audio.append({
+                "audio": af,
+                "file_a": matching_texts[0],
+                "file_b": None,
+            })
+            matched_text_paths.add(matching_texts[0]["path"])
+        else:
+            unpaired_audio.append({
+                "audio": af,
+                "file_a": None,
+                "file_b": None,
+            })
+
+    # Detect model abbreviations from text file suffixes
+    model_suffixes = set()
+    for tf in text_files:
+        base = _strip_model_suffix(tf["name_no_ext"])
+        if base != tf["name_no_ext"]:
+            suffix = tf["name_no_ext"][len(base):].lstrip("_")
+            if suffix:
+                model_suffixes.add(suffix)
+    model_abbrs = sorted(model_suffixes)[:4]
+
+    return {
+        "folder_path": real_path,
+        "pairs": pairs,
+        "unpaired": unpaired_audio,
+        "pair_count": len(pairs),
+        "unpaired_count": len(unpaired_audio),
+        "has_txt_dir": True,
+        "audio_count": len(audio_files),
+        "text_count": len(text_files),
+        "model_abbrs": model_abbrs,
+    }
+
+
+@app.post("/api/txt-compare/compare")
+def run_txt_compare(payload: dict = Body(...)):
+    """Compare text files paired with audio files, producing segmented-style results.
+
+    Accepts folder_path + selected_files (audio file names).
+    For each audio, finds matching text pairs in txt/ subdirectory,
+    compares them, and returns results compatible with ASR compare
+    segmented-mode rendering on the frontend.
+    """
+    from asr_pipeline import compare_text_files
+
+    folder_path = payload.get("folder_path", "").strip()
+    selected_files = payload.get("selected_files", [])
+    filter_english = payload.get("filter_english", True)
+
+    if not folder_path or not selected_files:
+        raise HTTPException(status_code=400, detail="Missing folder_path or selected_files")
+
+    folder_path = folder_path.replace("\\", "/")
+    try:
+        real_folder = os.path.realpath(folder_path)
+    except Exception:
+        real_folder = folder_path
+
+    if not os.path.isdir(real_folder):
+        raise HTTPException(status_code=404, detail=f"Directory not found: {folder_path}")
+
+    txt_dir = os.path.join(real_folder, "txt")
+    source_dir = os.path.basename(real_folder) or os.path.basename(os.path.dirname(real_folder))
+
+    # List all text files in txt/ for matching
+    text_files_map: dict[str, list] = {}  # name_no_ext -> list of text file dicts
+    text_exts = {".txt", ".srt", ".ass", ".ssa", ".vtt"}
+    if os.path.isdir(txt_dir):
+        try:
+            for entry in os.scandir(txt_dir):
+                if entry.is_file():
+                    ext = os.path.splitext(entry.name)[1].lower()
+                    if ext in text_exts:
+                        name_no_ext = os.path.splitext(entry.name)[0]
+                        base = _strip_model_suffix(name_no_ext)
+                        text_files_map.setdefault(base, []).append({
+                            "name": entry.name,
+                            "path": entry.path.replace("\\", "/"),
+                            "ext": ext,
+                            "name_no_ext": name_no_ext,
+                        })
+        except PermissionError:
+            pass
+
+    # Build audio-file list from selected_files
+    validated_items = []
+    for fname in selected_files:
+        audio_path = os.path.join(real_folder, fname)
+        if not os.path.isfile(audio_path):
+            continue
+        audio_name_no_ext = os.path.splitext(fname)[0]
+
+        # Find matching text pairs
+        matching_texts = text_files_map.get(audio_name_no_ext, [])
+        matching_texts.sort(key=lambda x: x["name"])
+
+        if len(matching_texts) >= 2:
+            # Use first two as model A/B
+            txt_a = matching_texts[0]
+            txt_b = matching_texts[1]
+        elif len(matching_texts) == 1:
+            txt_a = matching_texts[0]
+            txt_b = None
+        else:
+            txt_a = None
+            txt_b = None
+
+        validated_items.append({
+            "audio_name": fname,
+            "audio_path": audio_path.replace("\\", "/"),
+            "audio_name_no_ext": audio_name_no_ext,
+            "txt_a": txt_a,
+            "txt_b": txt_b,
+            "pair_key": audio_path.replace("\\", "/"),
+        })
+
+    if not validated_items:
+        raise HTTPException(status_code=404, detail="No valid audio files found")
+
+    # Detect model abbreviations from text file suffixes
+    model_abbrs = []
+    all_txt_files = []
+    for v in validated_items:
+        if v["txt_a"]:
+            all_txt_files.append(v["txt_a"])
+        if v["txt_b"]:
+            all_txt_files.append(v["txt_b"])
+    model_suffixes = set()
+    for tf in all_txt_files:
+        base = _strip_model_suffix(tf["name_no_ext"])
+        if base != tf["name_no_ext"]:
+            suffix = tf["name_no_ext"][len(base):].lstrip("_")
+            if suffix:
+                model_suffixes.add(suffix)
+    model_abbrs = sorted(model_suffixes)[:2]
+    model_a_abbr = model_abbrs[0] if len(model_abbrs) > 0 else "A"
+    model_b_abbr = model_abbrs[1] if len(model_abbrs) > 1 else "B"
+
+    job_id = uuid.uuid4().hex[:12]
+
+    with _txt_compare_lock:
+        _txt_compare_jobs[job_id] = {
+            "job_id": job_id,
+            "status": "pending",
+            "progress": 0,
+            "current_step": "",
+            "total": len(validated_items),
+            "completed": 0,
+            "flagged_count": 0,
+            "items": validated_items,
+            "results": {},
+            "error": None,
+            "created_at": time.time(),
+            "_model_a_abbr": model_a_abbr,
+            "_model_b_abbr": model_b_abbr,
+            "filter_english": filter_english,
+        }
+        _save_txt_compare_jobs()
+
+    def _run():
+        with _txt_compare_lock:
+            job = _txt_compare_jobs.get(job_id)
+        if not job:
+            return
+
+        job["status"] = "running"
+        with _txt_compare_lock:
+            _save_txt_compare_jobs()
+
+        for i, item in enumerate(validated_items):
+            with _txt_compare_lock:
+                j = _txt_compare_jobs.get(job_id)
+                if j and j.get("_cancelled"):
+                    j["status"] = "cancelled"
+                    j["current_step"] = "已取消"
+                    _save_txt_compare_jobs()
+                    return
+
+            pk = item["pair_key"]
+            job["current_step"] = f"对比 {item['audio_name']}"
+            job["progress"] = int((i / len(validated_items)) * 100)
+            with _txt_compare_lock:
+                _save_txt_compare_jobs()
+
+            try:
+                # Build result in segmented ASR compare format
+                segments = []
+                audio_name = item["audio_name"]
+
+                if item["txt_a"] and item["txt_b"]:
+                    cmp = compare_text_files(item["txt_a"]["path"], item["txt_b"]["path"],
+                                            filter_english=filter_english)
+                    diff_percent = cmp.get("overall_diff_percent", 0.0)
+                    match_rate = cmp.get("match_rate", 100.0)
+                    sentence_results = cmp.get("sentence_results", [])
+
+                    # Build diff_chunks from sentence results for display
+                    text_a_full = "\n".join(sr.get("text_a", "") for sr in sentence_results)
+                    text_b_full = "\n".join(sr.get("text_b", "") for sr in sentence_results)
+                    from asr_pipeline import _compute_diff_chunks as _comp_chunks
+                    diff_chunks = _comp_chunks(text_a_full, text_b_full)
+                elif item["txt_a"] or item["txt_b"]:
+                    text_a_full = ""
+                    text_b_full = ""
+                    if item["txt_a"]:
+                        with open(item["txt_a"]["path"], "r", encoding="utf-8", errors="replace") as f:
+                            text_a_full = f.read()
+                    if item["txt_b"]:
+                        with open(item["txt_b"]["path"], "r", encoding="utf-8", errors="replace") as f:
+                            text_b_full = f.read()
+                    diff_percent = 100.0
+                    match_rate = 0.0
+                    sentence_results = []
+                    diff_chunks = [{"type": "diff", "text_a": text_a_full, "text_b": text_b_full}]
+                else:
+                    text_a_full = ""
+                    text_b_full = ""
+                    diff_percent = 0.0
+                    match_rate = 100.0
+                    sentence_results = []
+                    diff_chunks = []
+
+                segment = {
+                    "seg_index": 0,
+                    "seg_name": audio_name,
+                    "start_ms": 0,
+                    "end_ms": 0,
+                    "duration_s": 0,
+                    "wav_path": item["audio_path"],
+                    "text_a": text_a_full,
+                    "text_b": text_b_full,
+                    "txt_path_a": item["txt_a"]["path"] if item["txt_a"] else "",
+                    "txt_path_b": item["txt_b"]["path"] if item["txt_b"] else "",
+                    "error_a": None if item["txt_a"] else "文本文件不存在",
+                    "error_b": None if item["txt_b"] else "文本文件不存在",
+                    "diff_percent": diff_percent,
+                    "match_rate": match_rate,
+                    "flagged": diff_percent > 10.0,
+                    "diff_chunks": diff_chunks,
+                    "user_action": None,
+                }
+                segments.append(segment)
+
+                result = {
+                    "audio_path": item["audio_path"],
+                    "audio_name": audio_name,
+                    "source_dir": source_dir,
+                    "duration_sec": 0,
+                    "segment_count": 1,
+                    "model_a": {"key": model_a_abbr, "name": model_a_abbr, "abbr": model_a_abbr},
+                    "model_b": {"key": model_b_abbr, "name": model_b_abbr, "abbr": model_b_abbr},
+                    "segments_dir": real_folder,
+                    "segments": segments,
+                    "pair_key": pk,
+                    "flagged": segments[0]["flagged"] if segments else False,
+                    "user_action": None,
+                }
+
+                with _txt_compare_lock:
+                    j2 = _txt_compare_jobs.get(job_id)
+                    if j2:
+                        j2["results"][pk] = result
+                        j2["completed"] = i + 1
+                        if result.get("flagged"):
+                            j2["flagged_count"] += 1
+                        _save_txt_compare_jobs()
+            except Exception as e:
+                error_result = {
+                    "audio_path": item["audio_path"],
+                    "audio_name": item["audio_name"],
+                    "source_dir": source_dir,
+                    "pair_key": pk,
+                    "error": str(e),
+                    "flagged": True,
+                    "segments": [{
+                        "seg_index": 0,
+                        "seg_name": item["audio_name"],
+                        "wav_path": item["audio_path"],
+                        "error_a": str(e),
+                        "error_b": str(e),
+                        "diff_percent": 100.0,
+                        "match_rate": 0.0,
+                        "flagged": True,
+                        "diff_chunks": [],
+                        "user_action": None,
+                    }],
+                }
+                with _txt_compare_lock:
+                    j2 = _txt_compare_jobs.get(job_id)
+                    if j2:
+                        j2["results"][pk] = error_result
+                        j2["completed"] = i + 1
+                        j2["flagged_count"] += 1
+                        _save_txt_compare_jobs()
+
+        with _txt_compare_lock:
+            j3 = _txt_compare_jobs.get(job_id)
+            if j3:
+                j3["status"] = "completed"
+                j3["progress"] = 100
+                j3["current_step"] = "完成"
+                for pk, r in j3.get("results", {}).items():
+                    if r.get("user_action") not in ("deleted", "discarded"):
+                        _txt_compare_results[pk] = r
+                _save_txt_compare_jobs()
+
+    threading.Thread(target=_run, daemon=False).start()
+    return {"job_id": job_id, "status": "started", "total": len(validated_items)}
+
+
+@app.get("/api/txt-compare/job/{job_id}")
+def get_txt_compare_job(job_id: str):
+    with _txt_compare_lock:
+        job = _txt_compare_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@app.get("/api/txt-compare/jobs")
+def list_txt_compare_jobs():
+    with _txt_compare_lock:
+        jobs = sorted(_txt_compare_jobs.values(), key=lambda j: j.get("created_at", 0), reverse=True)
+    return {"jobs": jobs}
+
+
+@app.post("/api/txt-compare/cancel")
+def cancel_txt_compare(payload: dict = Body(...)):
+    job_id = payload.get("job_id", "")
+    with _txt_compare_lock:
+        job = _txt_compare_jobs.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        if job["status"] not in ("running", "pending", "loading"):
+            raise HTTPException(status_code=400, detail=f"Cannot cancel job in status: {job['status']}")
+        job["_cancelled"] = True
+        _save_txt_compare_jobs()
+    return {"status": "ok"}
+
+
+@app.post("/api/txt-compare/job/{job_id}/discard")
+def discard_txt_compare_job(job_id: str):
+    with _txt_compare_lock:
+        job = _txt_compare_jobs.get(job_id)
+        if job:
+            job["status"] = "cancelled"
+            job["current_step"] = "已丢弃"
+            _save_txt_compare_jobs()
+    return {"status": "ok"}
+
+
+@app.get("/api/txt-compare/results")
+def list_txt_compare_results():
+    with _txt_compare_lock:
+        # Hydrate from latest completed job
+        for j in _txt_compare_jobs.values():
+            if j.get("status") == "completed":
+                for pk, result in j.get("results", {}).items():
+                    if pk not in _txt_compare_results:
+                        _txt_compare_results[pk] = result
+
+    results = [r for r in _txt_compare_results.values()
+               if r.get("user_action") not in ("deleted", "discarded")]
+    results.sort(key=lambda r: r.get("source_dir", "") + r.get("audio_name", ""))
+    return {"results": results}
+
+
+@app.post("/api/txt-compare/keep")
+def keep_txt_compare_pair(payload: dict = Body(...)):
+    pair_key = payload.get("pair_key", "")
+    if not pair_key:
+        raise HTTPException(status_code=400, detail="Missing pair_key")
+
+    with _txt_compare_lock:
+        if pair_key in _txt_compare_results:
+            _txt_compare_results[pair_key]["flagged"] = False
+            _txt_compare_results[pair_key]["user_action"] = "kept"
+
+    _sync_txt_user_action_to_jobs(pair_key)
+    return {"status": "ok", "action": "kept"}
+
+
+@app.post("/api/txt-compare/delete")
+def delete_txt_compare_files(payload: dict = Body(...)):
+    """Permanently delete an audio file and its associated text files from disk."""
+    pair_key = payload.get("pair_key", "")
+    audio_path = payload.get("audio_path", "")
+
+    if not pair_key:
+        raise HTTPException(status_code=400, detail="Missing pair_key")
+
+    real_data = os.path.realpath(DATA_DIR)
+    deleted = []
+
+    # Collect files to delete from the result
+    files_to_delete = []
+    if audio_path:
+        files_to_delete.append(audio_path)
+    with _txt_compare_lock:
+        result = _txt_compare_results.get(pair_key, {})
+    for seg in result.get("segments", []):
+        for key in ("txt_path_a", "txt_path_b"):
+            fp = seg.get(key, "")
+            if fp:
+                files_to_delete.append(fp)
+
+    for fp in files_to_delete:
+        real_fp = os.path.realpath(fp)
+        if not real_fp.startswith(real_data + os.sep) and real_fp != real_data:
+            continue
+        if os.path.exists(real_fp):
+            os.remove(real_fp)
+            deleted.append(real_fp)
+
+    with _txt_compare_lock:
+        if pair_key in _txt_compare_results:
+            _txt_compare_results[pair_key]["flagged"] = False
+            _txt_compare_results[pair_key]["user_action"] = "deleted"
+
+    _sync_txt_user_action_to_jobs(pair_key)
+    return {"status": "ok", "action": "deleted", "files": deleted}
+
+
+@app.post("/api/txt-compare/batch-delete")
+def batch_delete_txt_compare_files(payload: dict = Body(...)):
+    """Permanently delete multiple audio+text file groups from disk."""
+    items = payload.get("items", [])
+    if not items:
+        raise HTTPException(status_code=400, detail="No items provided")
+
+    real_data = os.path.realpath(DATA_DIR)
+    results = []
+
+    for item in items:
+        pair_key = item.get("pair_key", "")
+        audio_path = item.get("audio_path", "")
+
+        files_to_delete = []
+        if audio_path:
+            files_to_delete.append(audio_path)
+        with _txt_compare_lock:
+            result = _txt_compare_results.get(pair_key, {})
+        for seg in result.get("segments", []):
+            for key in ("txt_path_a", "txt_path_b"):
+                fp = seg.get(key, "")
+                if fp:
+                    files_to_delete.append(fp)
+
+        deleted = []
+        for fp in files_to_delete:
+            real_fp = os.path.realpath(fp)
+            if not real_fp.startswith(real_data + os.sep) and real_fp != real_data:
+                continue
+            if os.path.exists(real_fp):
+                os.remove(real_fp)
+                deleted.append(real_fp)
+
+        with _txt_compare_lock:
+            if pair_key and pair_key in _txt_compare_results:
+                _txt_compare_results[pair_key]["flagged"] = False
+                _txt_compare_results[pair_key]["user_action"] = "deleted"
+
+        if pair_key:
+            _sync_txt_user_action_to_jobs(pair_key)
+        results.append({"pair_key": pair_key, "status": "deleted", "files": deleted})
+
+    return {"status": "ok", "total": len(items), "results": results}
+
+
+@app.get("/api/txt-compare/stream")
+def stream_txt_compare_file(path: str = Query("")):
+    """Stream an audio or text file to the browser."""
+    if not path or not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File not found")
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".wav":
+        return FileResponse(path, media_type="audio/wav")
+    return FileResponse(path, media_type="text/plain; charset=utf-8")
+
+
+@app.post("/api/txt-compare/package")
+def package_txt_compare_results(payload: dict = Body(...)):
+    """Copy kept text file pairs to the output directory."""
+    import shutil as _shutil
+    pair_keys = payload.get("pair_keys", [])
+    if not pair_keys:
+        # Package all kept results
+        with _txt_compare_lock:
+            pair_keys = [pk for pk, r in _txt_compare_results.items()
+                        if r.get("user_action") in ("kept", None)
+                        and r.get("user_action") != "deleted"]
+
+    os.makedirs(TXT_COMPARE_OUTPUT_DIR, exist_ok=True)
+    packaged = []
+
+    for pk in pair_keys:
+        with _txt_compare_lock:
+            result = _txt_compare_results.get(pk, {})
+        if not result:
+            continue
+        file_a = result.get("file_a", "")
+        file_b = result.get("file_b", "")
+        source_dir = result.get("source_dir", "default")
+        dest_dir = os.path.join(TXT_COMPARE_OUTPUT_DIR, source_dir)
+        os.makedirs(dest_dir, exist_ok=True)
+
+        for fp in [file_a, file_b]:
+            if fp and os.path.exists(fp):
+                dest = os.path.join(dest_dir, os.path.basename(fp))
+                _shutil.copy2(fp, dest)
+                packaged.append(dest)
+
+    return {"status": "ok", "packaged": len(packaged), "output_dir": TXT_COMPARE_OUTPUT_DIR}
+
+
+# ============================================================
 # ASR Comparison endpoints
 # ============================================================
 
@@ -4913,6 +5842,7 @@ def list_asr_compare_models():
                 "description": info["description"],
                 "languages": info["languages"],
                 "abbr": info.get("abbr", key),
+                "framework": info.get("framework", "funasr"),
             })
     return {"models": models}
 
@@ -5002,6 +5932,7 @@ def run_asr_compare_all(
             "_language": language,
             "_device": device,
             "_hotwords": hotwords,
+            "_filter_english": _filter_english,
         }
         _save_asr_compare_jobs()
 
@@ -5226,6 +6157,7 @@ def asr_compare_resume_job(job_id: str):
         hotwords = job.get("_hotwords", "")
         completed_paths = set(job.get("results", {}).keys())
         is_segmented = job.get("is_segmented", False)
+        _filter_english = job.get("_filter_english", True)
 
     def _run_resume():
         from asr_pipeline import compare_asr_pipeline, segment_and_compare_pipeline
@@ -5594,6 +6526,7 @@ def run_asr_compare_segmented(
             "_hotwords": hotwords,
             "_segment_min_s": segment_min_s,
             "_segment_max_s": segment_max_s,
+            "_filter_english": _filter_english,
         }
         _save_asr_compare_jobs()
 
@@ -5684,6 +6617,7 @@ def run_asr_compare_segmented(
                     progress_callback=on_progress,
                     source_dir=f["source_dir"],
                     cancel_check=_cancel_check,
+                    filter_english=_filter_english,
                 )
 
                 with _asr_compare_lock:
@@ -6349,7 +7283,7 @@ def _run_pipeline_video(job_id: str):
             {"key": "duration_split", "enabled": True},
             {"key": "convert", "enabled": True},
             {"key": "music_separate", "enabled": True},
-            {"key": "enhance", "enabled": True},
+            {"key": "enhance", "enabled": False},
             {"key": "super_resolve", "enabled": False},
             {"key": "asr", "enabled": False},
             {"key": "cut", "enabled": False},
@@ -8042,7 +8976,7 @@ def mfa_align(
         for ext in (".TextGrid", ".textgrid"):
             tg_path = os.path.join(output_dir, check_audio_stem + ext)
             if os.path.exists(tg_path):
-                return {"status": "ok", "already_done": True, "message": f"TextGrid 已存在，无需重复生成: {check_audio_stem}{ext}"}
+                return {"status": "ok", "already_done": True, "message": f"TextGrid 已存在，无需重复生成: {check_audio_stem}{ext}", "tg_path": tg_path}
 
     # Resolve model names to full paths
     dict_path = os.path.join(models_root, "pretrained_models", "dictionary", dictionary + ".dict")
@@ -8109,34 +9043,29 @@ def mfa_align(
 # Step 4: Post-process TextGrid
 @app.post("/api/mfa/postprocess")
 def mfa_postprocess(
-    jsonl_path: str = Query(..., description="JSONL file path"),
     txt_dir: str = Query(..., description="Generated TXT directory"),
     textgrid_dir: str = Query(..., description="MFA aligned TextGrid input directory"),
     output_dir: str = Query(..., description="Post-processed TextGrid output directory"),
     filtered_dir: str = Query(..., description="Filtered (bad) TextGrid output directory"),
     wav_dir: str = Query("", description="WAV directory for energy-based fix"),
-    text_key: str = Query("text"),
-    wav_key: str = Query("wav_file"),
     overwrite: bool = Query(True),
     fix_short_multi_unit: bool = Query(True),
     filter_suspicious_alignment: bool = Query(True),
     copy_errors: bool = Query(False),
-    language: str = Query("jp", description="Language: zh (Chinese pinyin) or jp (Japanese romaji)"),
+    language: str = Query("zh", description="Language: zh (Chinese pinyin) or jp (Japanese romaji)"),
 ):
-    """Step 4: Post-process MFA TextGrid output (add tiers, fix alignment, filter)."""
+    """Step 4: Post-process MFA TextGrid output (add tiers, fix alignment, filter).
+    Raw texts are read directly from TXT files in txt_dir — no JSONL needed."""
     job_id = uuid.uuid4().hex[:12]
     python_exe = _get_mfa_config("MFA_PYTHON", "python")
     script = os.path.join(MFA_SCRIPTS_DIR, "postprocess_textgrids.py")
 
     cmd = [
         python_exe, script,
-        "--jsonl", jsonl_path,
         "--txt-dir", txt_dir,
         "--textgrid-dir", textgrid_dir,
         "--output-dir", output_dir,
         "--filtered-dir", filtered_dir,
-        "--text-key", text_key,
-        "--wav-key", wav_key,
     ]
     if wav_dir:
         cmd.extend(["--wav-dir", wav_dir])
@@ -8425,13 +9354,10 @@ def _build_postprocess_cmd(python_exe, payload):
     script = os.path.join(MFA_SCRIPTS_DIR, "postprocess_textgrids.py")
     cmd = [
         python_exe, script,
-        "--jsonl", payload.get("post_jsonl_path", ""),
         "--txt-dir", payload.get("post_txt_dir", ""),
         "--textgrid-dir", payload.get("post_textgrid_dir", ""),
         "--output-dir", payload.get("post_output_dir", ""),
         "--filtered-dir", payload.get("post_filtered_dir", ""),
-        "--text-key", payload.get("post_text_key", "text"),
-        "--wav-key", payload.get("post_wav_key", "wav_file"),
     ]
     wav_dir = payload.get("post_wav_dir", "")
     if wav_dir:
@@ -8448,6 +9374,7 @@ def _build_postprocess_cmd(python_exe, payload):
         cmd.append("--no-filter-suspicious-alignment")
     if payload.get("post_copy_errors", False):
         cmd.append("--copy-errors")
+    cmd.extend(["--language", payload.get("language", "zh")])
     return cmd
 
 
@@ -9316,6 +10243,529 @@ def clear_mfa_jobs(status: str = Query("completed", description="Status filter: 
             del _mfa_jobs[jid]
         _save_mfa_jobs()
     return {"status": "ok", "deleted": len(to_delete)}
+
+# ============================================================
+# Batch MFA Pipeline — API endpoints
+# ============================================================
+
+def _batch_match_text(audio_stem: str, jsonl_path: str = "", txt_dir: str = "",
+                      text_key: str = "text", wav_key: str = "wav_file") -> tuple:
+    """Try to match text for an audio file. Returns (text_content, source_description)."""
+    if jsonl_path and os.path.isfile(jsonl_path):
+        try:
+            with open(jsonl_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    item = json.loads(line)
+                    wav_file = item.get(wav_key, "")
+                    if Path(wav_file).stem == audio_stem:
+                        return item.get(text_key, ""), f"JSONL: {jsonl_path}"
+        except Exception:
+            pass
+    if txt_dir and os.path.isdir(txt_dir):
+        txt_path = os.path.join(txt_dir, f"{audio_stem}.txt")
+        if os.path.isfile(txt_path):
+            try:
+                with open(txt_path, "r", encoding="utf-8") as f:
+                    return f.read().strip(), f"TXT: {txt_path}"
+            except Exception:
+                pass
+    return "", ""
+
+
+def _batch_generate_txt(text: str, audio_stem: str, output_dir: str, language: str,
+                        dict_path: str = "") -> tuple:
+    """Tokenize text and write TXT file. Returns (txt_path, error)."""
+    txt_path = os.path.join(output_dir, f"{audio_stem}.txt")
+    try:
+        if language == "zh":
+            tokenized = _tokenize_chinese_to_pinyin(text)
+        else:
+            python_exe = _get_mfa_config("MFA_PYTHON", sys.executable)
+            script = os.path.join(MFA_SCRIPTS_DIR, "generate_wav_txt.py")
+            import tempfile as _tmp
+            tmp_jsonl = os.path.join(_tmp.gettempdir(), f"_bmfa_{uuid.uuid4().hex[:8]}.jsonl")
+            tmp_txt_dir = os.path.join(_tmp.gettempdir(), f"_bmfa_txt_{uuid.uuid4().hex[:8]}")
+            os.makedirs(tmp_txt_dir, exist_ok=True)
+            with open(tmp_jsonl, "w", encoding="utf-8") as f:
+                f.write(json.dumps({"text": text, "wav_file": f"{audio_stem}.wav"}, ensure_ascii=False) + "\n")
+            cmd = [python_exe, script, "--jsonl", tmp_jsonl, "--output-dir", tmp_txt_dir,
+                   "--text-key", "text", "--wav-key", "wav_file", "--mode", "A",
+                   "--max-merge-tokens", "5", "--overwrite"]
+            if dict_path and os.path.isfile(dict_path):
+                cmd.extend(["--dict-path", dict_path])
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, cwd=PROJECT_ROOT)
+            generated = os.path.join(tmp_txt_dir, f"{audio_stem}.txt")
+            if os.path.isfile(generated):
+                with open(generated, "r", encoding="utf-8") as f:
+                    tokenized = f.read().strip()
+            else:
+                tokenized = text
+            try:
+                os.remove(tmp_jsonl)
+                import shutil as _shutil
+                _shutil.rmtree(tmp_txt_dir, ignore_errors=True)
+            except Exception:
+                pass
+        os.makedirs(output_dir, exist_ok=True)
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write(tokenized)
+        return txt_path, ""
+    except Exception as e:
+        return "", str(e)
+
+
+@app.post("/api/mfa/batch/start")
+def mfa_batch_start(payload: dict = Body(...)):
+    """Start a batch MFA pipeline job."""
+    audio_paths = payload.get("audio_paths", [])
+    if not audio_paths:
+        raise HTTPException(status_code=400, detail="No audio paths provided")
+    language = payload.get("language", "jp")
+    if language not in ("jp", "zh"):
+        raise HTTPException(status_code=400, detail="language must be jp or zh")
+    valid = [p for p in audio_paths if os.path.isfile(p) and p.lower().endswith(".wav")]
+    if not valid:
+        raise HTTPException(status_code=400, detail="No valid WAV files found")
+    job_id = uuid.uuid4().hex[:12]
+    files = [BatchMfaFileItem(audio_path=p, audio_name=os.path.basename(p)) for p in valid]
+    params = {
+        "audio_paths": valid, "language": language,
+        "jsonl_path": payload.get("jsonl_path", ""),
+        "txt_dir": payload.get("txt_dir", ""),
+        "text_key": payload.get("text_key", "text"),
+        "wav_key": payload.get("wav_key", "wav_file"),
+        "dict_path": payload.get("dict_path", ""),
+        "acoustic_model": payload.get("acoustic_model", ""),
+        "dictionary": payload.get("dictionary", ""),
+        "output_dir": payload.get("output_dir", ""),
+    }
+    job = BatchMfaJob(job_id=job_id, language=language, files=files, params=params)
+    with _batch_mfa_lock:
+        _batch_mfa_jobs[job_id] = job
+        _save_batch_mfa_jobs()
+    threading.Thread(target=_run_batch_mfa_job, args=(job_id,), daemon=True).start()
+    return {"status": "ok", "job_id": job_id, "file_count": len(valid)}
+
+
+def _run_batch_mfa_job(job_id: str):
+    """Execute the batch MFA pipeline: match text -> tokenize -> align -> anomaly detect."""
+    with _batch_mfa_lock:
+        job = _batch_mfa_jobs.get(job_id)
+        if not job:
+            return
+    python_exe = _get_mfa_config("MFA_PYTHON", sys.executable)
+    mfa_exe = _get_mfa_config("MFA_EXECUTABLE", "mfa")
+    model_root = _get_mfa_config("MFA_MODELS_DIR", MFA_MODELS_DIR)
+    language = job.language
+    params = job.params
+    total = len(job.files)
+
+    base_out = params.get("output_dir", "") or os.path.join(MFA_DIR, "batch", job_id)
+    batch_txt_dir = os.path.join(base_out, "txt")
+    batch_aligned_dir = os.path.join(base_out, "aligned")
+    batch_post_dir = os.path.join(base_out, "post")
+    batch_filtered_dir = os.path.join(base_out, "filtered")
+    batch_wav_dir = os.path.join(base_out, "wav")
+
+    jsonl_path = params.get("jsonl_path", "")
+    txt_dir = params.get("txt_dir", "")
+    text_key = params.get("text_key", "text")
+    wav_key = params.get("wav_key", "wav_file")
+    dict_path = params.get("dict_path", "")
+    if language == "zh":
+        dict_path = dict_path or MFA_DICT_PATH_ZH
+    else:
+        dict_path = dict_path or MFA_DICT_PATH
+    acoustic = params.get("acoustic_model", "")
+    dictionary = params.get("dictionary", "")
+    if language == "zh":
+        acoustic = acoustic or "corp4EPL_sat2"
+        dictionary = dictionary or "fullpinyin_enword"
+    else:
+        acoustic = acoustic or "japanese_mfa"
+        dictionary = dictionary or "japanese_mfa"
+
+    def _ck():
+        with _batch_mfa_lock:
+            j = _batch_mfa_jobs.get(job_id)
+            return j and j.cancelled
+
+    def _up(**kw):
+        with _batch_mfa_lock:
+            j = _batch_mfa_jobs.get(job_id)
+            if j:
+                for k, v in kw.items():
+                    setattr(j, k, v)
+                _save_batch_mfa_jobs()
+
+    # Step 1: Match text
+    _up(status="running", current_step="步骤 1/4: 匹配文本", progress=0)
+    matched_count = 0
+    for idx, f in enumerate(job.files):
+        if _ck():
+            _up(status="cancelled", current_step="已取消")
+            return
+        f.status = "matching"
+        _up(current_file=f.audio_name, progress=round((idx / total) * 20))
+        text, src = _batch_match_text(Path(f.audio_path).stem, jsonl_path, txt_dir, text_key, wav_key)
+        if text:
+            f.matched_text_content = text
+            f.matched_text_path = src
+            matched_count += 1
+        else:
+            stem = Path(f.audio_path).stem
+            if txt_dir and os.path.isdir(txt_dir):
+                for fn in sorted(os.listdir(txt_dir)):
+                    if fn.lower().endswith(".txt"):
+                        txt_stem = fn[:-4]
+                        if stem[:8] in txt_stem or txt_stem[:8] in stem:
+                            try:
+                                tfp = os.path.join(txt_dir, fn)
+                                with open(tfp, "r", encoding="utf-8") as tf:
+                                    f.matched_text_content = tf.read().strip()
+                                f.matched_text_path = f"模糊匹配: {tfp}"
+                                matched_count += 1
+                            except Exception:
+                                pass
+                            break
+    _up(progress=20)
+
+    # Step 2: Tokenize
+    _up(current_step="步骤 2/4: 生成分词 TXT", progress=20)
+    os.makedirs(batch_txt_dir, exist_ok=True)
+    tokenized_count = 0
+    for idx, f in enumerate(job.files):
+        if _ck():
+            _up(status="cancelled", current_step="已取消")
+            return
+        if not f.matched_text_content:
+            f.status = "skipped"
+            f.error = "无匹配文本"
+            continue
+        f.status = "tokenizing"
+        _up(current_file=f.audio_name, progress=round(20 + (idx / total) * 15))
+        tp, err = _batch_generate_txt(f.matched_text_content, Path(f.audio_path).stem,
+                                      batch_txt_dir, language, dict_path)
+        if tp:
+            f.tokenized_path = tp
+            tokenized_count += 1
+        else:
+            f.error = f"分词失败: {err}"
+    _up(progress=35)
+
+    if tokenized_count == 0:
+        _up(status="failed", current_step="无文件可对齐", progress=100,
+            result_summary={"total": total, "matched": matched_count,
+                            "aligned": 0, "anomalous": 0, "normal": 0})
+        return
+
+    # Step 3: MFA Align (batch)
+    _up(current_step="步骤 3/4: MFA 对齐", progress=35)
+    if _ck():
+        _up(status="cancelled", current_step="已取消")
+        return
+
+    import shutil as _shutil
+    align_work_dir = os.path.join(base_out, "align_work")
+    for _d in [align_work_dir, batch_aligned_dir, batch_wav_dir]:
+        os.makedirs(_d, exist_ok=True)
+
+    align_file_count = 0
+    for f in job.files:
+        if f.tokenized_path and os.path.isfile(f.tokenized_path):
+            stem = Path(f.audio_path).stem
+            try:
+                wav_dst = os.path.join(batch_wav_dir, f"{stem}.wav")
+                if not os.path.exists(wav_dst):
+                    _shutil.copy2(f.audio_path, wav_dst)
+                txt_dst = os.path.join(align_work_dir, f"{stem}.txt")
+                _shutil.copy2(f.tokenized_path, txt_dst)
+                align_file_count += 1
+            except Exception as e:
+                f.error = f"准备对齐文件失败: {e}"
+
+    if align_file_count == 0:
+        _up(status="failed", current_step="无可对齐的文件对", progress=100)
+        return
+
+    dict_full = os.path.join(model_root, "pretrained_models", "dictionary", dictionary + ".dict")
+    acoustic_full = os.path.join(model_root, "pretrained_models", "acoustic", acoustic, acoustic)
+    if not os.path.isdir(acoustic_full):
+        acoustic_full = os.path.join(model_root, "pretrained_models", "acoustic", acoustic)
+
+    temp_dir = os.path.join(base_out, "temp")
+    os.makedirs(temp_dir, exist_ok=True)
+
+    align_cmd = [
+        mfa_exe, "align", align_work_dir, dict_full, acoustic_full, batch_aligned_dir,
+        "--output_format", "long_textgrid",
+        "--temporary_directory", temp_dir,
+        "--audio_directory", batch_wav_dir,
+        "--num_jobs", str(_get_mfa_config("MFA_DEFAULT_NUM_JOBS", "8")),
+        "--clean", "--overwrite", "--no_tokenization", "--no_textgrid_cleanup",
+    ]
+
+    try:
+        process_env = os.environ.copy()
+        for _p in [os.path.expanduser("~/miniconda3/bin"), os.path.expanduser("~/anaconda3/bin")]:
+            if os.path.isdir(_p) and _p not in process_env.get("PATH", ""):
+                process_env["PATH"] = _p + os.pathsep + process_env.get("PATH", "")
+        process_env["MFA_ROOT_DIR"] = model_root
+
+        process = subprocess.Popen(
+            align_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            cwd=PROJECT_ROOT, env=process_env,
+            text=True, encoding='utf-8', errors='replace',
+        )
+        import re as _re_b
+        re_p = _re_b.compile(r'\[(\d+)/(\d+)\]')
+        for line in iter(process.stdout.readline, ''):
+            m = re_p.search(line)
+            if m:
+                cur = int(m.group(1))
+                tot = int(m.group(2))
+                if tot > 0:
+                    _up(progress=round(35 + (cur / tot) * 40))
+            if _ck():
+                process.kill()
+                _up(status="cancelled", current_step="已取消")
+                return
+        process.wait()
+        if process.returncode != 0:
+            _up(status="failed", current_step=f"MFA 对齐失败 (exit {process.returncode})")
+            return
+    except Exception as e:
+        _up(status="failed", current_step=f"MFA 对齐异常: {e}")
+        return
+
+    aligned_count = 0
+    for f in job.files:
+        if f.tokenized_path:
+            stem = Path(f.audio_path).stem
+            tg_path = os.path.join(batch_aligned_dir, f"{stem}.TextGrid")
+            if os.path.isfile(tg_path):
+                f.textgrid_path = tg_path
+                f.status = "aligning"
+                aligned_count += 1
+            else:
+                f.error = "MFA 未生成对齐结果"
+    _up(progress=75)
+
+    if aligned_count == 0:
+        _up(status="failed", current_step="MFA 未生成任何对齐结果", progress=100)
+        return
+
+    # Step 4: Postprocess / Anomaly Detection
+    _up(current_step="步骤 4/4: 异常检测", progress=75)
+    for _d in [batch_post_dir, batch_filtered_dir]:
+        os.makedirs(_d, exist_ok=True)
+
+    tmp_jsonl = os.path.join(base_out, "_batch.jsonl")
+    with open(tmp_jsonl, "w", encoding="utf-8") as jf:
+        for f in job.files:
+            if f.matched_text_content:
+                jf.write(json.dumps({text_key: f.matched_text_content, wav_key: f.audio_path},
+                                    ensure_ascii=False) + "\n")
+
+    post_script = os.path.join(MFA_SCRIPTS_DIR, "postprocess_textgrids.py")
+    post_cmd = [
+        python_exe, post_script,
+        "--jsonl", tmp_jsonl,
+        "--txt-dir", batch_txt_dir,
+        "--textgrid-dir", batch_aligned_dir,
+        "--output-dir", batch_post_dir,
+        "--filtered-dir", batch_filtered_dir,
+        "--text-key", text_key, "--wav-key", wav_key,
+        "--overwrite",
+        "--fix-short-multi-unit",
+        "--filter-suspicious-alignment",
+        "--language", language,
+    ]
+
+    try:
+        process = subprocess.Popen(
+            post_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            cwd=PROJECT_ROOT, env=os.environ.copy(),
+            text=True, encoding='utf-8', errors='replace',
+        )
+        import re as _re_b2
+        re_pp = _re_b2.compile(r'\[(\d+)/(\d+)\]')
+        for line in iter(process.stdout.readline, ''):
+            m = re_pp.search(line)
+            if m:
+                cur = int(m.group(1))
+                tot = int(m.group(2))
+                if tot > 0:
+                    _up(progress=round(75 + (cur / tot) * 20))
+            if _ck():
+                process.kill()
+                _up(status="cancelled", current_step="已取消")
+                return
+        process.wait()
+    except Exception as e:
+        _up(status="failed", current_step=f"异常检测异常: {e}")
+        return
+
+    # Read postprocess report
+    report_path = os.path.join(batch_post_dir, "postprocess_report.jsonl")
+    report_map = {}
+    if os.path.isfile(report_path):
+        try:
+            with open(report_path, "r", encoding="utf-8") as rf:
+                for line in rf:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    r = json.loads(line)
+                    report_map[r.get("stem", "")] = r
+        except Exception:
+            pass
+
+    anomalous_count = 0
+    normal_count = 0
+    for f in job.files:
+        stem = Path(f.audio_path).stem
+        r = report_map.get(stem, {})
+        status = r.get("status", "")
+        post_tg = os.path.join(batch_post_dir, f"{stem}.TextGrid")
+        filtered_tg = os.path.join(batch_filtered_dir, f"{stem}.TextGrid")
+        if os.path.isfile(post_tg):
+            f.post_textgrid_path = post_tg
+            f.status = "completed"
+            normal_count += 1
+        elif os.path.isfile(filtered_tg):
+            f.post_textgrid_path = filtered_tg
+            f.status = "anomalous"
+            f.is_anomalous = True
+            reasons = r.get("filter_reasons", []) or r.get("alignment_filter_issues", [])
+            if reasons and isinstance(reasons[0], dict):
+                reasons = [item.get("rule", str(item)) for item in reasons]
+            f.anomaly_reasons = reasons
+            anomalous_count += 1
+        elif status.startswith("filtered"):
+            f.status = "anomalous"
+            f.is_anomalous = True
+            f.anomaly_reasons = r.get("filter_reasons", [])
+            anomalous_count += 1
+        elif status == "error":
+            f.status = "error"
+            f.error = r.get("error", "后处理错误")
+        else:
+            f.status = "error"
+            f.error = "未找到后处理结果"
+
+    summary = {"total": total, "matched": matched_count, "aligned": aligned_count,
+               "anomalous": anomalous_count, "normal": normal_count}
+    _up(status="completed", current_step="全部完成", progress=100, result_summary=summary)
+
+
+@app.get("/api/mfa/batch/job/{job_id}")
+def get_batch_mfa_job(job_id: str):
+    """Poll batch MFA job status."""
+    with _batch_mfa_lock:
+        job = _batch_mfa_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job.to_dict()
+
+
+@app.get("/api/mfa/batch/jobs")
+def list_batch_mfa_jobs():
+    """List all batch MFA jobs (latest 20)."""
+    with _batch_mfa_lock:
+        jobs = sorted(_batch_mfa_jobs.values(), key=lambda j: j.created_at, reverse=True)[:20]
+    return {"jobs": [j.to_dict() for j in jobs], "count": len(jobs)}
+
+
+@app.delete("/api/mfa/batch/job/{job_id}")
+def cancel_batch_mfa_job(job_id: str):
+    """Cancel a running batch MFA job."""
+    with _batch_mfa_lock:
+        job = _batch_mfa_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status not in ("pending", "running"):
+        raise HTTPException(status_code=400, detail=f"Job is {job.status}, not running")
+    job.cancelled = True
+    job.status = "cancelled"
+    job.current_step = "已取消"
+    _save_batch_mfa_jobs()
+    return {"status": "ok"}
+
+
+@app.post("/api/mfa/batch/job/{job_id}/resume")
+def resume_batch_mfa_job(job_id: str):
+    """Resume an interrupted or pending batch MFA job."""
+    with _batch_mfa_lock:
+        job = _batch_mfa_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status not in ("interrupted", "pending"):
+        raise HTTPException(status_code=400, detail=f"Job is {job.status}, not interrupted/pending")
+    job.status = "running"
+    job.cancelled = False
+    _save_batch_mfa_jobs()
+    threading.Thread(target=_run_batch_mfa_job, args=(job_id,), daemon=True).start()
+    return {"status": "ok", "message": "已恢复执行"}
+
+
+@app.post("/api/mfa/batch/job/{job_id}/delete-anomalous")
+def batch_delete_anomalous(job_id: str, payload: dict = Body(...)):
+    """Delete anomalous audio files. Body: {file_indices: [int] or delete_all: bool, dry_run: bool}."""
+    with _batch_mfa_lock:
+        job = _batch_mfa_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    file_indices = set(payload.get("file_indices", []) or [])
+    delete_all = payload.get("delete_all", False)
+    dry_run = payload.get("dry_run", False)
+    deleted = []
+    errors = []
+    for idx, f in enumerate(job.files):
+        should_delete = (delete_all and f.is_anomalous) or (idx in file_indices)
+        if not should_delete:
+            continue
+        paths = [p for p in [f.audio_path, f.tokenized_path, f.textgrid_path, f.post_textgrid_path]
+                 if p and os.path.isfile(p)]
+        if dry_run:
+            deleted.append({"audio_name": f.audio_name, "paths": paths, "dry_run": True})
+        else:
+            for p in paths:
+                try:
+                    os.remove(p)
+                except Exception as ex:
+                    errors.append({"path": p, "error": str(ex)})
+            if not errors:
+                f.status = "deleted"
+                deleted.append({"audio_name": f.audio_name, "paths": paths, "dry_run": False})
+    _save_batch_mfa_jobs()
+    return {"status": "ok", "deleted": len(deleted), "errors": errors, "items": deleted}
+
+
+@app.post("/api/mfa/batch/match-preview")
+def batch_match_preview(payload: dict = Body(...)):
+    """Preview text matching for audio files without starting a job."""
+    audio_paths = payload.get("audio_paths", [])
+    jsonl_path = payload.get("jsonl_path", "")
+    txt_dir = payload.get("txt_dir", "")
+    text_key = payload.get("text_key", "text")
+    wav_key = payload.get("wav_key", "wav_file")
+    results = []
+    for p in audio_paths:
+        if not os.path.isfile(p) or not p.lower().endswith(".wav"):
+            continue
+        stem = Path(p).stem
+        text, src = _batch_match_text(stem, jsonl_path, txt_dir, text_key, wav_key)
+        results.append({
+            "audio_path": p, "audio_name": os.path.basename(p), "stem": stem,
+            "matched": bool(text), "text_preview": text[:200] if text else "", "source": src,
+        })
+    matched = sum(1 for r in results if r["matched"])
+    return {"status": "ok", "results": results, "total": len(results), "matched": matched}
+
 
 FRONTEND_DIR = os.path.join(PROJECT_ROOT, "frontend")
 

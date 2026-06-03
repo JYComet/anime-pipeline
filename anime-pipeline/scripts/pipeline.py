@@ -154,6 +154,7 @@ class Pipeline:
                         status=StepStatus(s["status"]),
                         message=s.get("message", ""),
                         duration_seconds=s.get("duration", 0),
+                        data=s.get("data", {}),
                     ))
                 self.jobs[jid] = job
                 restored += 1
@@ -277,93 +278,113 @@ class Pipeline:
     ) -> PipelineJob:
         """Run the complete pipeline: download (if magnet) -> extract subs -> split.
 
+        If the job already exists (e.g. after a server restart and resume), reuse
+        it and skip steps that are already marked COMPLETED. Intermediate state
+        is saved after every step so progress survives unexpected restarts.
+
         Args:
             download_method: One of 'aria2c', 'qbittorrent', 'bitcomet'.
                              aria2c = headless daemon, others = GUI apps.
 
         If mkv_path is provided, skip the download step and use the local file directly.
         """
-        job = self.create_job(job_id, title=title, magnet=magnet)
-        job.mkv_path = mkv_path
-        job.status = "running"
+        # Reuse existing job (e.g. after resume) or create a fresh one
+        existing = self.get_job(job_id)
+        if existing:
+            job = existing
+            job.status = "running"
+        else:
+            job = self.create_job(job_id, title=title, magnet=magnet)
+        if mkv_path:
+            job.mkv_path = mkv_path
 
-        steps = []
+        def _step_done(step_name):
+            return any(
+                s.step == step_name and s.status == StepStatus.COMPLETED
+                for s in job.steps
+            )
+
+        steps = list(job.steps)
 
         # --- Step 1: Submit to download backend (non-blocking) ---
         if magnet and not mkv_path:
-            job.current_step = "download"
-            job.progress = 5
-            t0 = time.time()
-
-            method = download_method.lower()
-            backend_label = download_method
-            try:
-                if method == "qbittorrent":
-                    from qbittorrent_client import add_magnet as _add_mag
-                    _add_mag(magnet, save_path=DOWNLOAD_DIR)
-                    steps.append(StepResult(
-                        step="download",
-                        status=StepStatus.COMPLETED,
-                        message=f"已提交到 qBittorrent 下载\n下载完成后将自动检测并触发处理。",
-                        data={"method": "qbittorrent"},
-                        duration_seconds=time.time() - t0,
-                    ))
-                elif method == "bitcomet":
-                    from bitcomet_client import add_magnet as _add_mag
-                    _add_mag(magnet, save_path=DOWNLOAD_DIR)
-                    steps.append(StepResult(
-                        step="download",
-                        status=StepStatus.COMPLETED,
-                        message=f"已提交到 BitComet 下载\n下载完成后将自动检测并触发处理。",
-                        data={"method": "bitcomet"},
-                        duration_seconds=time.time() - t0,
-                    ))
-                else:
-                    # Default: aria2c
-                    from aria2_rpc import add_magnet, tell_status
-
-                    gid = add_magnet(magnet)
-                    job.gid = gid
-                    status = tell_status(gid)
-                    name = status.get("bittorrent", {}).get("info", {}).get("name", "")
-                    total_mb = int(status.get("totalLength", 0)) / 1024 / 1024
-
-                    steps.append(StepResult(
-                        step="download",
-                        status=StepStatus.COMPLETED,
-                        message=(
-                            f"已提交到 aria2c 后台下载"
-                            + (f" ({name[:40]})" if name else "")
-                            + (f" | 大小: {total_mb:.0f}MB" if total_mb > 0 else "")
-                            + "\n下载完成后文件监控器会自动检测并触发处理。"
-                        ),
-                        data={"gid": gid, "name": name, "method": "aria2c"},
-                        duration_seconds=time.time() - t0,
-                    ))
+            if _step_done("download"):
+                job.current_step = "download"
                 job.progress = 10
-            except RuntimeError as e:
-                msg = str(e)
-                if "already registered" in msg.lower() or "duplicate" in msg.lower():
-                    steps.append(StepResult(
-                        step="download",
-                        status=StepStatus.COMPLETED,
-                        message=f"该资源已在下载队列中，无需重复添加。\n下载完成后将自动处理。",
-                        duration_seconds=time.time() - t0,
-                    ))
-                else:
+            else:
+                job.current_step = "download"
+                job.progress = 5
+                t0 = time.time()
+
+                method = download_method.lower()
+                backend_label = download_method
+                try:
+                    if method == "qbittorrent":
+                        from qbittorrent_client import add_magnet as _add_mag
+                        _add_mag(magnet, save_path=DOWNLOAD_DIR)
+                        steps.append(StepResult(
+                            step="download",
+                            status=StepStatus.COMPLETED,
+                            message=f"已提交到 qBittorrent 下载\n下载完成后将自动检测并触发处理。",
+                            data={"method": "qbittorrent"},
+                            duration_seconds=time.time() - t0,
+                        ))
+                    elif method == "bitcomet":
+                        from bitcomet_client import add_magnet as _add_mag
+                        _add_mag(magnet, save_path=DOWNLOAD_DIR)
+                        steps.append(StepResult(
+                            step="download",
+                            status=StepStatus.COMPLETED,
+                            message=f"已提交到 BitComet 下载\n下载完成后将自动检测并触发处理。",
+                            data={"method": "bitcomet"},
+                            duration_seconds=time.time() - t0,
+                        ))
+                    else:
+                        # Default: aria2c
+                        from aria2_rpc import add_magnet, tell_status
+
+                        gid = add_magnet(magnet)
+                        job.gid = gid
+                        status = tell_status(gid)
+                        name = status.get("bittorrent", {}).get("info", {}).get("name", "")
+                        total_mb = int(status.get("totalLength", 0)) / 1024 / 1024
+
+                        steps.append(StepResult(
+                            step="download",
+                            status=StepStatus.COMPLETED,
+                            message=(
+                                f"已提交到 aria2c 后台下载"
+                                + (f" ({name[:40]})" if name else "")
+                                + (f" | 大小: {total_mb:.0f}MB" if total_mb > 0 else "")
+                                + "\n下载完成后文件监控器会自动检测并触发处理。"
+                            ),
+                            data={"gid": gid, "name": name, "method": "aria2c"},
+                            duration_seconds=time.time() - t0,
+                        ))
+                    job.progress = 10
+                except RuntimeError as e:
+                    msg = str(e)
+                    if "already registered" in msg.lower() or "duplicate" in msg.lower():
+                        steps.append(StepResult(
+                            step="download",
+                            status=StepStatus.COMPLETED,
+                            message=f"该资源已在下载队列中，无需重复添加。\n下载完成后将自动处理。",
+                            duration_seconds=time.time() - t0,
+                        ))
+                    else:
+                        steps.append(StepResult(
+                            step="download",
+                            status=StepStatus.FAILED,
+                            message=f"{backend_label} 添加失败: {msg}",
+                            duration_seconds=time.time() - t0,
+                        ))
+                except Exception as e:
                     steps.append(StepResult(
                         step="download",
                         status=StepStatus.FAILED,
-                        message=f"{backend_label} 添加失败: {msg}",
+                        message=f"{backend_label} 异常: {e}",
                         duration_seconds=time.time() - t0,
                     ))
-            except Exception as e:
-                steps.append(StepResult(
-                    step="download",
-                    status=StepStatus.FAILED,
-                    message=f"{backend_label} 异常: {e}",
-                    duration_seconds=time.time() - t0,
-                ))
             job.steps = steps
             # Don't proceed to extract — file watcher handles completion
             job.status = "download_submitted"
@@ -374,74 +395,134 @@ class Pipeline:
 
         # --- Step 2: Extract subtitles ---
         if job.mkv_path and os.path.exists(job.mkv_path):
-            job.current_step = "extract_subtitles"
-            job.progress = 35
-            t0 = time.time()
-            try:
-                from extract_subs import extract_all_chinese_subs
-                subs = extract_all_chinese_subs(job.mkv_path, cancel_event=job.cancel_event)
-                job.subtitle_paths = subs
+            if _step_done("extract_subtitles"):
+                # Restore subtitle paths from step data or filesystem
+                subs = []
+                for s in job.steps:
+                    if s.step == "extract_subtitles" and s.status == StepStatus.COMPLETED:
+                        subs = (s.data or {}).get("subtitle_paths", [])
+                        break
+                if subs and all(os.path.exists(p) for p in subs):
+                    job.subtitle_paths = subs
+                else:
+                    # Fallback: find .ass/.srt files next to MKV or in SUBTITLE_DIR
+                    import glob as _glob
+                    base = os.path.splitext(os.path.basename(job.mkv_path))[0]
+                    found = []
+                    sub_dir = os.path.join(SUBTITLE_DIR, base)
+                    if os.path.isdir(sub_dir):
+                        found = sorted(_glob.glob(os.path.join(sub_dir, "*.ass"))) + \
+                                sorted(_glob.glob(os.path.join(sub_dir, "*.srt")))
+                    if not found:
+                        mkv_dir = os.path.dirname(job.mkv_path)
+                        found = sorted(_glob.glob(os.path.join(mkv_dir, base + "*.ass"))) + \
+                                sorted(_glob.glob(os.path.join(mkv_dir, base + "*.srt")))
+                    job.subtitle_paths = found
                 job.progress = 65
-                steps.append(StepResult(
-                    step="extract_subtitles",
-                    status=StepStatus.COMPLETED if subs else StepStatus.FAILED,
-                    message=f"Extracted {len(subs)} subtitle track(s)",
-                    data={"subtitle_paths": subs},
-                    duration_seconds=time.time() - t0,
-                ))
-            except Exception as e:
-                steps.append(StepResult(
-                    step="extract_subtitles",
-                    status=StepStatus.FAILED,
-                    message=str(e),
-                    duration_seconds=time.time() - t0,
-                ))
+            else:
+                job.current_step = "extract_subtitles"
+                job.progress = 35
+                t0 = time.time()
+                try:
+                    from extract_subs import extract_all_chinese_subs
+                    subs = extract_all_chinese_subs(job.mkv_path, cancel_event=job.cancel_event)
+                    job.subtitle_paths = subs
+                    job.progress = 65
+                    steps.append(StepResult(
+                        step="extract_subtitles",
+                        status=StepStatus.COMPLETED if subs else StepStatus.FAILED,
+                        message=f"Extracted {len(subs)} subtitle track(s)",
+                        data={"subtitle_paths": subs},
+                        duration_seconds=time.time() - t0,
+                    ))
+                except Exception as e:
+                    steps.append(StepResult(
+                        step="extract_subtitles",
+                        status=StepStatus.FAILED,
+                        message=str(e),
+                        duration_seconds=time.time() - t0,
+                    ))
             job.steps = steps
             if on_step:
                 on_step(steps[-1])
+            with self._lock:
+                self.jobs[job_id] = job
+            self._save_jobs()
 
         # --- Step 3: Split video by subtitles ---
         if job.subtitle_paths and job.mkv_path:
-            job.current_step = "split_video"
-            job.progress = 70
-            t0 = time.time()
-            try:
-                from split_video import split_video_by_subtitle
-                all_clips = []
-
-                for sub_path in job.subtitle_paths:
-                    def split_progress(current, total, text):
-                        pct = 70 + (current / max(total, 1)) * 25
-                        job.progress = min(pct, 95)
-
-                    clips = split_video_by_subtitle(
-                        job.mkv_path,
-                        sub_path,
-                        hw_accel=hw_accel,
-                        on_progress=split_progress,
-                        cancel_event=job.cancel_event,
-                    )
-                    all_clips.extend(clips)
-
-                if all_clips:
-                    job.clip_dir = os.path.dirname(all_clips[0])
-                job.clip_paths = all_clips
+            if _step_done("split_video"):
+                # Restore clip_dir from step data or filesystem
+                clip_dir = job.clip_dir
+                if not clip_dir or not os.path.isdir(clip_dir):
+                    for s in job.steps:
+                        if s.step == "split_video" and s.status == StepStatus.COMPLETED:
+                            clip_dir = (s.data or {}).get("clip_dir", "")
+                            break
+                if not clip_dir or not os.path.isdir(clip_dir):
+                    # Fallback: find clips dir by MKV name
+                    base = os.path.splitext(os.path.basename(job.mkv_path))[0]
+                    potential = os.path.join(CLIPS_DIR, base)
+                    if os.path.isdir(potential):
+                        clip_dir = potential
+                job.clip_dir = clip_dir
                 job.progress = 97
-                steps.append(StepResult(
-                    step="split_video",
-                    status=StepStatus.COMPLETED if all_clips else StepStatus.FAILED,
-                    message=f"Created {len(all_clips)} video clips",
-                    data={"clip_dir": job.clip_dir, "clip_count": len(all_clips)},
-                    duration_seconds=time.time() - t0,
-                ))
+            else:
+                job.current_step = "split_video"
+                job.progress = 70
+                t0 = time.time()
+                try:
+                    from split_video import split_video_by_subtitle
+                    all_clips = []
 
-                # --- Step 4: Auto-filter short clips (default 1.0s) ---
+                    for sub_path in job.subtitle_paths:
+                        def split_progress(current, total, text):
+                            pct = 70 + (current / max(total, 1)) * 25
+                            job.progress = min(pct, 95)
+
+                        clips = split_video_by_subtitle(
+                            job.mkv_path,
+                            sub_path,
+                            hw_accel=hw_accel,
+                            on_progress=split_progress,
+                            cancel_event=job.cancel_event,
+                        )
+                        all_clips.extend(clips)
+
+                    if all_clips:
+                        job.clip_dir = os.path.dirname(all_clips[0])
+                    job.clip_paths = all_clips
+                    job.progress = 97
+                    steps.append(StepResult(
+                        step="split_video",
+                        status=StepStatus.COMPLETED if all_clips else StepStatus.FAILED,
+                        message=f"Created {len(all_clips)} video clips",
+                        data={"clip_dir": job.clip_dir, "clip_count": len(all_clips)},
+                        duration_seconds=time.time() - t0,
+                    ))
+                except Exception as e:
+                    steps.append(StepResult(
+                        step="split_video",
+                        status=StepStatus.FAILED,
+                        message=str(e),
+                        duration_seconds=time.time() - t0,
+                    ))
+            job.steps = steps
+            if on_step:
+                on_step(steps[-1])
+            with self._lock:
+                self.jobs[job_id] = job
+            self._save_jobs()
+
+        # --- Step 4 & 5: Filter clips (fast, always run if there are clips) ---
+        if job.clip_dir and os.path.isdir(job.clip_dir):
+            if not _step_done("filter_clips"):
                 job.current_step = "filter_clips"
                 job.progress = 98
                 t_filter = time.time()
                 try:
                     filter_result = self.filter_clips(job_id, min_duration=2.0, clip_dir=job.clip_dir)
-                    job.clip_paths = []  # will be refreshed
+                    job.clip_paths = []
                     job.progress = 100
                     steps.append(StepResult(
                         step="filter_clips",
@@ -457,8 +538,12 @@ class Pipeline:
                         message=str(fe),
                         duration_seconds=time.time() - t_filter,
                     ))
+                job.steps = steps
+                with self._lock:
+                    self.jobs[job_id] = job
+                self._save_jobs()
 
-                # --- Step 5: Auto-filter high-silence clips ---
+            if not _step_done("filter_silence"):
                 job.current_step = "filter_silence"
                 job.progress = 99
                 t_silence = time.time()
@@ -480,16 +565,10 @@ class Pipeline:
                         message=str(fe),
                         duration_seconds=time.time() - t_silence,
                     ))
-            except Exception as e:
-                steps.append(StepResult(
-                    step="split_video",
-                    status=StepStatus.FAILED,
-                    message=str(e),
-                    duration_seconds=time.time() - t0,
-                ))
             job.steps = steps
-            if on_step:
-                on_step(steps[-1])
+            with self._lock:
+                self.jobs[job_id] = job
+            self._save_jobs()
 
         job.status = "completed"
         if any(s.status == StepStatus.FAILED for s in steps):

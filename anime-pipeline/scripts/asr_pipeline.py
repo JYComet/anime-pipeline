@@ -125,10 +125,37 @@ ASR_MODELS = {
         "abbr": "pf",
         "framework": "funasr",
     },
+    "qwen3-asr-api": {
+        "name": "Qwen3-ASR-Flash (API)",
+        "model_id": "",
+        "description": "阿里云百炼 Qwen3-ASR-Flash，中文/多语言，API 调用",
+        "languages": ["zh"],
+        "abbr": "qwen3-api",
+        "framework": "api",
+        "api_model": "qwen3-asr-flash",
+    },
+    "paraformer-v2-api": {
+        "name": "Paraformer语音识别-v2 (API)",
+        "model_id": "",
+        "description": "阿里云百炼 Paraformer语音识别-v2，中文普通话，API 调用",
+        "languages": ["zh"],
+        "abbr": "pfv2-api",
+        "framework": "api",
+        "api_model": "paraformer-v2",
+    },
+    "paraformer-8k-api": {
+        "name": "Paraformer语音识别-8k-v1 (API)",
+        "model_id": "",
+        "description": "阿里云百炼 Paraformer语音识别-8k-v1，中文普通话 8kHz，API 调用",
+        "languages": ["zh"],
+        "abbr": "pf8k-api",
+        "framework": "api",
+        "api_model": "paraformer-8k-v1",
+    },
 }
 
 # Models used for ASR comparison
-COMPARE_MODELS = ["qwen3-asr", "cohere-transcribe", "whisper-base", "firered-asr2", "sensevoice-small", "paraformer-large"]
+COMPARE_MODELS = ["qwen3-asr", "cohere-transcribe", "whisper-base", "firered-asr2", "sensevoice-small", "paraformer-large", "qwen3-asr-api", "paraformer-v2-api", "paraformer-8k-api"]
 
 # --- Model singletons ---
 _asr_models: dict[tuple, object] = {}  # keyed by (model_key, device, use_fp16, use_flash_attn)
@@ -854,6 +881,102 @@ def _firered_asr_pipeline(audio_path: str, model_key: str, language: str, device
                 pass
 
 
+def _api_asr_pipeline(audio_path: str, model_key: str, language: str, device: str, hotwords: str = "") -> list:
+    """Run API-based ASR via Alibaba Cloud DashScope (Bailian) on audio file.
+
+    Returns a list of {text, start_ms, end_ms} dicts, or a single-segment result
+    when sentence-level timestamps are not available.
+    """
+    import requests
+    import json as _json
+    import base64
+    from config import DASHSCOPE_API_KEY, DASHSCOPE_API_BASE
+
+    model_info = ASR_MODELS[model_key]
+    api_model = model_info["api_model"]
+
+    if not DASHSCOPE_API_KEY:
+        raise RuntimeError("未配置阿里云百炼 API Key，请在设置中配置 DASHSCOPE_API_KEY")
+
+    duration_ms = int(get_audio_duration(audio_path) * 1000)
+
+    # Read audio and encode as base64 (DashScope supports base64 audio in JSON body)
+    with open(audio_path, "rb") as f:
+        audio_b64 = base64.b64encode(f.read()).decode("ascii")
+
+    url = f"{DASHSCOPE_API_BASE.rstrip('/')}/api/v1/services/audio/asr/transcription"
+    headers = {
+        "Authorization": f"Bearer {DASHSCOPE_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    params: dict = {}
+    if language and language != "auto":
+        params["language"] = language
+    if hotwords:
+        params["hotwords"] = hotwords
+
+    payload = {
+        "model": api_model,
+        "input": {"audio": audio_b64},
+    }
+    if params:
+        payload["parameters"] = params
+
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=300)
+        if resp.status_code != 200:
+            error_msg = resp.text[:500]
+            try:
+                err = resp.json()
+                error_msg = err.get("message", err.get("code", resp.text[:200]))
+            except Exception:
+                pass
+            raise RuntimeError(f"API调用失败 ({resp.status_code}): {error_msg}")
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(f"API请求失败: {e}") from e
+
+    result = resp.json()
+    output = result.get("output", {})
+
+    # Parse DashScope ASR response: handle transcripts with optional sentences
+    segments: list = []
+    transcripts = output.get("transcripts", [])
+    if not transcripts and isinstance(output, dict):
+        # Some models return flat output.text
+        flat_text = output.get("text", "").strip()
+        if flat_text:
+            return [{"text": flat_text, "start_ms": 0, "end_ms": duration_ms}]
+
+    for transcript in transcripts:
+        text = transcript.get("text", "").strip()
+        sentences = transcript.get("sentences", [])
+
+        if sentences:
+            for sent in sentences:
+                sent_text = sent.get("text", "").strip()
+                if sent_text:
+                    segments.append({
+                        "text": sent_text,
+                        "start_ms": sent.get("begin_time", sent.get("start_ms", 0)),
+                        "end_ms": sent.get("end_time", 0),
+                    })
+        elif text:
+            segments.append({
+                "text": text,
+                "start_ms": 0,
+                "end_ms": duration_ms,
+            })
+
+    return segments
+
+
+def _api_transcribe_segment(audio_path: str, model_key: str, language: str, device: str, hotwords: str = "") -> str:
+    """Transcribe a short audio segment via DashScope API. Returns plain text."""
+    segs = _api_asr_pipeline(audio_path, model_key, language, device, hotwords)
+    return " ".join(seg.get("text", "").strip() for seg in segs if seg.get("text", "").strip())
+
+
 def segments_to_srt(segments: list, output_srt: str) -> str:
     """Write segments to an SRT subtitle file. Returns the file path."""
     os.makedirs(os.path.dirname(output_srt), exist_ok=True)
@@ -912,7 +1035,9 @@ def run_asr_pipeline(
         progress_callback("loading_models", 7)
 
     framework = ASR_MODELS[model_key].get("framework", "funasr")
-    if framework == "nemo":
+    if framework == "api":
+        segments = _api_asr_pipeline(audio_path, model_key, language, device, hotwords)
+    elif framework == "nemo":
         segments = _nemo_asr_pipeline(audio_path, model_key, language, device)
     elif framework == "transformers":
         segments = _transformers_asr_pipeline(audio_path, model_key, language, device)
@@ -1150,6 +1275,27 @@ def _build_cjk_variant_map():
     return _CJK_VARIANT_MAP
 
 
+# MFA-style punctuation symbols (same as mfa/postprocess_textgrids.py)
+_MFA_PUNCT_SYMBOLS = set("〜～")  # wave dash, fullwidth tilde
+
+
+def _normalize_text_mfa(text: str) -> str:
+    """Normalize text the same way MFA does — strip punctuation only.
+
+    Matches the approach in mfa/postprocess_textgrids.py:
+    remove Unicode punctuation (category P) + wave dash / fullwidth tilde.
+    No NFKC, no kana shift, no homophone mapping.
+    """
+    import unicodedata
+    cleaned = []
+    for ch in text:
+        cat = unicodedata.category(ch)
+        if cat.startswith("P") or ch in _MFA_PUNCT_SYMBOLS:
+            continue
+        cleaned.append(ch)
+    return "".join(cleaned)
+
+
 def _normalize_text(text: str) -> str:
     """Normalize text for comparison — deep normalization.
 
@@ -1283,7 +1429,7 @@ def parse_srt_to_segments(srt_path: str) -> list:
             "start_ms": start_ms,
             "end_ms": end_ms,
             "text": text,
-            "normalized_text": _normalize_text(text),
+            "normalized_text": _normalize_text_mfa(text),
         })
 
     return segments
@@ -1568,6 +1714,122 @@ def compare_srt_sentences(srt_path1: str, srt_path2: str) -> dict:
     }
 
 
+def compare_text_files(file_path_a: str, file_path_b: str, filter_english: bool = True) -> dict:
+    """Compare two text/SRT files and return comparison results.
+
+    For .srt files: delegates to compare_srt_sentences() for time-aligned,
+    sentence-level comparison with character diff chunks.
+    For .txt/.ass/.ssa/.vtt files: splits into lines, compares line-by-line
+    using Levenshtein distance and LCS diff chunks.
+
+    If filter_english is True and either file contains English text (3+
+    consecutive ASCII letters), forces match_rate to 0%.
+    """
+    ext_a = os.path.splitext(file_path_a)[1].lower()
+    ext_b = os.path.splitext(file_path_b)[1].lower()
+
+    # Helper to read file content
+    def _read_all(path):
+        if not os.path.exists(path):
+            return ""
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read()
+
+    # English filter check
+    if filter_english:
+        content_a = _read_all(file_path_a)
+        content_b = _read_all(file_path_b)
+        if _has_english(content_a) or _has_english(content_b):
+            return {
+                "overall_diff_percent": 100.0,
+                "match_rate": 0.0,
+                "flagged": True,
+                "sentence_results": [],
+                "matched_count": 0,
+                "unmatched_a": 0,
+                "unmatched_b": 0,
+                "file_a": file_path_a,
+                "file_b": file_path_b,
+            }
+
+    if ext_a == ".srt" and ext_b == ".srt":
+        result = compare_srt_sentences(file_path_a, file_path_b)
+        result["file_a"] = file_path_a
+        result["file_b"] = file_path_b
+        result["flagged"] = result.get("overall_diff_percent", 0) > 10.0
+        return result
+
+    # Plain text / other formats: read and compare line-by-line
+    def _read_lines(path):
+        if not os.path.exists(path):
+            return []
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return [line.rstrip("\n\r") for line in f]
+
+    lines_a = _read_lines(file_path_a)
+    lines_b = _read_lines(file_path_b)
+
+    full_a = "\n".join(lines_a)
+    full_b = "\n".join(lines_b)
+
+    if not full_a and not full_b:
+        overall_diff = 0.0
+    elif not full_a or not full_b:
+        overall_diff = 100.0
+    else:
+        dist = _levenshtein(full_a, full_b)
+        max_len = max(len(full_a), len(full_b))
+        overall_diff = round((dist / max_len) * 100, 1)
+
+    sentence_results = []
+    max_lines = max(len(lines_a), len(lines_b))
+    total_weight = 0
+    weighted_diff_sum = 0.0
+
+    for i in range(max_lines):
+        ta = lines_a[i] if i < len(lines_a) else ""
+        tb = lines_b[i] if i < len(lines_b) else ""
+        if not ta and not tb:
+            diff = 0.0
+        elif not ta or not tb:
+            diff = 100.0
+        else:
+            dist = _levenshtein(ta, tb)
+            max_l = max(len(ta), len(tb))
+            diff = round((dist / max_l) * 100, 1) if max_l > 0 else 0.0
+
+        weight = max(len(ta), len(tb))
+        weighted_diff_sum += diff * weight
+        total_weight += weight
+
+        diff_chunks = _compute_diff_chunks(ta, tb)
+        sentence_results.append({
+            "idx_a": i + 1 if i < len(lines_a) and ta else None,
+            "idx_b": i + 1 if i < len(lines_b) and tb else None,
+            "start_ms": 0,
+            "end_ms": 0,
+            "text_a": ta,
+            "text_b": tb,
+            "diff_percent": diff,
+            "match_rate": round(100.0 - diff, 1),
+            "flagged": diff > 10.0,
+            "diff_chunks": diff_chunks,
+        })
+
+    matched_count = min(len(lines_a), len(lines_b))
+    return {
+        "overall_diff_percent": overall_diff,
+        "match_rate": round(100.0 - overall_diff, 1),
+        "flagged": overall_diff > 10.0,
+        "sentence_results": sentence_results,
+        "matched_count": matched_count,
+        "unmatched_a": max(0, len(lines_a) - len(lines_b)),
+        "unmatched_b": max(0, len(lines_b) - len(lines_a)),
+        "file_a": file_path_a,
+        "file_b": file_path_b,
+    }
+
+
 def compare_asr_pipeline(
     audio_path: str,
     language: str = "ja",
@@ -1613,6 +1875,8 @@ def compare_asr_pipeline(
         model_info = ASR_MODELS.get(model_key)
         if model_info is None:
             raise ValueError(f"Unknown ASR model: {model_key}")
+        if model_info.get("framework") == "api":
+            continue  # API models don't need local preloading
         try:
             _get_asr_model(model_key, device=device, use_compile=False)
         except Exception as e:
@@ -1631,6 +1895,8 @@ def compare_asr_pipeline(
     _dummy2 = (_np2.sin(2 * _np2.pi * _np2.linspace(300, 3000, 32000) / 16000
                        * _np2.arange(32000)) * 0.05).astype(_np2.float32)
     for mk in compare_models:
+        if ASR_MODELS.get(mk, {}).get("framework") == "api":
+            continue  # API models don't need GPU warm-up
         try:
             with _tempfile2.NamedTemporaryFile(suffix=".wav", delete=False) as _tf2:
                 sf.write(_tf2.name, _dummy2, 16000, subtype="PCM_16")
@@ -1673,7 +1939,10 @@ def compare_asr_pipeline(
         model_info = ASR_MODELS[model_key]
         framework = model_info.get("framework", "funasr")
 
-        if framework == "nemo":
+        if framework == "api":
+            segs = _api_asr_pipeline(audio_path, model_key=model_key,
+                                     language=language, device=device, hotwords=hotwords)
+        elif framework == "nemo":
             segs = _nemo_asr_pipeline(audio_path, model_key=model_key,
                                        language=language, device=device)
         elif framework == "transformers":
@@ -1850,6 +2119,9 @@ def _transcribe_segment(audio_path: str, model_key: str, language: str, device: 
     model_info = ASR_MODELS[model_key]
     framework = model_info.get("framework", "funasr")
 
+    if framework == "api":
+        return _api_transcribe_segment(audio_path, model_key, language, device, hotwords)
+
     if model_key in ("qwen3-asr",):
         audio, sr = sf.read(audio_path, dtype="float32")
         if audio.ndim > 1:
@@ -1946,6 +2218,7 @@ def segment_and_compare_pipeline(
     source_dir: str = "",
     cancel_check=None,  # callable → bool; if True, abort processing
     filter_english: bool = True,
+    on_segment=None,  # callable(seg_index, total, partial_result) called after each segment
 ) -> dict:
     """Split audio into 10-15s segments via VAD, run two ASR models on each, compare.
 
@@ -1984,6 +2257,8 @@ def segment_and_compare_pipeline(
         mi = ASR_MODELS.get(mk)
         if mi is None:
             raise ValueError(f"Unknown ASR model: {mk}")
+        if mi.get("framework") == "api":
+            continue  # API models don't need local preloading
         try:
             _get_asr_model(mk, device=device, use_compile=False)
         except Exception as e:
@@ -2011,6 +2286,8 @@ def segment_and_compare_pipeline(
     _dummy = (_np.sin(2 * _np.pi * _np.linspace(300, 3000, _dummy_len) / 16000
                       * _np.arange(_dummy_len)) * 0.05).astype(_np.float32)
     for mk in compare_models:
+        if ASR_MODELS.get(mk, {}).get("framework") == "api":
+            continue  # API models don't need GPU warm-up
         try:
             with _tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as _tf:
                 sf.write(_tf.name, _dummy, 16000, subtype="PCM_16")
@@ -2179,8 +2456,8 @@ def segment_and_compare_pipeline(
                     error_b = str(_retry_exc)
 
         # Compare
-        norm_a = _normalize_text(text_a)
-        norm_b = _normalize_text(text_b)
+        norm_a = _normalize_text_mfa(text_a)
+        norm_b = _normalize_text_mfa(text_b)
 
         # English filter: if enabled and either side has English → 0% match
         if filter_english and (_has_english(norm_a) or _has_english(norm_b)):
@@ -2216,6 +2493,23 @@ def segment_and_compare_pipeline(
             "diff_chunks": diff_chunks,
             "user_action": None,
         })
+
+        if on_segment:
+            partial = {
+                "audio_path": audio_path,
+                "audio_name": base_name,
+                "source_dir": source_dir,
+                "duration_sec": round(duration, 1),
+                "segment_count": len(segment_results),
+                "model_a": {"key": model_a, "name": model_a_info["name"], "abbr": model_a_info.get("abbr", model_a)},
+                "model_b": {"key": model_b, "name": model_b_info["name"], "abbr": model_b_info.get("abbr", model_b)},
+                "segments_dir": seg_out_dir,
+                "segments": list(segment_results),
+            }
+            try:
+                on_segment(idx + 1, total, partial)
+            except Exception:
+                pass
 
     if progress_callback:
         progress_callback("completed", 100)
