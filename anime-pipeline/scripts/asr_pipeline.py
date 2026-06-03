@@ -128,34 +128,47 @@ ASR_MODELS = {
     "qwen3-asr-api": {
         "name": "Qwen3-ASR-Flash (API)",
         "model_id": "",
-        "description": "阿里云百炼 Qwen3-ASR-Flash，中文/多语言，API 调用",
+        "description": "阿里云百炼 Qwen3-ASR-Flash，同步接口，base64 直传",
         "languages": ["zh"],
         "abbr": "qwen3-api",
         "framework": "api",
         "api_model": "qwen3-asr-flash",
+        "api_mode": "sync",
+    },
+    "fun-asr-api": {
+        "name": "Fun-ASR (API)",
+        "model_id": "",
+        "description": "阿里云百炼 Fun-ASR，异步文件转写，自动上传",
+        "languages": ["zh"],
+        "abbr": "funasr-api",
+        "framework": "api",
+        "api_model": "fun-asr",
+        "api_mode": "async",
     },
     "paraformer-v2-api": {
-        "name": "Paraformer语音识别-v2 (API)",
+        "name": "Paraformer-v2 (API)",
         "model_id": "",
-        "description": "阿里云百炼 Paraformer语音识别-v2，中文普通话，API 调用",
+        "description": "阿里云百炼 Paraformer-v2，异步文件转写，自动上传",
         "languages": ["zh"],
         "abbr": "pfv2-api",
         "framework": "api",
         "api_model": "paraformer-v2",
+        "api_mode": "async",
     },
     "paraformer-8k-api": {
-        "name": "Paraformer语音识别-8k-v1 (API)",
+        "name": "Paraformer-8k-v2 (API)",
         "model_id": "",
-        "description": "阿里云百炼 Paraformer语音识别-8k-v1，中文普通话 8kHz，API 调用",
+        "description": "阿里云百炼 Paraformer-8k-v2 8kHz电话场景，异步文件转写，自动上传",
         "languages": ["zh"],
         "abbr": "pf8k-api",
         "framework": "api",
-        "api_model": "paraformer-8k-v1",
+        "api_model": "paraformer-8k-v2",
+        "api_mode": "async",
     },
 }
 
 # Models used for ASR comparison
-COMPARE_MODELS = ["qwen3-asr", "cohere-transcribe", "whisper-base", "firered-asr2", "sensevoice-small", "paraformer-large", "qwen3-asr-api", "paraformer-v2-api", "paraformer-8k-api"]
+COMPARE_MODELS = ["qwen3-asr", "cohere-transcribe", "whisper-base", "firered-asr2", "sensevoice-small", "paraformer-large", "qwen3-asr-api", "fun-asr-api", "paraformer-v2-api", "paraformer-8k-api"]
 
 # --- Model singletons ---
 _asr_models: dict[tuple, object] = {}  # keyed by (model_key, device, use_fp16, use_flash_attn)
@@ -371,6 +384,10 @@ def _get_asr_model(model_key="qwen3-asr", device="cuda", use_fp16=True, use_flas
             )
             model = FireRedAsr2System(sys_cfg)
             _asr_models[cache_key] = model
+        elif model_info.get("framework") == "api":
+            # API-based models have no local model to load.
+            # Store a sentinel so callers can detect this case.
+            _asr_models[cache_key] = None
         else:
             from funasr import AutoModel
             model = AutoModel(
@@ -884,73 +901,304 @@ def _firered_asr_pipeline(audio_path: str, model_key: str, language: str, device
 def _api_asr_pipeline(audio_path: str, model_key: str, language: str, device: str, hotwords: str = "") -> list:
     """Run API-based ASR via Alibaba Cloud DashScope (Bailian) on audio file.
 
+    Two API modes:
+    - sync  (Qwen3-ASR-Flash): multimodal endpoint, base64 data URI, instant result
+    - async (Fun-ASR, Paraformer): upload file → OSS URL → submit task → poll → download
+
     Returns a list of {text, start_ms, end_ms} dicts, or a single-segment result
     when sentence-level timestamps are not available.
     """
     import requests
-    import json as _json
     import base64
     from config import DASHSCOPE_API_KEY, DASHSCOPE_API_BASE
 
     model_info = ASR_MODELS[model_key]
     api_model = model_info["api_model"]
+    api_mode = model_info.get("api_mode", "sync")
 
     if not DASHSCOPE_API_KEY:
         raise RuntimeError("未配置阿里云百炼 API Key，请在设置中配置 DASHSCOPE_API_KEY")
 
     duration_ms = int(get_audio_duration(audio_path) * 1000)
+    base_url = DASHSCOPE_API_BASE.rstrip('/')
 
-    # Read audio and encode as base64 (DashScope supports base64 audio in JSON body)
+    if api_mode == "sync":
+        return _api_sync_transcribe(audio_path, api_model, language, hotwords,
+                                    DASHSCOPE_API_KEY, base_url, duration_ms)
+    else:
+        return _api_async_transcribe(audio_path, api_model, language, hotwords,
+                                     DASHSCOPE_API_KEY, base_url, duration_ms)
+
+
+def _api_sync_transcribe(audio_path: str, api_model: str, language: str,
+                         hotwords: str, api_key: str, base_url: str,
+                         duration_ms: int) -> list:
+    """Qwen3-ASR-Flash: synchronous transcription via multimodal endpoint."""
+    import requests
+    import base64
+
+    ext = os.path.splitext(audio_path)[1].lower()
+    _mime_map = {'.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4',
+                 '.flac': 'audio/flac', '.aac': 'audio/aac', '.ogg': 'audio/ogg'}
+    mime_type = _mime_map.get(ext, 'audio/wav')
+
     with open(audio_path, "rb") as f:
         audio_b64 = base64.b64encode(f.read()).decode("ascii")
 
-    url = f"{DASHSCOPE_API_BASE.rstrip('/')}/api/v1/services/audio/asr/transcription"
-    headers = {
-        "Authorization": f"Bearer {DASHSCOPE_API_KEY}",
-        "Content-Type": "application/json",
-    }
+    url = f"{base_url}/api/v1/services/aigc/multimodal-generation/generation"
+    data_uri = f"data:{mime_type};base64,{audio_b64}"
 
-    params: dict = {}
+    asr_options: dict = {}
     if language and language != "auto":
-        params["language"] = language
+        asr_options["language"] = language
     if hotwords:
-        params["hotwords"] = hotwords
+        asr_options["context"] = hotwords
 
     payload = {
         "model": api_model,
-        "input": {"audio": audio_b64},
+        "input": {
+            "messages": [
+                {"content": [{"text": ""}], "role": "system"},
+                {"content": [{"audio": data_uri}], "role": "user"},
+            ],
+        },
+        "parameters": {},
+    }
+    if asr_options:
+        payload["parameters"]["asr_options"] = asr_options
+
+    try:
+        resp = _api_request_with_retry("POST", url, headers=_api_headers(api_key),
+                                       json=payload)
+        if resp.status_code != 200:
+            _raise_api_error(resp)
+    except Exception as e:
+        raise RuntimeError(f"API请求失败: {e}") from e
+
+    result = resp.json()
+    output = result.get("output", {})
+    choices = output.get("choices", [])
+    text = ""
+    if choices:
+        content_list = choices[0].get("message", {}).get("content", [])
+        text = "".join(
+            c.get("text", "") for c in content_list if isinstance(c, dict)
+        ).strip()
+    else:
+        text = (output.get("text", "") or "").strip()
+
+    if not text:
+        return []
+    return [{"text": text, "start_ms": 0, "end_ms": duration_ms}]
+
+
+# Shared session + semaphore to avoid SSL connection pool exhaustion under concurrency
+_api_session = None
+_api_session_lock = threading.Lock()
+_api_request_semaphore = threading.Semaphore(10)
+
+
+def _get_api_session():
+    """Lazy-init a requests.Session with retry and connection pooling."""
+    global _api_session
+    if _api_session is not None:
+        return _api_session
+    with _api_session_lock:
+        if _api_session is not None:
+            return _api_session
+        import requests
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
+        _api_session = requests.Session()
+        _retry = Retry(total=3, backoff_factor=0.5,
+                       status_forcelist=[500, 502, 503, 504],
+                       allowed_methods=["GET", "POST"])
+        _adapter = HTTPAdapter(max_retries=_retry, pool_connections=10, pool_maxsize=20)
+        _api_session.mount("https://", _adapter)
+        _api_session.mount("http://", _adapter)
+        return _api_session
+
+
+def _api_request_with_retry(method: str, url: str, **kwargs) -> "requests.Response":
+    """Make an HTTP request with retry + backoff for SSL/connection errors."""
+    import requests
+    import time
+    _api_request_semaphore.acquire()
+    try:
+        session = _get_api_session()
+        _last_err = None
+        for _attempt in range(3):
+            try:
+                resp = session.request(method, url, timeout=kwargs.pop("timeout", 300), **kwargs)
+                return resp
+            except (requests.exceptions.SSLError,
+                    requests.exceptions.ConnectionError) as e:
+                _last_err = e
+                time.sleep(1.0 * (_attempt + 1))
+        raise _last_err  # type: ignore[misc]
+    finally:
+        _api_request_semaphore.release()
+
+
+def _api_async_transcribe(audio_path: str, api_model: str, language: str,
+                          hotwords: str, api_key: str, base_url: str,
+                          duration_ms: int) -> list:
+    """Fun-ASR / Paraformer: async transcription via file upload and polling.
+
+    Steps:
+      1. Upload local file to DashScope via Files API → get file_id
+      2. Retrieve signed OSS URL via Files.get(file_id)
+      3. Submit async transcription task with the OSS URL
+      4. Poll task status until SUCCEEDED or FAILED
+      5. Download transcription result JSON and parse segments
+    """
+    import requests
+    import json as _json
+    import time
+    try:
+        import dashscope
+    except ImportError:
+        raise RuntimeError(
+            "使用异步API模型需要安装 dashscope SDK，请执行: pip install dashscope"
+        ) from None
+
+    dashscope.api_key = api_key
+    dashscope.base_http_api_url = f"{base_url}/api/v1"
+
+    # Step 1: Upload file (semaphore-limited + retry — SSL pool exhaustion)
+    from dashscope import Files
+    _upload_ok = False
+    _upload_err = None
+    _api_request_semaphore.acquire()
+    try:
+        for _attempt in range(3):
+            try:
+                upload_res = Files.upload(file_path=audio_path, purpose="inference")
+                file_id = upload_res.output["uploaded_files"][0]["file_id"]
+                _upload_ok = True
+                break
+            except Exception as e:
+                _upload_err = e
+                time.sleep(1.0 * (_attempt + 1))
+    finally:
+        _api_request_semaphore.release()
+    if not _upload_ok:
+        raise RuntimeError(f"文件上传失败(重试3次): {_upload_err}") from _upload_err
+
+    # Step 2: Get signed OSS URL
+    _url_ok = False
+    _url_err = None
+    for _attempt in range(3):
+        try:
+            info = Files.get(file_id)
+            oss_url = info.output["url"]
+            _url_ok = True
+            break
+        except Exception as e:
+            _url_err = e
+            time.sleep(1.0 * (_attempt + 1))
+    if not _url_ok:
+        raise RuntimeError(f"获取文件URL失败(重试3次): {_url_err}") from _url_err
+
+    # Step 3: Submit async transcription task
+    url = f"{base_url}/api/v1/services/audio/asr/transcription"
+    headers = _api_headers(api_key)
+    headers["X-DashScope-Async"] = "enable"
+
+    params: dict = {}
+    if language and language != "auto":
+        params["language_hints"] = [language]
+    if hotwords:
+        params["special_word_filter"] = hotwords
+
+    payload: dict = {
+        "model": api_model,
+        "input": {"file_urls": [oss_url]},
     }
     if params:
         payload["parameters"] = params
 
     try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=300)
+        resp = _api_request_with_retry("POST", url, headers=headers, json=payload)
         if resp.status_code != 200:
-            error_msg = resp.text[:500]
-            try:
-                err = resp.json()
-                error_msg = err.get("message", err.get("code", resp.text[:200]))
-            except Exception:
-                pass
-            raise RuntimeError(f"API调用失败 ({resp.status_code}): {error_msg}")
-    except requests.exceptions.RequestException as e:
-        raise RuntimeError(f"API请求失败: {e}") from e
+            _raise_api_error(resp)
+    except Exception as e:
+        raise RuntimeError(f"提交任务失败: {e}") from e
 
-    result = resp.json()
-    output = result.get("output", {})
+    task_id = resp.json()["output"]["task_id"]
 
-    # Parse DashScope ASR response: handle transcripts with optional sentences
+    # Step 4: Poll for completion
+    task_url = f"{base_url}/api/v1/tasks/{task_id}"
+    max_wait = 600  # 10 minutes max
+    poll_interval = 2
+    elapsed = 0
+    while elapsed < max_wait:
+        time.sleep(poll_interval)
+        elapsed += poll_interval
+        try:
+            pr = _api_request_with_retry("GET", task_url, headers=headers)
+            if pr.status_code != 200:
+                continue
+        except requests.exceptions.RequestException:
+            continue
+
+        task_data = pr.json()
+        ts = task_data.get("output", {}).get("task_status", "")
+
+        if ts == "SUCCEEDED":
+            results = task_data["output"].get("results", [])
+            if not results:
+                return []
+            result_item = results[0]
+            # DashScope returns transcription_url — a URL to download the JSON result.
+            # Fall back to inline transcription dict if URL is absent.
+            trans_url = result_item.get("transcription_url", "")
+            transcript = {}
+            if trans_url:
+                try:
+                    tr = _api_request_with_retry("GET", trans_url)
+                    transcript = tr.json() if tr.status_code == 200 else {}
+                except Exception:
+                    transcript = {}
+            else:
+                transcript = result_item.get("transcription", {}) or {}
+
+            return _parse_async_transcription(transcript, result_item, duration_ms)
+
+        elif ts == "FAILED":
+            err = task_data.get("output", {})
+            code = err.get("code", "UNKNOWN")
+            msg = err.get("message", "未知错误")
+            # Non-speech signals — return empty, not an error
+            if code in ("ASR_RESPONSE_HAVE_NO_WORDS",
+                        "SUCCESS_WITH_NO_VALID_FRAGMENT"):
+                return []
+            raise RuntimeError(f"语音识别失败 ({code}): {msg}")
+
+        # Back off polling gradually for longer tasks
+        if elapsed > 30:
+            poll_interval = 5
+        if elapsed > 120:
+            poll_interval = 10
+
+    raise RuntimeError(f"任务超时: 等待 {max_wait}s 后仍未完成")
+
+
+def _parse_async_transcription(transcript: dict, result_item: dict,
+                               duration_ms: int) -> list:
+    """Parse async transcription result into segments.
+
+    DashScope async results may contain:
+    - transcription: a dict with transcripts/sentences (URL already downloaded)
+    - file_url, code, etc. in the parent result_item
+    """
+    # Try transcription dict first
+    transcripts = transcript.get("transcripts", [])
     segments: list = []
-    transcripts = output.get("transcripts", [])
-    if not transcripts and isinstance(output, dict):
-        # Some models return flat output.text
-        flat_text = output.get("text", "").strip()
-        if flat_text:
-            return [{"text": flat_text, "start_ms": 0, "end_ms": duration_ms}]
 
-    for transcript in transcripts:
-        text = transcript.get("text", "").strip()
-        sentences = transcript.get("sentences", [])
+    for t in transcripts:
+        text = t.get("text", "").strip()
+        sentences = t.get("sentences", [])
 
         if sentences:
             for sent in sentences:
@@ -962,13 +1210,37 @@ def _api_asr_pipeline(audio_path: str, model_key: str, language: str, device: st
                         "end_ms": sent.get("end_time", 0),
                     })
         elif text:
-            segments.append({
-                "text": text,
-                "start_ms": 0,
-                "end_ms": duration_ms,
-            })
+            segments.append({"text": text, "start_ms": 0, "end_ms": duration_ms})
 
-    return segments
+    if segments:
+        return segments
+
+    # Fallback: some models return flat text
+    flat_text = transcript.get("text", "").strip()
+    if flat_text:
+        return [{"text": flat_text, "start_ms": 0, "end_ms": duration_ms}]
+
+    # Last fallback: check the result_item for inline transcription
+    inline_text = result_item.get("text", "").strip()
+    if inline_text:
+        return [{"text": inline_text, "start_ms": 0, "end_ms": duration_ms}]
+
+    return []
+
+
+def _api_headers(api_key: str) -> dict:
+    return {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+
+def _raise_api_error(resp) -> None:
+    """Extract error message from a failed DashScope API response and raise."""
+    error_msg = resp.text[:500]
+    try:
+        err = resp.json()
+        error_msg = err.get("message", err.get("code", resp.text[:200]))
+    except Exception:
+        pass
+    raise RuntimeError(f"API调用失败 ({resp.status_code}): {error_msg}")
 
 
 def _api_transcribe_segment(audio_path: str, model_key: str, language: str, device: str, hotwords: str = "") -> str:
@@ -1278,22 +1550,109 @@ def _build_cjk_variant_map():
 # MFA-style punctuation symbols (same as mfa/postprocess_textgrids.py)
 _MFA_PUNCT_SYMBOLS = set("〜～")  # wave dash, fullwidth tilde
 
+# Chinese numeral → digit mapping
+_CN_DIGIT_MAP = {
+    '零': 0, '〇': 0,
+    '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
+    '六': 6, '七': 7, '八': 8, '九': 9,
+    '两': 2,
+}
+_CN_NUMERAL_CHARS = set(_CN_DIGIT_MAP.keys()) | {'十', '百', '千', '万', '亿'}
+
+# Fullwidth digits ０-９ → halfwidth 0-9
+_FW_DIGIT_MAP = {chr(0xFF10 + i): str(i) for i in range(10)}
+
+
+def _parse_cn_number(s: str) -> int:
+    """Parse a Chinese numeral string (e.g. 十二, 一百二十三, 二〇二四) to integer."""
+    if not s:
+        return 0
+
+    # Pure digit sequence without units (e.g. 二〇二四 → 2024, 三五 → 35)
+    if all(ch in _CN_DIGIT_MAP for ch in s):
+        return int("".join(str(_CN_DIGIT_MAP[ch]) for ch in s))
+
+    total = 0
+    cur_num = 0
+    cur_section = 0
+
+    for ch in s:
+        if ch in _CN_DIGIT_MAP:
+            cur_num = _CN_DIGIT_MAP[ch]
+        elif ch == '十':
+            cur_section += cur_num * 10 if cur_num else 10
+            cur_num = 0
+        elif ch == '百':
+            cur_section += cur_num * 100 if cur_num else 100
+            cur_num = 0
+        elif ch == '千':
+            cur_section += cur_num * 1000 if cur_num else 1000
+            cur_num = 0
+        elif ch == '万':
+            cur_section = (cur_section + cur_num) * 10000 if (cur_section + cur_num) > 0 else 10000
+            total += cur_section
+            cur_section = 0
+            cur_num = 0
+        elif ch == '亿':
+            cur_section = (cur_section + cur_num) * 100000000 if (cur_section + cur_num) > 0 else 100000000
+            total += cur_section
+            cur_section = 0
+            cur_num = 0
+
+    return total + cur_section + cur_num
+
+
+def _normalize_chinese_numbers(text: str) -> str:
+    """Convert Chinese numerals and fullwidth digits to Arabic numerals."""
+    result = []
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch in _FW_DIGIT_MAP:
+            result.append(_FW_DIGIT_MAP[ch])
+            i += 1
+        elif ch in _CN_NUMERAL_CHARS:
+            j = i
+            while j < len(text) and text[j] in _CN_NUMERAL_CHARS:
+                j += 1
+            cn_str = text[i:j]
+            try:
+                result.append(str(_parse_cn_number(cn_str)))
+            except Exception:
+                result.append(cn_str)
+            i = j
+        else:
+            result.append(ch)
+            i += 1
+    return "".join(result)
+
 
 def _normalize_text_mfa(text: str) -> str:
-    """Normalize text the same way MFA does — strip punctuation only.
+    """Normalize text for ASR comparison — strip punctuation, unify pronouns and numbers.
 
-    Matches the approach in mfa/postprocess_textgrids.py:
-    remove Unicode punctuation (category P) + wave dash / fullwidth tilde.
-    No NFKC, no kana shift, no homophone mapping.
+    Steps:
+      1. Strip Unicode punctuation (category P) + wave dash / fullwidth tilde
+      2. Unify third-person pronouns (他/她/它/祂/牠 → 他)
+      3. Normalize Chinese numerals and fullwidth digits to Arabic digits
     """
     import unicodedata
+
+    # 1. Strip punctuation
     cleaned = []
     for ch in text:
         cat = unicodedata.category(ch)
         if cat.startswith("P") or ch in _MFA_PUNCT_SYMBOLS:
             continue
         cleaned.append(ch)
-    return "".join(cleaned)
+    text = "".join(cleaned)
+
+    # 2. Unify third-person pronouns
+    text = re.sub(r'[他她它祂牠]', '他', text)
+
+    # 3. Normalize Chinese numbers to Arabic digits
+    text = _normalize_chinese_numbers(text)
+
+    return text
 
 
 def _normalize_text(text: str) -> str:
@@ -1511,6 +1870,15 @@ def _levenshtein(s1: str, s2: str) -> int:
 
 _ENGLISH_RE = re.compile(r"[a-zA-Z]{3,}")  # 3+ consecutive Latin letters
 
+
+def _get_match_threshold() -> float:
+    """Read configurable match threshold from settings (default 90%)."""
+    try:
+        from config import ASR_COMPARE_MATCH_THRESHOLD as _v
+        return float(_v)
+    except Exception:
+        return 90.0
+
 def _has_english(text: str) -> bool:
     """Check if text contains English words (3+ consecutive ASCII letters)."""
     return bool(_ENGLISH_RE.search(text))
@@ -1647,8 +2015,8 @@ def compare_srt_sentences(srt_path1: str, srt_path2: str) -> dict:
         weighted_diff_sum += diff * weight
         total_weight += weight
 
-        # Compute character diff for this sentence pair
-        diff_chunks = _compute_diff_chunks(seg_a["text"], seg_b["text"])
+        # Compute character diff on normalized text (ignores punctuation, unifies numbers/pronouns)
+        diff_chunks = _compute_diff_chunks(t_a, t_b)
 
         sentence_results.append({
             "idx_a": seg_a["index"],
@@ -1659,7 +2027,7 @@ def compare_srt_sentences(srt_path1: str, srt_path2: str) -> dict:
             "text_b": seg_b["text"],
             "diff_percent": diff,
             "match_rate": round(100.0 - diff, 1),
-            "flagged": diff > 10.0,
+            "flagged": (100.0 - diff) < _get_match_threshold(),
             "diff_chunks": diff_chunks,
         })
 
@@ -1756,75 +2124,91 @@ def compare_text_files(file_path_a: str, file_path_b: str, filter_english: bool 
         result = compare_srt_sentences(file_path_a, file_path_b)
         result["file_a"] = file_path_a
         result["file_b"] = file_path_b
-        result["flagged"] = result.get("overall_diff_percent", 0) > 10.0
+        result["flagged"] = (100.0 - result.get("overall_diff_percent", 0)) < _get_match_threshold()
         return result
 
-    # Plain text / other formats: read and compare line-by-line
-    def _read_lines(path):
+    # Plain text / other formats: read, normalize, compare per sentence
+    def _read_all(path):
         if not os.path.exists(path):
-            return []
+            return ""
         with open(path, "r", encoding="utf-8", errors="replace") as f:
-            return [line.rstrip("\n\r") for line in f]
+            return f.read()
 
-    lines_a = _read_lines(file_path_a)
-    lines_b = _read_lines(file_path_b)
+    raw_a = _read_all(file_path_a)
+    raw_b = _read_all(file_path_b)
 
-    full_a = "\n".join(lines_a)
-    full_b = "\n".join(lines_b)
+    # Deep normalize both texts (strips punctuation, normalizes chars) for matching
+    norm_a = _normalize_text(raw_a)
+    norm_b = _normalize_text(raw_b)
 
-    if not full_a and not full_b:
+    if not norm_a and not norm_b:
         overall_diff = 0.0
-    elif not full_a or not full_b:
+    elif not norm_a or not norm_b:
         overall_diff = 100.0
     else:
-        dist = _levenshtein(full_a, full_b)
-        max_len = max(len(full_a), len(full_b))
+        dist = _levenshtein(norm_a, norm_b)
+        max_len = max(len(norm_a), len(norm_b))
         overall_diff = round((dist / max_len) * 100, 1)
 
+    # Split into sentences by common CJK/ASCII sentence-ending punctuation
+    def _split_sentences(text):
+        if not text:
+            return []
+        import re as _re_module
+        # Split on 。！？、；：！？\n . ! ? and keep delimiter with previous sentence
+        parts = _re_module.split(r'(?<=[。！？、；：!?\n\r\.])', text)
+        return [p.strip() for p in parts if p.strip()]
+
+    sents_a = _split_sentences(raw_a)
+    sents_b = _split_sentences(raw_b)
+
     sentence_results = []
-    max_lines = max(len(lines_a), len(lines_b))
+    max_sents = max(len(sents_a), len(sents_b))
     total_weight = 0
     weighted_diff_sum = 0.0
 
-    for i in range(max_lines):
-        ta = lines_a[i] if i < len(lines_a) else ""
-        tb = lines_b[i] if i < len(lines_b) else ""
-        if not ta and not tb:
+    for i in range(max_sents):
+        ta = sents_a[i] if i < len(sents_a) else ""
+        tb = sents_b[i] if i < len(sents_b) else ""
+        nta = _normalize_text(ta)
+        ntb = _normalize_text(tb)
+
+        if not nta and not ntb:
             diff = 0.0
-        elif not ta or not tb:
+        elif not nta or not ntb:
             diff = 100.0
         else:
-            dist = _levenshtein(ta, tb)
-            max_l = max(len(ta), len(tb))
+            dist = _levenshtein(nta, ntb)
+            max_l = max(len(nta), len(ntb))
             diff = round((dist / max_l) * 100, 1) if max_l > 0 else 0.0
 
-        weight = max(len(ta), len(tb))
+        weight = max(len(nta), len(ntb))
         weighted_diff_sum += diff * weight
         total_weight += weight
 
-        diff_chunks = _compute_diff_chunks(ta, tb)
+        diff_chunks = _compute_diff_chunks(nta, ntb)
         sentence_results.append({
-            "idx_a": i + 1 if i < len(lines_a) and ta else None,
-            "idx_b": i + 1 if i < len(lines_b) and tb else None,
+            "idx_a": i + 1 if i < len(sents_a) and ta else None,
+            "idx_b": i + 1 if i < len(sents_b) and tb else None,
             "start_ms": 0,
             "end_ms": 0,
             "text_a": ta,
             "text_b": tb,
             "diff_percent": diff,
             "match_rate": round(100.0 - diff, 1),
-            "flagged": diff > 10.0,
+            "flagged": (100.0 - diff) < _get_match_threshold(),
             "diff_chunks": diff_chunks,
         })
 
-    matched_count = min(len(lines_a), len(lines_b))
+    matched_count = min(len(sents_a), len(sents_b))
     return {
         "overall_diff_percent": overall_diff,
         "match_rate": round(100.0 - overall_diff, 1),
-        "flagged": overall_diff > 10.0,
+        "flagged": (100.0 - overall_diff) < _get_match_threshold(),
         "sentence_results": sentence_results,
         "matched_count": matched_count,
-        "unmatched_a": max(0, len(lines_a) - len(lines_b)),
-        "unmatched_b": max(0, len(lines_b) - len(lines_a)),
+        "unmatched_a": max(0, len(sents_a) - len(sents_b)),
+        "unmatched_b": max(0, len(sents_b) - len(sents_a)),
         "file_a": file_path_a,
         "file_b": file_path_b,
     }
@@ -2049,7 +2433,8 @@ def compare_asr_pipeline(
         matched_count = sentence_cmp["matched_count"]
         unmatched_a = sentence_cmp["unmatched_a"]
         unmatched_b = sentence_cmp["unmatched_b"]
-        flagged = diff_percent > 10.0 or len(empty_models) > 0
+        _threshold = _get_match_threshold()
+        flagged = (100.0 - diff_percent) < _threshold or len(empty_models) > 0
 
     if progress_callback:
         progress_callback("completed", 100)
@@ -2363,30 +2748,30 @@ def segment_and_compare_pipeline(
     # Step 4 & 5: Run both models on each segment and compare
     model_a_info = ASR_MODELS[model_a]
     model_b_info = ASR_MODELS[model_b]
-    segment_results = []
 
-    for idx, seg in enumerate(segment_files):
-        if cancel_check and cancel_check():
-            raise _CancelPipeline("Cancelled during segment processing")
-        if progress_callback:
-            progress_callback(f"processing_{idx + 1}", 10 + int((idx / total) * 85))
+    # When BOTH models are API-based, process all segments in parallel.
+    # API calls are pure network I/O — no GPU contention, so ThreadPoolExecutor
+    # gives near-linear speedup (N segments ≈ 1 segment's wall-clock time).
+    _both_api = (
+        model_a_info.get("framework") == "api"
+        and model_b_info.get("framework") == "api"
+    )
+    # API parallel workers: process all segments at once, cap at 30
+    _api_workers = min(len(segment_files), 10)
 
-        # Run both models on the SAME segment in parallel
+    _cuda_idx = 0
+    if device != "cpu" and torch.cuda.is_available():
+        try:
+            _cuda_idx = torch.cuda.current_device()
+        except Exception:
+            _cuda_idx = 0
+
+    def _process_single_segment(seg: dict) -> dict:
+        """Transcribe one segment with both models (parallel per-model), compare, save TXT."""
         text_a = ""
         text_b = ""
         error_a = None
         error_b = None
-
-        # Determine CUDA device index for per-thread context initialization.
-        # CUDA contexts are thread-local; each thread must set its own device
-        # to ensure GPU tensors are accessible. Without this, firered-asr2 can
-        # silently fail when its first ASR forward pass runs in a sub-thread.
-        _cuda_idx = 0
-        if device != "cpu" and torch.cuda.is_available():
-            try:
-                _cuda_idx = torch.cuda.current_device()
-            except Exception:
-                _cuda_idx = 0
 
         def _transcribe_a():
             nonlocal text_a, error_a
@@ -2406,40 +2791,20 @@ def segment_and_compare_pipeline(
             except Exception as e:
                 error_b = str(e)
 
-        # Execute both transcriptions concurrently
         t_a = threading.Thread(target=_transcribe_a, daemon=True)
         t_b = threading.Thread(target=_transcribe_b, daemon=True)
-        t_a.start()
-        t_b.start()
-        t_a.join()
-        t_b.join()
+        t_a.start(); t_b.start()
+        t_a.join(); t_b.join()
 
-        # Save TXT transcriptions in a txt/ subfolder alongside segment WAVs.
-        # Naming: {seg_name_without_ext}_{model_abbr}.txt
-        # e.g., xxx_seg001_qwen3-asr.txt, xxx_seg001_firered-asr2.txt
-        txt_dir = os.path.join(seg_out_dir, "txt")
-        os.makedirs(txt_dir, exist_ok=True)
-        seg_base = os.path.splitext(seg["name"])[0]  # e.g., "xxx_seg001"
-        txt_path_a = os.path.join(txt_dir, f"{seg_base}_{model_a_info.get('abbr', model_a)}.txt")
-        txt_path_b = os.path.join(txt_dir, f"{seg_base}_{model_b_info.get('abbr', model_b)}.txt")
-        with open(txt_path_a, "w", encoding="utf-8") as _f:
-            _f.write((text_a or "").strip())
-        with open(txt_path_b, "w", encoding="utf-8") as _f:
-            _f.write((text_b or "").strip())
-
-        # Retry: if firered-asr2 returned empty in a sub-thread (silent GPU
-        # failure — see FireRedAsr2.transcribe() which swallows exceptions),
-        # retry it once in the main thread where the CUDA context is primary.
-        # Only firered has this silent-failure mode; other models raise
-        # exceptions on real errors.
+        # firered silent-failure retry (only for firered, not API)
         for _retry_mk, _is_model_a in ((model_a, True), (model_b, False)):
             _retry_text = text_a if _is_model_a else text_b
             _retry_err = error_a if _is_model_a else error_b
             if _retry_text or _retry_err:
-                continue  # already got a result or a hard error
+                continue
             _retry_mi = ASR_MODELS.get(_retry_mk, {})
             if _retry_mi.get("framework") != "firered":
-                continue  # only firered has known silent-failure mode
+                continue
             try:
                 _retry_result = _transcribe_segment(
                     seg["wav_path"], _retry_mk, language, device, hotwords
@@ -2455,11 +2820,21 @@ def segment_and_compare_pipeline(
                 else:
                     error_b = str(_retry_exc)
 
+        # Save TXT files
+        txt_dir = os.path.join(seg_out_dir, "txt")
+        os.makedirs(txt_dir, exist_ok=True)
+        seg_base = os.path.splitext(seg["name"])[0]
+        txt_path_a = os.path.join(txt_dir, f"{seg_base}_{model_a_info.get('abbr', model_a)}.txt")
+        txt_path_b = os.path.join(txt_dir, f"{seg_base}_{model_b_info.get('abbr', model_b)}.txt")
+        with open(txt_path_a, "w", encoding="utf-8") as _f:
+            _f.write((text_a or "").strip())
+        with open(txt_path_b, "w", encoding="utf-8") as _f:
+            _f.write((text_b or "").strip())
+
         # Compare
         norm_a = _normalize_text_mfa(text_a)
         norm_b = _normalize_text_mfa(text_b)
 
-        # English filter: if enabled and either side has English → 0% match
         if filter_english and (_has_english(norm_a) or _has_english(norm_b)):
             diff_percent = 100.0
         elif not norm_a and not norm_b:
@@ -2472,9 +2847,9 @@ def segment_and_compare_pipeline(
             diff_percent = round((dist / max_len) * 100, 1)
 
         match_rate = round(100.0 - diff_percent, 1)
-        diff_chunks = _compute_diff_chunks(text_a, text_b) if (text_a or text_b) else []
+        diff_chunks = _compute_diff_chunks(norm_a, norm_b) if (norm_a or norm_b) else []
 
-        segment_results.append({
+        return {
             "seg_index": seg["index"],
             "seg_name": seg["name"],
             "start_ms": seg["start_ms"],
@@ -2489,27 +2864,97 @@ def segment_and_compare_pipeline(
             "error_b": error_b,
             "diff_percent": diff_percent,
             "match_rate": match_rate,
-            "flagged": diff_percent > 20.0,  # 20% diff = 80% match threshold
+            "flagged": (100.0 - diff_percent) < _get_match_threshold(),
             "diff_chunks": diff_chunks,
             "user_action": None,
-        })
+        }
 
-        if on_segment:
-            partial = {
-                "audio_path": audio_path,
-                "audio_name": base_name,
-                "source_dir": source_dir,
-                "duration_sec": round(duration, 1),
-                "segment_count": len(segment_results),
-                "model_a": {"key": model_a, "name": model_a_info["name"], "abbr": model_a_info.get("abbr", model_a)},
-                "model_b": {"key": model_b, "name": model_b_info["name"], "abbr": model_b_info.get("abbr", model_b)},
-                "segments_dir": seg_out_dir,
-                "segments": list(segment_results),
+    total = len(segment_files)
+    segment_results: list = []
+
+    if _both_api:
+        # --- Parallel path: all segments at once via thread pool ---
+        if progress_callback:
+            progress_callback("processing_parallel", 10)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=_api_workers) as _pool:
+            _futures = {
+                _pool.submit(_process_single_segment, seg): idx
+                for idx, seg in enumerate(segment_files)
             }
-            try:
-                on_segment(idx + 1, total, partial)
-            except Exception:
-                pass
+            _done_count = 0
+            for _future in concurrent.futures.as_completed(_futures):
+                if cancel_check and cancel_check():
+                    _pool.shutdown(wait=False, cancel_futures=True)
+                    raise _CancelPipeline("Cancelled during segment processing")
+                try:
+                    _result = _future.result()
+                except Exception as _exc:
+                    # If a single segment crashes, record it and continue
+                    _seg_idx = _futures[_future]
+                    _seg = segment_files[_seg_idx]
+                    _result = {
+                        "seg_index": _seg["index"], "seg_name": _seg["name"],
+                        "start_ms": _seg["start_ms"], "end_ms": _seg["end_ms"],
+                        "duration_s": _seg["duration_s"], "wav_path": _seg["wav_path"],
+                        "text_a": "", "text_b": "", "txt_path_a": "", "txt_path_b": "",
+                        "error_a": str(_exc), "error_b": str(_exc),
+                        "diff_percent": 100.0, "match_rate": 0.0, "flagged": True,
+                        "diff_chunks": [], "user_action": None,
+                    }
+                segment_results.append(_result)
+                _done_count += 1
+                if progress_callback:
+                    progress_callback(f"processing_{_done_count}",
+                                      10 + int((_done_count / total) * 85))
+                if on_segment:
+                    _partial = {
+                        "audio_path": audio_path, "audio_name": base_name,
+                        "source_dir": source_dir, "duration_sec": round(duration, 1),
+                        "segment_count": len(segment_results),
+                        "model_a": {"key": model_a, "name": model_a_info["name"],
+                                    "abbr": model_a_info.get("abbr", model_a)},
+                        "model_b": {"key": model_b, "name": model_b_info["name"],
+                                    "abbr": model_b_info.get("abbr", model_b)},
+                        "segments_dir": seg_out_dir,
+                        "segments": list(segment_results),
+                    }
+                    try:
+                        on_segment(_done_count, total, _partial)
+                    except Exception:
+                        pass
+
+        # Sort results by segment index (as_completed yields out of order)
+        segment_results.sort(key=lambda r: r["seg_index"])
+
+    else:
+        # --- Serial path: original behavior for local/GPU models ---
+        for idx, seg in enumerate(segment_files):
+            if cancel_check and cancel_check():
+                raise _CancelPipeline("Cancelled during segment processing")
+            if progress_callback:
+                progress_callback(f"processing_{idx + 1}",
+                                  10 + int((idx / total) * 85))
+
+            _result = _process_single_segment(seg)
+            segment_results.append(_result)
+
+            if on_segment:
+                _partial = {
+                    "audio_path": audio_path, "audio_name": base_name,
+                    "source_dir": source_dir, "duration_sec": round(duration, 1),
+                    "segment_count": len(segment_results),
+                    "model_a": {"key": model_a, "name": model_a_info["name"],
+                                "abbr": model_a_info.get("abbr", model_a)},
+                    "model_b": {"key": model_b, "name": model_b_info["name"],
+                                "abbr": model_b_info.get("abbr", model_b)},
+                    "segments_dir": seg_out_dir,
+                    "segments": list(segment_results),
+                }
+                try:
+                    on_segment(idx + 1, total, _partial)
+                except Exception:
+                    pass
 
     if progress_callback:
         progress_callback("completed", 100)
@@ -2525,3 +2970,300 @@ def segment_and_compare_pipeline(
         "segments_dir": seg_out_dir,
         "segments": segment_results,
     }
+
+
+def segment_and_compare_pipeline_multi(
+    audio_files: list,  # [{"path": str, "source_dir": str, "name": str}, ...]
+    language: str = "zh",
+    device: str = "cuda",
+    model_a: str = "qwen3-asr",
+    model_b: str = "cohere-transcribe",
+    hotwords: str = "",
+    segment_min_s: float = 9.0,
+    segment_max_s: float = 16.0,
+    progress_callback=None,   # callable(step, pct)
+    cancel_check=None,         # callable → bool
+    filter_english: bool = True,
+    on_segment=None,           # callable(file_name, seg_idx, total_segs, partial)
+    on_file_done=None,         # callable(file_idx, result_dict) when all segments of one file finish
+) -> list:
+    """Process multiple audio files with VAD + API segment comparison in parallel.
+
+    Streaming pipeline optimized for API models:
+      VAD file → immediately submit its segments to API → VAD next file in parallel.
+      VAD and API phases overlap — no waiting for all VADs to finish.
+
+    Returns a list of per-file result dicts (same format as segment_and_compare_pipeline).
+    """
+    if not audio_files:
+        return []
+
+    model_a_info = ASR_MODELS[model_a]
+    model_b_info = ASR_MODELS[model_b]
+    total_files = len(audio_files)
+
+    if progress_callback:
+        progress_callback(f"准备处理 {total_files} 个文件...", 2)
+
+    # ── Streaming pipeline: VAD file → submit its segments → VAD next file ──
+    # VAD is serial (FunASR model), but API calls start immediately after each
+    # file's VAD, overlapping with the next file's VAD.
+    import logging as _logging
+    _logger = _logging.getLogger("asr_pipeline")
+
+    _file_results: list = [{"segments": [], "audio_path": f["path"],
+                            "audio_name": os.path.splitext(f.get("name", os.path.basename(f["path"])))[0],
+                            "source_dir": f.get("source_dir", ""),
+                            "duration_sec": 0, "segment_count": 0,
+                            "model_a": {"key": model_a, "name": model_a_info["name"],
+                                        "abbr": model_a_info.get("abbr", model_a)},
+                            "model_b": {"key": model_b, "name": model_b_info["name"],
+                                        "abbr": model_b_info.get("abbr", model_b)},
+                            "segments_dir": ""} for f in audio_files]
+
+    _cuda_idx = 0
+    if device != "cpu" and torch.cuda.is_available():
+        try:
+            _cuda_idx = torch.cuda.current_device()
+        except Exception:
+            _cuda_idx = 0
+
+    _api_done_count = [0]
+    _total_segs_global = [0]
+    _file_seg_total = [0] * total_files  # how many segments each file has
+    _file_seg_done = [0] * total_files   # how many have completed
+    _api_futures_lock = threading.Lock()
+    _api_futures: dict = {}  # future → (file_idx, seg_index)
+    _api_workers = min(len(segment_files), 10)
+    _api_pool = concurrent.futures.ThreadPoolExecutor(max_workers=_api_workers)
+
+    def _vad_one_file(file_idx: int, finfo: dict) -> list:
+        """VAD → chunk → save segment WAVs. Returns list of segment task dicts."""
+        audio_path = finfo["path"]
+        base_name = os.path.splitext(finfo.get("name", os.path.basename(audio_path)))[0]
+        source_dir = finfo.get("source_dir", "")
+        duration = get_audio_duration(audio_path)
+        duration_ms = int(duration * 1000)
+        _file_results[file_idx]["duration_sec"] = round(duration, 1)
+        seg_out_dir = os.path.join(ASR_COMPARE_SEGMENTS_DIR, base_name)
+        os.makedirs(seg_out_dir, exist_ok=True)
+        _file_results[file_idx]["segments_dir"] = seg_out_dir
+
+        vad_segs = run_vad(audio_path, device=device)
+        if not vad_segs:
+            if duration <= segment_max_s * 2:
+                vad_segs = [(0, duration_ms)]
+            else:
+                chunk_ms = int((segment_min_s + segment_max_s) / 2 * 1000)
+                vad_segs = [(i * chunk_ms, min((i + 1) * chunk_ms, duration_ms))
+                            for i in range((duration_ms + chunk_ms - 1) // chunk_ms)]
+        chunks = _chunk_vad_segments(vad_segs, segment_min_s, segment_max_s)
+        if not chunks:
+            chunks = [(0, duration_ms)]
+
+        audio, sr = sf.read(audio_path, dtype="float32")
+        if audio.ndim > 1:
+            audio = audio.mean(axis=1)
+
+        segments = []
+        for i_chunk, (start_ms, end_ms) in enumerate(chunks):
+            start_samp = max(0, int(start_ms * sr / 1000))
+            end_samp = min(len(audio), int(end_ms * sr / 1000))
+            if end_samp <= start_samp:
+                continue
+            chunk = audio[start_samp:end_samp]
+            seg_name = f"{base_name}_seg{i_chunk + 1:03d}.wav"
+            seg_path = os.path.join(seg_out_dir, seg_name)
+            sf.write(seg_path, chunk, sr, subtype="PCM_16")
+            segments.append({
+                "index": i_chunk + 1, "start_ms": start_ms, "end_ms": end_ms,
+                "duration_s": round((end_ms - start_ms) / 1000, 1),
+                "wav_path": seg_path, "name": seg_name,
+                "source_dir": source_dir, "file_name": finfo.get("name", base_name),
+                "base_name": base_name, "seg_out_dir": seg_out_dir,
+                "audio_path": audio_path, "duration_sec": round(duration, 1),
+            })
+        return segments
+
+    def _process_one_task(file_idx: int, seg: dict) -> dict:
+        """Transcribe one segment with both models, compare, save TXT."""
+        text_a = ""; text_b = ""; error_a = None; error_b = None
+
+        def _transcribe_a():
+            nonlocal text_a, error_a
+            try:
+                if device != "cpu" and torch.cuda.is_available():
+                    torch.cuda.set_device(_cuda_idx)
+                text_a = _transcribe_segment(seg["wav_path"], model_a, language, device, hotwords)
+            except Exception as e:
+                error_a = str(e)
+
+        def _transcribe_b():
+            nonlocal text_b, error_b
+            try:
+                if device != "cpu" and torch.cuda.is_available():
+                    torch.cuda.set_device(_cuda_idx)
+                text_b = _transcribe_segment(seg["wav_path"], model_b, language, device, hotwords)
+            except Exception as e:
+                error_b = str(e)
+
+        t_a = threading.Thread(target=_transcribe_a, daemon=True)
+        t_b = threading.Thread(target=_transcribe_b, daemon=True)
+        t_a.start(); t_b.start(); t_a.join(); t_b.join()
+
+        txt_dir = os.path.join(seg["seg_out_dir"], "txt")
+        os.makedirs(txt_dir, exist_ok=True)
+        seg_base = os.path.splitext(seg["name"])[0]
+        txt_a = os.path.join(txt_dir, f"{seg_base}_{model_a_info.get('abbr', model_a)}.txt")
+        txt_b = os.path.join(txt_dir, f"{seg_base}_{model_b_info.get('abbr', model_b)}.txt")
+        with open(txt_a, "w", encoding="utf-8") as _f:
+            _f.write((text_a or "").strip())
+        with open(txt_b, "w", encoding="utf-8") as _f:
+            _f.write((text_b or "").strip())
+
+        norm_a = _normalize_text_mfa(text_a); norm_b = _normalize_text_mfa(text_b)
+        if filter_english and (_has_english(norm_a) or _has_english(norm_b)):
+            diff_percent = 100.0
+        elif not norm_a and not norm_b:
+            diff_percent = 0.0
+        elif not norm_a or not norm_b:
+            diff_percent = 100.0
+        else:
+            dist = _levenshtein(norm_a, norm_b)
+            diff_percent = round((dist / max(len(norm_a), len(norm_b))) * 100, 1)
+        match_rate = round(100.0 - diff_percent, 1)
+        diff_chunks = _compute_diff_chunks(norm_a, norm_b) if (norm_a or norm_b) else []
+
+        return {
+            "seg_index": seg["index"], "seg_name": seg["name"],
+            "start_ms": seg["start_ms"], "end_ms": seg["end_ms"],
+            "duration_s": seg["duration_s"], "wav_path": seg["wav_path"],
+            "text_a": text_a, "text_b": text_b,
+            "txt_path_a": txt_a, "txt_path_b": txt_b,
+            "error_a": error_a, "error_b": error_b,
+            "diff_percent": diff_percent, "match_rate": match_rate,
+            "flagged": (100.0 - diff_percent) < _get_match_threshold(),
+            "diff_chunks": diff_chunks, "user_action": None,
+        }
+
+    try:
+        # VAD each file serially, submit segments to API pool immediately
+        for _fi in range(total_files):
+            if cancel_check and cancel_check():
+                raise _CancelPipeline("Cancelled")
+            _fname = audio_files[_fi].get("name", f"文件{_fi+1}")
+            if progress_callback:
+                progress_callback(f"VAD: {_fname} ({_fi+1}/{total_files})",
+                                  2 + int((_fi / max(total_files, 1)) * 8))
+
+            _segs = _vad_one_file(_fi, audio_files[_fi])
+            _total_segs_global[0] += len(_segs)
+            _file_seg_total[_fi] = len(_segs)
+
+            # Submit this file's segments to API pool (non-blocking)
+            for _seg in _segs:
+                _f = _api_pool.submit(_process_one_task, _fi, _seg)
+                with _api_futures_lock:
+                    _api_futures[_f] = _fi
+
+            if progress_callback:
+                _pct = 10 + int(((_fi + 1) / max(total_files, 1)) * 10)
+                progress_callback(
+                    f"已提交API: {_fi+1}/{total_files} ({len(_segs)}段)",
+                    _pct,
+                )
+
+        # All VAD done, wait for remaining API futures
+        _total_segs = _total_segs_global[0]
+        while True:
+            with _api_futures_lock:
+                if not _api_futures:
+                    break
+                _snapshot = list(_api_futures.keys())
+            if not _snapshot:
+                break
+
+            _done, _ = concurrent.futures.wait(
+                _snapshot, timeout=1.0,
+                return_when=concurrent.futures.FIRST_COMPLETED,
+            )
+            for _f in _done:
+                with _api_futures_lock:
+                    _fi = _api_futures.pop(_f, None)
+                if _fi is None:
+                    continue
+                try:
+                    _seg_result = _f.result()
+                    _file_results[_fi]["segments"].append(_seg_result)
+                except Exception as _e:
+                    _logger.warning("Segment API failed (file %d): %s", _fi, _e)
+                _api_done_count[0] += 1
+                _file_seg_done[_fi] += 1
+                # Check if this file's all segments are done
+                if on_file_done and _file_seg_total[_fi] > 0 and _file_seg_done[_fi] >= _file_seg_total[_fi]:
+                    _fr = _file_results[_fi]
+                    _fr["segment_count"] = len(_fr["segments"])
+                    _fr["segments"].sort(key=lambda r: r["seg_index"])
+                    _done_result = {
+                        "audio_path": _fr["audio_path"],
+                        "audio_name": _fr["audio_name"],
+                        "source_dir": _fr["source_dir"],
+                        "duration_sec": _fr.get("duration_sec", 0),
+                        "segment_count": _fr["segment_count"],
+                        "model_a": _fr["model_a"],
+                        "model_b": _fr["model_b"],
+                        "segments_dir": _fr.get("segments_dir", ""),
+                        "segments": list(_fr["segments"]),
+                    }
+                    try:
+                        on_file_done(_fi, _done_result)
+                    except Exception:
+                        pass
+
+            if cancel_check and cancel_check():
+                raise _CancelPipeline("Cancelled")
+
+            if progress_callback and _total_segs > 0:
+                _pct = 20 + int((_api_done_count[0] / _total_segs) * 78)
+                progress_callback(
+                    f"API转写: {_api_done_count[0]}/{_total_segs} 段",
+                    min(_pct, 98),
+                )
+
+            if on_segment:
+                for _f in _done:
+                    try:
+                        _fi2 = _api_futures.get(_f) if _f in _api_futures else None
+                        if _fi2 is None:
+                            _fi2, _ = _f.result() if hasattr(_f, 'result') else (0, None)
+                    except Exception:
+                        continue
+                    try:
+                        _fr = _file_results[_fi2] if isinstance(_fi2, int) and _fi2 < len(_file_results) else _file_results[0]
+                    except Exception:
+                        continue
+                    _partial = {
+                        "audio_path": _fr["audio_path"], "audio_name": _fr["audio_name"],
+                        "source_dir": _fr["source_dir"], "duration_sec": _fr.get("duration_sec", 0),
+                        "segment_count": len(_fr["segments"]),
+                        "model_a": _fr["model_a"], "model_b": _fr["model_b"],
+                        "segments_dir": _fr.get("segments_dir", ""),
+                        "segments": list(_fr["segments"]),
+                    }
+                    try:
+                        on_segment(_fr["audio_name"], len(_fr["segments"]), _total_segs, _partial)
+                    except Exception:
+                        pass
+    finally:
+        _api_pool.shutdown(wait=False)
+
+    # Sort and finalize
+    for _fr in _file_results:
+        _fr["segments"].sort(key=lambda r: r["seg_index"])
+        _fr["segment_count"] = len(_fr["segments"])
+
+    if progress_callback:
+        progress_callback("completed", 100)
+
+    return _file_results
+

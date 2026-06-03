@@ -1390,7 +1390,10 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
           </div>
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
             <span style="font-size:11px;color:var(--text2);" id="cmp-progress-detail"></span>
-            <button class="btn" id="btn-cmp-stop" onclick="stopAsrCompare()" style="display:none;font-size:11px;padding:4px 12px;background:var(--danger);color:#fff;">中止</button>
+            <div style="display:flex;gap:8px;">
+              <button class="btn" id="btn-cmp-retry" onclick="retryCurrentAsrCompare()" style="display:none;font-size:11px;padding:4px 12px;background:#ff9800;color:#fff;" title="强制重试卡住的任务">重试</button>
+              <button class="btn" id="btn-cmp-stop" onclick="stopAsrCompare()" style="display:none;font-size:11px;padding:4px 12px;background:var(--danger);color:#fff;">中止</button>
+            </div>
           </div>
           <div id="cmp-file-progress-list" style="max-height:40vh;overflow-y:auto;"></div>
         </div>
@@ -1576,7 +1579,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
               <option value="below">低于</option>
               <option value="above">高于</option>
             </select>
-            <input id="txt-filter-threshold" type="number" value="80" min="0" max="100" step="1"
+            <input id="txt-filter-threshold" type="number" value="90" min="0" max="100" step="1"
               onchange="renderTxtResults()" oninput="renderTxtResults()"
               style="width:56px;padding:4px 6px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;text-align:center;">
             <span style="font-size:12px;color:var(--text2);">% 匹配率</span>
@@ -2847,6 +2850,10 @@ document.addEventListener('click', function(e) {
     discardPipelineJob(btn.getAttribute('data-jobid'));
     return;
   }
+  if (btn.classList.contains('btn-retry-job')) {
+    retryPipelineJob(btn.getAttribute('data-jobid'));
+    return;
+  }
 });
 
 // ============================================================
@@ -3625,8 +3632,9 @@ async function loadJobs() {
           '<div style="display:flex;gap:8px;align-items:center;">' +
             '<span class="job-status status-' + j.status + '">' + statusText(j.status) + '</span>' +
             (j.status === 'completed' || j.status === 'failed' ? '<button class="btn btn-secondary btn-delete-job" data-jobid="' + j.job_id + '" style="font-size:10px;padding:2px 6px;background:var(--danger);color:#fff;margin-left:6px;">X</button>' : '') +
-            (j.status === 'running' || j.status === 'download_submitted' || j.status === 'queued' ? '<button class="btn btn-secondary btn-cancel-job" data-jobid="' + j.job_id + '" style="font-size:10px;padding:2px 8px;background:var(--warning);color:#000;margin-left:6px;">取消</button>' : '') +
-            (j.status === 'interrupted' ? '<button class="btn btn-success btn-resume-job" data-jobid="' + j.job_id + '" style="font-size:10px;padding:2px 8px;background:var(--success);color:#000;margin-left:6px;">继续执行</button><button class="btn btn-secondary btn-discard-job" data-jobid="' + j.job_id + '" style="font-size:10px;padding:2px 8px;background:var(--danger);color:#fff;margin-left:4px;">丢弃</button>' : '') +
+            (j.status === 'running' || j.status === 'download_submitted' || j.status === 'queued' || j.status === 'pending' ? '<button class="btn btn-secondary btn-cancel-job" data-jobid="' + j.job_id + '" style="font-size:10px;padding:2px 8px;background:var(--warning);color:#000;margin-left:6px;">取消</button><button class="btn btn-warning btn-retry-job" data-jobid="' + j.job_id + '" style="font-size:10px;padding:2px 8px;background:#ff9800;color:#fff;margin-left:4px;" title="强制重试卡住的任务">重试</button>' : '') +
+            (j.status === 'interrupted' ? '<button class="btn btn-success btn-resume-job" data-jobid="' + j.job_id + '" style="font-size:10px;padding:2px 8px;background:var(--success);color:#000;margin-left:6px;">继续执行</button><button class="btn btn-warning btn-retry-job" data-jobid="' + j.job_id + '" style="font-size:10px;padding:2px 8px;background:#ff9800;color:#fff;margin-left:4px;" title="强制重试">重试</button><button class="btn btn-secondary btn-discard-job" data-jobid="' + j.job_id + '" style="font-size:10px;padding:2px 8px;background:var(--danger);color:#fff;margin-left:4px;">丢弃</button>' : '') +
+            (j.status === 'failed' ? '<button class="btn btn-warning btn-retry-job" data-jobid="' + j.job_id + '" style="font-size:10px;padding:2px 8px;background:#ff9800;color:#fff;margin-left:6px;" title="强制重试失败的任务">重试</button>' : '') +
           '</div>' +
         '</div>' +
         '<div class="progress-bar"><div class="progress-fill" style="width:' + progress + '%"></div></div>' +
@@ -3700,6 +3708,16 @@ async function discardPipelineJob(jobId) {
     var data = await resp.json();
     if (resp.ok) { toast(data.message || '已丢弃', 'info'); loadJobs(); }
     else { toast('丢弃失败: ' + (data.detail || ''), 'error'); }
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function retryPipelineJob(jobId) {
+  if (!confirm('确定重试此任务？\\n\\n已完成的步骤将跳过，不会从头开始。')) return;
+  try {
+    var resp = await fetch(API + '/api/jobs/' + jobId + '/retry', { method: 'POST' });
+    var data = await resp.json();
+    if (resp.ok) { toast(data.message || '任务正在重试', 'success'); loadJobs(); }
+    else { toast('重试失败: ' + (data.detail || ''), 'error'); }
   } catch(e) { toast('Error: ' + e.message, 'error'); }
 }
 
@@ -7653,7 +7671,7 @@ function restoreUiState() {
 var _cmpLoaded = false;
 var _cmpRestored = false;    // only restore interrupted jobs once per page load
 var _cmpMode = 'seg';         // 'seg' (VAD split) or 'file' (whole file)
-var _cmpFolderPath = '/mnt/project/ComicCut/anime-pipeline/data/asr_compare/segments';
+var _cmpFolderPath = '/mnt/nas/Persons/jiangyichen/Enhanced';
 var _cmpFolderFiles = [];    // audio files in current folder
 var _cmpFolderSelected = {}; // selected file names
 var _cmpJobId = null;
@@ -8009,6 +8027,12 @@ async function pollCmpJob() {
 
     _cmpRenderFileCards(job);
 
+    // Show retry button when job is loading or running (user may want to force-retry if stuck)
+    var retryBtn = document.getElementById('btn-cmp-retry');
+    if (retryBtn) {
+      retryBtn.style.display = (job.status === 'loading' || job.status === 'running') ? 'inline-block' : 'none';
+    }
+
     if (job.status === 'completed') {
       _cmpResetUI();
       _cmpResults = job.results || {};
@@ -8044,6 +8068,12 @@ async function pollCmpJob() {
 function _cmpResetUI() {
   stopCmpPolling();
   document.getElementById('btn-cmp-stop').style.display = 'none';
+  document.getElementById('btn-cmp-retry').style.display = 'none';
+}
+
+function retryCurrentAsrCompare() {
+  if (!_cmpJobId) { toast('没有正在进行的任务', 'warn'); return; }
+  retryAsrCompareJob(_cmpJobId);
 }
 
 function stopAsrCompare() {
@@ -8801,6 +8831,7 @@ async function restoreAsrCompareInterruptedJobs() {
       html += '</div>';
       html += '<div style="display:flex;gap:8px;margin-top:12px;">';
       html += '<button class="btn btn-success" onclick="resumeAsrCompareJob(\'' + j.job_id + '\')" style="background:var(--success);color:#000;font-weight:600;">继续执行 (跳过已完成)</button>';
+      html += '<button class="btn btn-warning" onclick="retryAsrCompareJob(\'' + j.job_id + '\')" style="background:#ff9800;color:#fff;">强制重试</button>';
       html += '<button class="btn btn-secondary" onclick="discardAsrCompareJob(\'' + j.job_id + '\')" style="background:var(--danger);color:#fff;">丢弃任务</button>';
       html += '</div></div></div>';
       panel.insertAdjacentHTML('afterbegin', html);
@@ -8839,6 +8870,7 @@ async function resumeAsrCompareJob(jobId) {
     document.getElementById('cmp-progress-detail').textContent = '';
     document.getElementById('cmp-file-progress-list').innerHTML = '';
     document.getElementById('btn-cmp-stop').style.display = 'inline-block';
+    document.getElementById('btn-cmp-retry').style.display = 'none';
     document.getElementById('cmp-summary').style.display = 'none';
     document.getElementById('cmp-empty-state').style.display = 'none';
     document.getElementById('btn-cmp-run').disabled = true;
@@ -8858,6 +8890,33 @@ async function discardAsrCompareJob(jobId) {
   } catch(e) { toast('丢弃失败: ' + e.message, 'error'); }
 }
 
+async function retryAsrCompareJob(jobId) {
+  if (!confirm('确定强制重试此任务？\\n\\n已完成的文件不会被重复处理，仅重新加载模型并继续处理卡住的文件。')) return;
+  try {
+    var resp = await fetch(API + '/api/asr-compare/job/' + jobId + '/retry', { method: 'POST' });
+    if (!resp.ok) { var err = await resp.json(); toast('重试失败: ' + (err.detail || '未知错误'), 'error'); return; }
+    toast('ASR 对比任务正在重试...', 'success');
+    // Remove interrupted card if present
+    var section = document.getElementById('cmp-interrupted-section');
+    if (section) section.remove();
+    // Set up the compare UI for polling
+    _cmpJobId = jobId;
+    document.getElementById('cmp-progress').style.display = 'block';
+    document.getElementById('cmp-progress-fill').style.width = '0%';
+    document.getElementById('cmp-progress-pct').textContent = '0%';
+    document.getElementById('cmp-progress-text').textContent = '正在重试...';
+    document.getElementById('cmp-progress-detail').textContent = '';
+    document.getElementById('cmp-file-progress-list').innerHTML = '';
+    document.getElementById('btn-cmp-stop').style.display = 'inline-block';
+    document.getElementById('btn-cmp-retry').style.display = 'none';
+    document.getElementById('cmp-summary').style.display = 'none';
+    document.getElementById('cmp-empty-state').style.display = 'none';
+    document.getElementById('btn-cmp-run').disabled = true;
+    document.getElementById('btn-cmp-run').textContent = '处理中...';
+    startCmpPolling();
+  } catch(e) { toast('重试失败: ' + e.message, 'error'); }
+}
+
 // ============================================================
 // Text Comparison
 // ============================================================
@@ -8868,10 +8927,10 @@ var _txtFolderFiles = [];
 var _txtFolderSelected = {};
 var _txtPairs = [];
 var _txtModelAbbrs = [];
+var _txtDefaultPath = '/mnt/project/ComicCut/anime-pipeline/data/asr_compare/segments';
 var _txtJobId = null;
 var _txtPollTimer = null;
 var _txtResults = {};
-var _txtDefaultPath = '';
 
 async function loadTxtFolderBrowser(path) {
   if (!path) path = _txtDefaultPath || '';
@@ -9070,17 +9129,19 @@ function stopTxtPolling() {
 }
 
 function _txtRenderFileCards(job) {
-  var pairs = job.pairs || [];
-  if (!pairs.length) return;
+  var items = job.items || job.pairs || [];
+  if (!items.length) return;
   var html = '';
-  for (var i = 0; i < pairs.length; i++) {
-    var pk = pairs[i].pair_key;
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    var pk = item.pair_key || item.audio_path || '';
+    var name = item.audio_name || item.name_a || '';
     var r = (job.results || {})[pk];
-    var cls = r ? (r.error ? 'error' : 'completed') : (i <= job.completed ? 'completed' : 'pending');
+    var cls = r ? (r.error ? 'error' : 'completed') : 'pending';
     var statusText = {pending: '等待中', completed: '完成', error: '出错'}[cls] || cls;
     html += '<div class="cmp-progress-card ' + (cls === 'completed' ? 'completed' : cls === 'error' ? 'error' : '') + '">' +
       '<div style="display:flex;justify-content:space-between;align-items:center;">' +
-        '<span style="font-size:11px;font-weight:500;">' + escapeHtml(pairs[i].name_a) + ' ↔ ' + escapeHtml(pairs[i].name_b) + '</span>' +
+        '<span style="font-size:11px;font-weight:500;">' + escapeHtml(name) + '</span>' +
         '<span style="font-size:10px;padding:1px 6px;border-radius:3px;' +
           (cls === 'completed' ? 'background:#1a3a2a;color:var(--success);' :
            cls === 'error' ? 'background:#3a1a1a;color:var(--danger);' :
@@ -9093,11 +9154,11 @@ function _txtRenderFileCards(job) {
 function pollTxtJob() {
   if (!_txtJobId) { stopTxtPolling(); return; }
   fetch(API + '/api/txt-compare/job/' + _txtJobId).then(function(resp) { return resp.json(); }).then(function(job) {
-    if (!job || job.error === 'Job not found') { stopTxtPolling(); return; }
+    if (!job || job.detail === 'Job not found') { stopTxtPolling(); return; }
     document.getElementById('txt-progress-fill').style.width = Math.round(job.progress || 0) + '%';
     document.getElementById('txt-progress-pct').textContent = Math.round(job.progress || 0) + '%';
     document.getElementById('txt-progress-text').textContent = job.current_step || '';
-    document.getElementById('txt-progress-detail').textContent = (job.completed || 0) + '/' + job.total + ' 组';
+    document.getElementById('txt-progress-detail').textContent = (job.completed || 0) + '/' + job.total + ' 文件';
     _txtRenderFileCards(job);
 
     if (job.status === 'completed') {
@@ -9144,89 +9205,108 @@ function _txtGetThreshold() {
 }
 
 function _txtGetMatchRate(r) {
+  // Check top-level or first segment match_rate
   if (r.match_rate != null) return r.match_rate;
   if (r.diff_percent != null) return Math.round((100 - r.diff_percent) * 10) / 10;
   if (r.overall_diff_percent != null) return Math.round((100 - r.overall_diff_percent) * 10) / 10;
+  // Segmented-style: get from first segment
+  var segs = r.segments || [];
+  if (segs.length) {
+    if (segs[0].match_rate != null) return segs[0].match_rate;
+    if (segs[0].diff_percent != null) return Math.round((100 - segs[0].diff_percent) * 10) / 10;
+  }
   return 0;
 }
 
 function renderTxtSummary() {
   var threshold = _txtGetThreshold();
   var keys = Object.keys(_txtResults);
-  var total = keys.length;
-  var good = 0, low = 0, deleted = 0;
+  // Count segments across all results (segmented-style)
+  var totalSeg = 0, goodSeg = 0, lowSeg = 0, deletedSeg = 0;
   for (var i = 0; i < keys.length; i++) {
-    var r = _txtResults[keys[i]];
-    if (r.user_action === 'deleted' || r.user_action === 'discarded') { deleted++; }
-    else if (_txtGetMatchRate(r) < threshold) { low++; }
-    else { good++; }
+    var result = _txtResults[keys[i]];
+    var segs = result.segments || [];
+    for (var j = 0; j < segs.length; j++) {
+      var s = segs[j];
+      totalSeg++;
+      if (s.user_action === 'deleted') { deletedSeg++; }
+      else if (_txtGetMatchRate(s) < threshold) { lowSeg++; }
+      else { goodSeg++; }
+    }
   }
-  document.getElementById('txt-total-num').textContent = total;
-  document.getElementById('txt-good-num').textContent = good;
-  document.getElementById('txt-low-num').textContent = low;
-  document.getElementById('txt-deleted-num').textContent = deleted;
+  document.getElementById('txt-total-num').textContent = totalSeg;
+  document.getElementById('txt-good-num').textContent = goodSeg;
+  document.getElementById('txt-low-num').textContent = lowSeg;
+  document.getElementById('txt-deleted-num').textContent = deletedSeg;
   document.getElementById('txt-summary').style.display = 'block';
 }
 
 function renderTxtResults() {
+  // Segmented-style: flatten all segments from all results
+  var allSegs = [];
   var keys = Object.keys(_txtResults);
+  for (var i = 0; i < keys.length; i++) {
+    var result = _txtResults[keys[i]];
+    var segs = result.segments || [];
+    for (var j = 0; j < segs.length; j++) {
+      var s = segs[j];
+      s._parent_audio_name = result.audio_name || '';
+      s._parent_source_dir = result.source_dir || '';
+      s._parent_audio_path = result.audio_path || '';
+      s._parent_pair_key = keys[i];
+      s._model_a = (result.model_a || {}).abbr || 'A';
+      s._model_b = (result.model_b || {}).abbr || 'B';
+      allSegs.push(s);
+    }
+  }
+
   var filterOn = document.getElementById('txt-filter-cb').checked;
-  var filterAbove = document.getElementById('txt-filter-dir').value === 'above';
   var threshold = _txtGetThreshold();
+  var filterAbove = document.getElementById('txt-filter-dir').value === 'above';
   var filterCount = 0;
 
   var rowsHtml = '';
-  for (var i = 0; i < keys.length; i++) {
-    var pk = keys[i];
-    var r = _txtResults[pk];
-    if (r.user_action === 'deleted' || r.user_action === 'discarded') continue;
-    var mr = _txtGetMatchRate(r);
+  for (var i = 0; i < allSegs.length; i++) {
+    var seg = allSegs[i];
+    if (seg.user_action === 'deleted') continue;
+    var mr = _txtGetMatchRate(seg);
     if (filterOn) {
       if (filterAbove ? mr < threshold : mr >= threshold) continue;
     }
     filterCount++;
     var badgeCls = mr >= threshold ? 'normal' : 'flagged';
-    var sentCount = (r.sentence_results || []).length;
-    var statusLabel = r.user_action === 'kept' ? '已保留' : (r.error ? '出错' : '');
-    var rowId = 'txt-row-' + i;
+    var rowId = 'txt-seg-' + i;
+    var hasError = seg.error_a || seg.error_b;
 
     rowsHtml += '<tr id="' + rowId + '" class="cmp-main-row" style="cursor:pointer;" onclick="txtToggleSentences(\'' + rowId + '\')">';
-    rowsHtml += '<td style="font-size:11px;" title="' + safeAttr(r.file_a || r.name_a || '') + '">' + escapeHtml((r.name_a || '文件A').substring(0, 40)) + '</td>';
-    rowsHtml += '<td style="font-size:11px;" title="' + safeAttr(r.file_b || r.name_b || '') + '">' + escapeHtml((r.name_b || '文件B').substring(0, 40)) + '</td>';
+    rowsHtml += '<td style="font-size:11px;" title="' + safeAttr(seg._parent_audio_name) + '">' +
+      escapeHtml(seg._parent_audio_name.substring(0, 40)) +
+      '<div style="font-size:9px;color:var(--text2);">' + escapeHtml(seg._model_a) + ' vs ' + escapeHtml(seg._model_b) + '</div></td>';
     rowsHtml += '<td><span class="cmp-diff-badge ' + badgeCls + '">' + mr.toFixed(1) + '%</span></td>';
-    rowsHtml += '<td style="font-size:11px;">' + sentCount + ' 行</td>';
-    rowsHtml += '<td style="font-size:10px;">' + escapeHtml(statusLabel) + '</td>';
+    rowsHtml += '<td style="font-size:10px;">' + (hasError ? '<span style="color:var(--danger);">出错</span>' : '') + '</td>';
     rowsHtml += '<td class="actions-cell">';
-    rowsHtml += '<button class="btn btn-secondary" onclick="event.stopPropagation();txtViewFile(\'' + safeAttr(r.file_a) + '\')" style="font-size:9px;padding:2px 6px;">查看A</button> ';
-    rowsHtml += '<button class="btn btn-secondary" onclick="event.stopPropagation();txtViewFile(\'' + safeAttr(r.file_b) + '\')" style="font-size:9px;padding:2px 6px;">查看B</button> ';
+    rowsHtml += '<button class="btn btn-secondary" onclick="event.stopPropagation();playTxtSegment(\'' + safeAttr(seg.wav_path) + '\',\'' + safeAttr(seg._parent_audio_name) + '\')" style="font-size:9px;padding:2px 6px;">🔊 播放</button> ';
+    if (seg.txt_path_a) { rowsHtml += '<button class="btn btn-secondary" onclick="event.stopPropagation();txtViewFile(\'' + safeAttr(seg.txt_path_a) + '\')" style="font-size:9px;padding:2px 6px;">查看' + escapeHtml(seg._model_a) + '</button> '; }
+    if (seg.txt_path_b) { rowsHtml += '<button class="btn btn-secondary" onclick="event.stopPropagation();txtViewFile(\'' + safeAttr(seg.txt_path_b) + '\')" style="font-size:9px;padding:2px 6px;">查看' + escapeHtml(seg._model_b) + '</button> '; }
     if (mr < threshold) {
-      rowsHtml += '<button class="btn btn-danger" onclick="event.stopPropagation();txtDeletePair(\'' + safeAttr(pk) + '\',\'' + safeAttr(r.file_a || '') + '\',\'' + safeAttr(r.file_b || '') + '\')" style="font-size:9px;padding:2px 6px;background:var(--danger);color:#fff;">删除</button>';
+      rowsHtml += '<button class="btn btn-danger" onclick="event.stopPropagation();txtDeleteSeg(\'' + safeAttr(seg._parent_pair_key) + '\',\'' + safeAttr(seg._parent_audio_path) + '\')" style="font-size:9px;padding:2px 6px;background:var(--danger);color:#fff;">删除</button>';
     }
     rowsHtml += '</td></tr>';
 
-    // Detail row
-    rowsHtml += '<tr id="' + rowId + '-sent" class="cmp-sent-row" style="display:none;"><td colspan="6">';
+    // Detail row with side-by-side diff
+    rowsHtml += '<tr id="' + rowId + '-sent" class="cmp-sent-row" style="display:none;"><td colspan="4">';
     rowsHtml += '<div style="padding:8px;font-size:11px;max-height:300px;overflow-y:auto;">';
-    rowsHtml += '<table style="width:100%;border-collapse:collapse;">';
-    rowsHtml += '<tr style="font-size:10px;color:var(--text2);"><th style="padding:4px;text-align:left;width:50%;">文件 A</th><th style="padding:4px;text-align:left;width:50%;">文件 B</th></tr>';
-    var sents = r.sentence_results || [];
-    for (var s = 0; s < sents.length; s++) {
-      var sent = sents[s];
-      var chunks = sent.diff_chunks || [];
-      var sideA = _renderDiffSide(chunks, 'a');
-      var sideB = _renderDiffSide(chunks, 'b');
-      var sentMr = sent.match_rate != null ? sent.match_rate : 100;
-      var sentBadgeCls = sentMr >= 90 ? 'normal' : 'flagged';
-      rowsHtml += '<tr style="border-top:1px solid var(--border);">';
-      rowsHtml += '<td style="padding:4px;vertical-align:top;font-size:10px;">' + sideA + '</td>';
-      rowsHtml += '<td style="padding:4px;vertical-align:top;font-size:10px;">' + sideB + '</td>';
-      rowsHtml += '</tr>';
-    }
-    rowsHtml += '</table></div></td></tr>';
+    var chunks = seg.diff_chunks || [];
+    var sideA = _renderDiffSide(chunks, 'a');
+    var sideB = _renderDiffSide(chunks, 'b');
+    rowsHtml += '<div style="display:flex;gap:8px;">';
+    rowsHtml += '<div style="flex:1;padding:8px;background:var(--bg);border-radius:4px;border:1px solid var(--border);"><div style="font-size:10px;color:var(--text2);margin-bottom:4px;">' + escapeHtml(seg._model_a) + '</div><div style="white-space:pre-wrap;font-size:10px;">' + sideA + '</div></div>';
+    rowsHtml += '<div style="flex:1;padding:8px;background:var(--bg);border-radius:4px;border:1px solid var(--border);"><div style="font-size:10px;color:var(--text2);margin-bottom:4px;">' + escapeHtml(seg._model_b) + '</div><div style="white-space:pre-wrap;font-size:10px;">' + sideB + '</div></div>';
+    rowsHtml += '</div></div></td></tr>';
   }
 
   document.getElementById('txt-filter-count').textContent = filterOn ? '(' + filterCount + ' 个结果)' : '';
-  document.getElementById('txt-result-tbody').innerHTML = rowsHtml || '<tr><td colspan="6" style="text-align:center;color:var(--text2);padding:20px;">无匹配结果</td></tr>';
+  document.getElementById('txt-result-tbody').innerHTML = rowsHtml || '<tr><td colspan="4" style="text-align:center;color:var(--text2);padding:20px;">无匹配结果</td></tr>';
 }
 
 function txtToggleSentences(rowId) {
@@ -9235,27 +9315,30 @@ function txtToggleSentences(rowId) {
   row.style.display = row.style.display === 'none' ? '' : 'none';
 }
 
-function txtKeepPair(pairKey) {
-  fetch(API + '/api/txt-compare/keep', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pair_key: pairKey })
-  }).then(function(resp) { return resp.json(); }).then(function(data) {
-    if (data.status === 'ok') {
-      if (_txtResults[pairKey]) { _txtResults[pairKey].user_action = 'kept'; _txtResults[pairKey].flagged = false; }
-      renderTxtSummary();
-      renderTxtResults();
-      toast('已保留', 'success');
-    }
-  }).catch(function(e) { toast('操作失败: ' + e.message, 'error'); });
+function playTxtSegment(wavPath, label) {
+  var playerBar = document.getElementById('txt-seg-player-bar');
+  var player = document.getElementById('txt-seg-audio-player');
+  var nameSpan = document.getElementById('txt-seg-playing-name');
+  playerBar.style.display = 'flex';
+  nameSpan.textContent = label || '';
+  player.src = API + '/api/txt-compare/stream?path=' + encodeURIComponent(wavPath);
+  player.style.display = 'block';
+  player.play().catch(function(){});
 }
 
-function txtDeletePair(pairKey, fileA, fileB) {
-  if (!confirm('确认删除此文件对？\n\n两个文本文件将被永久删除，无法恢复。')) return;
+function closeTxtSegPlayer() {
+  var player = document.getElementById('txt-seg-audio-player');
+  player.pause();
+  player.style.display = 'none';
+  document.getElementById('txt-seg-player-bar').style.display = 'none';
+}
+
+function txtDeleteSeg(pairKey, audioPath) {
+  if (!confirm('确认删除此音频及其关联的文本文件？\n\n音频和文本文件将被永久删除，无法恢复。')) return;
   fetch(API + '/api/txt-compare/delete', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pair_key: pairKey, file_a: fileA, file_b: fileB })
+    body: JSON.stringify({ pair_key: pairKey, audio_path: audioPath })
   }).then(function(resp) { return resp.json(); }).then(function(data) {
     if (data.status === 'ok') {
       if (_txtResults[pairKey]) { _txtResults[pairKey].user_action = 'deleted'; _txtResults[pairKey].flagged = false; }
@@ -9274,12 +9357,17 @@ function txtBatchDelete() {
   for (var i = 0; i < keys.length; i++) {
     var r = _txtResults[keys[i]];
     if (r.user_action === 'deleted' || r.user_action === 'discarded') continue;
-    if (_txtGetMatchRate(r) < threshold) {
-      items.push({ pair_key: keys[i], file_a: r.file_a || '', file_b: r.file_b || '' });
+    // Check segments
+    var segs = r.segments || [];
+    for (var j = 0; j < segs.length; j++) {
+      if (_txtGetMatchRate(segs[j]) < threshold) {
+        items.push({ pair_key: keys[i], audio_path: r.audio_path || '' });
+        break;
+      }
     }
   }
   if (!items.length) { toast('没有需要删除的文件', 'info'); return; }
-  if (!confirm('确认一键删除 ' + items.length + ' 组文件？\n\n所有匹配率低于 ' + threshold + '% 的文本文件将被永久删除，无法恢复。')) return;
+  if (!confirm('确认一键删除 ' + items.length + ' 个音频及关联文本文件？\n\n所有匹配率低于 ' + threshold + '% 的文件将被永久删除，无法恢复。')) return;
 
   fetch(API + '/api/txt-compare/batch-delete', {
     method: 'POST',
@@ -9297,7 +9385,7 @@ function txtBatchDelete() {
       renderTxtSummary();
       renderTxtResults();
       loadTxtFolderBrowser(_txtFolderPath);
-      toast('已批量删除', 'success');
+      toast('已批量删除 ' + items.length + ' 个音频及关联文件', 'success');
     }
   }).catch(function(e) { toast('批量删除失败: ' + e.message, 'error'); });
 }
@@ -9329,7 +9417,7 @@ async function restoreTxtCompareInterruptedJobs() {
       document.getElementById('txt-progress-fill').style.width = (running.progress || 0) + '%';
       document.getElementById('txt-progress-pct').textContent = Math.round(running.progress || 0) + '%';
       document.getElementById('txt-progress-text').textContent = running.current_step || '处理中...';
-      document.getElementById('txt-progress-detail').textContent = (running.completed || 0) + '/' + running.total + ' 组';
+      document.getElementById('txt-progress-detail').textContent = (running.completed || 0) + '/' + running.total + ' 文件';
       document.getElementById('btn-txt-stop').style.display = 'inline-block';
       document.getElementById('btn-txt-run').disabled = true;
       document.getElementById('btn-txt-run').textContent = '处理中...';
@@ -9353,10 +9441,13 @@ async function restoreTxtCompareInterruptedJobs() {
       var completed = j.completed || 0;
       var pending = total - completed;
       var progress = j.progress || 0;
+      var modelA = (j._model_a_abbr || 'A');
+      var modelB = (j._model_b_abbr || 'B');
       var html = '<div id="txt-interrupted-section" style="margin:12px 0;">';
       html += '<div style="background:var(--bg2);border:1px solid #ff6b6b;border-radius:8px;padding:16px;margin-bottom:12px;">';
       html += '<div style="font-size:16px;font-weight:bold;color:#ff6b6b;margin-bottom:8px;">⚠ 任务因服务器重启中断</div>';
-      html += '<div style="font-size:13px;color:var(--text2);margin-bottom:4px;">总文件组: ' + total + ' | 已完成: ' + completed + ' | 待处理: ' + pending + '</div>';
+      html += '<div style="font-size:13px;color:var(--text2);margin-bottom:4px;">模型: ' + escapeHtml(modelA) + ' vs ' + escapeHtml(modelB) + '</div>';
+      html += '<div style="font-size:13px;color:var(--text2);margin-bottom:4px;">总文件数: ' + total + ' | 已完成: ' + completed + ' | 待处理: ' + pending + '</div>';
       html += '<div style="font-size:13px;color:var(--text2);margin-bottom:4px;">进度: ' + progress + '%</div>';
       html += '<div style="margin-top:8px;background:var(--bg);border-radius:4px;height:6px;overflow:hidden;">';
       html += '<div style="width:' + progress + '%;height:100%;background:linear-gradient(90deg,#ff6b6b,#ff4444);border-radius:4px;"></div>';
@@ -10775,6 +10866,11 @@ function renderSettings() {
   html += '<span class="settings-label">模型 B</span>';
   html += '<select data-setting-config="ASR_COMPARE_MODEL_B" style="flex:1;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;">';
   html += '<option value="">— 加载中 —</option></select>';
+  html += '</div>';
+  html += '<div class="settings-row">';
+  html += '<span class="settings-label">匹配阈值 (%)</span>';
+  html += '<input type="number" data-setting-config="ASR_COMPARE_MATCH_THRESHOLD" value="' + escapeHtml(cfg.ASR_COMPARE_MATCH_THRESHOLD || '90') + '" min="0" max="100" step="1" style="width:80px;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:12px;">';
+  html += '<span style="font-size:11px;color:var(--text2);">低于此匹配率标记为异常</span>';
   html += '</div>';
   html += '</div>';
 
@@ -12795,7 +12891,10 @@ async function mfaAudioMatchText() {
 
       // Use matched text content for Step 2 tokenization
       var stem = _mfaAudioSelectedName.replace(/\.(wav|mp3|flac|m4a)$/i, '');
-      // Create JSONL from matched text content
+      var audioDir = _mfaAudioSelected.substring(0, _mfaAudioSelected.lastIndexOf('/'));
+      // Auto-trigger Step 1: trim silence (runs in background)
+      mfaAutoTrimForSelected(audioDir, stem);
+      // Create JSONL from matched text content (auto Step 2: tokenize)
       mfaCreateJsonlFromMatch(stem, data);
 
       // Step 2 output → data/mfa/txt (tokenized), Steps 3/4 use this
@@ -12850,17 +12949,17 @@ function mfaAudioSyncToPipeline() {
   document.getElementById('mfa-gen-jsonl').value = 'data/mfa/jsonl/' + stem + '.jsonl';
   document.getElementById('mfa-gen-output').value = 'data/mfa/txt';
   document.getElementById('mfa-align-txt-dir').value = 'data/mfa/txt';
-  document.getElementById('mfa-align-wav-dir').value = dir || 'data/mfa/wav';
+  document.getElementById('mfa-align-wav-dir').value = 'data/mfa/wav';
   document.getElementById('mfa-align-output').value = 'data/mfa/aligned';
   document.getElementById('mfa-val-txt-dir').value = 'data/mfa/txt';
-  document.getElementById('mfa-val-wav-dir').value = dir || 'data/mfa/wav';
+  document.getElementById('mfa-val-wav-dir').value = 'data/mfa/wav';
   document.getElementById('mfa-val-output').value = 'data/mfa/validate';
   document.getElementById('mfa-post-jsonl').value = 'data/mfa/jsonl/' + stem + '.jsonl';
   document.getElementById('mfa-post-txt-dir').value = 'data/mfa/txt';
   document.getElementById('mfa-post-textgrid-dir').value = 'data/mfa/aligned';
   document.getElementById('mfa-post-output').value = 'data/mfa/post';
   document.getElementById('mfa-post-filtered').value = 'data/mfa/filtered';
-  document.getElementById('mfa-post-wav-dir').value = dir || 'data/mfa/wav';
+  document.getElementById('mfa-post-wav-dir').value = 'data/mfa/wav';
 
   toast('管线路径已同步: ' + stem, 'success');
 }
@@ -13169,7 +13268,74 @@ function mfaTextShowInPostprocess(audioStem) {
     }).catch(function() {});
 }
 
-// -- Use original audio/text paths in Step 3/4 ---
+// -- Auto-trigger Step 1 trim silence after audio selection ---
+async function mfaAutoTrimForSelected(audioDir, stem) {
+  // Auto-trigger Step 1: trim silence on the selected audio's directory.
+  // Runs as a background job — fires and forgets, shows toast when done.
+  if (!audioDir) return;
+  var inputDir = audioDir;
+  var outputDir = document.getElementById('mfa-trim-output').value || 'data/mfa/wav';
+  try {
+    var params = new URLSearchParams();
+    params.set('input_dir', inputDir);
+    params.set('output_dir', outputDir);
+    params.set('max_silence_sec', document.getElementById('mfa-trim-max-silence').value || '1.0');
+    params.set('sil_vol_threshold', document.getElementById('mfa-trim-sil-vol').value || '0.001');
+    params.set('sil_len_threshold', document.getElementById('mfa-trim-sil-len').value || '0.08');
+    params.set('normalize_edges', document.getElementById('mfa-trim-normalize-edges').checked ? 'true' : 'false');
+    params.set('target_edge_silence_sec', document.getElementById('mfa-trim-target-edge').value || '0.5');
+    params.set('edge_silence_threshold', document.getElementById('mfa-trim-edge-threshold').value || '0.001');
+    params.set('edge_frame_length', document.getElementById('mfa-trim-edge-frame').value || '1024');
+    params.set('workers', document.getElementById('mfa-trim-workers').value || '8');
+    var resp = await fetch(API + '/api/mfa/trim-silence?' + params.toString(), { method: 'POST' });
+    var r = await resp.json();
+    if (r.status === 'ok') {
+      // Poll in background for completion
+      _mfaAutoTrimJobId = r.job_id;
+      mfaPollAutoTrimJob(r.job_id, stem);
+      // Update step 1 button
+      var trimBtn = document.getElementById('btn-mfa-trim');
+      if (trimBtn) { trimBtn.textContent = '步骤 1 (已触发 — 裁剪中...)'; trimBtn.disabled = true; trimBtn.style.background = 'var(--warning)'; trimBtn.style.cursor = 'wait'; }
+    }
+  } catch(e) {
+    console.error('Auto-trim failed:', e);
+  }
+}
+
+var _mfaAutoTrimJobId = null;
+var _mfaAutoTrimPollTimer = null;
+
+async function mfaPollAutoTrimJob(jobId, stem) {
+  if (_mfaAutoTrimPollTimer) clearInterval(_mfaAutoTrimPollTimer);
+  _mfaAutoTrimPollTimer = setInterval(async function() {
+    try {
+      var resp = await fetch(API + '/api/mfa/job/' + jobId);
+      if (!resp.ok) { clearInterval(_mfaAutoTrimPollTimer); _mfaAutoTrimPollTimer = null; return; }
+      var job = await resp.json();
+      if (job.status === 'completed') {
+        clearInterval(_mfaAutoTrimPollTimer); _mfaAutoTrimPollTimer = null;
+        _mfaAutoTrimJobId = null;
+        var trimBtn = document.getElementById('btn-mfa-trim');
+        if (trimBtn) { trimBtn.textContent = '步骤 1 (已完成 — 静音已裁剪)'; trimBtn.disabled = true; trimBtn.style.background = 'var(--success)'; trimBtn.style.cursor = 'default'; }
+        var runAllBtn = document.getElementById('btn-mfa-runall');
+        var genBtn = document.getElementById('btn-mfa-gen');
+        if (genBtn && genBtn.disabled) {
+          runAllBtn.textContent = '运行管线 (3→4)';
+          runAllBtn.disabled = false;
+          runAllBtn.style.opacity = '';
+        }
+        toast('步骤 1 完成: 静音裁剪 → ' + stem + '.wav', 'success');
+      } else if (job.status === 'failed') {
+        clearInterval(_mfaAutoTrimPollTimer); _mfaAutoTrimPollTimer = null;
+        _mfaAutoTrimJobId = null;
+        var trimBtn2 = document.getElementById('btn-mfa-trim');
+        if (trimBtn2) { trimBtn2.textContent = '步骤 1 (失败 — 点击重试)'; trimBtn2.disabled = false; trimBtn2.style.background = 'var(--danger)'; trimBtn2.style.cursor = 'pointer'; }
+        toast('步骤 1 失败: ' + (job.error || '裁剪静音出错'), 'error');
+      }
+    } catch(e) { console.error('Poll auto-trim:', e); }
+  }, 2000);
+}
+
 async function mfaCreateJsonlFromMatch(stem, data) {
   // Tokenize the matched TXT directly → skip JSONL, skip Step 2 button
   try {
@@ -13185,7 +13351,23 @@ async function mfaCreateJsonlFromMatch(stem, data) {
       genBtn.textContent = '步骤 2 (已完成 — ' + r.token_count + ' tokens)';
       genBtn.disabled = true; genBtn.style.background = 'var(--success)'; genBtn.style.cursor = 'default';
       var runAllBtn = document.getElementById('btn-mfa-runall');
-      runAllBtn.textContent = '运行管线 (3→4)';
+      // Only show "3→4" if trim (step 1) is also done
+      var trimBtn = document.getElementById('btn-mfa-trim');
+      var trimDone = trimBtn && trimBtn.disabled && trimBtn.textContent.indexOf('已完成') >= 0;
+      if (!_mfaAutoTrimJobId && !trimDone) {
+        // Trim hasn't been triggered — show full pipeline
+        runAllBtn.textContent = '运行完整管线 (1→2→3→4)';
+      } else if (_mfaAutoTrimJobId) {
+        // Trim is still running
+        runAllBtn.textContent = '运行管线 (等步骤1完成)';
+        runAllBtn.disabled = true;
+        runAllBtn.style.opacity = '0.6';
+      } else {
+        // Both steps done
+        runAllBtn.textContent = '运行管线 (3→4)';
+        runAllBtn.disabled = false;
+        runAllBtn.style.opacity = '';
+      }
       // Show tokenized text inline in step 2 panel
       _mfaGenOutputDir = r.output_dir || 'data/mfa/txt';
       var section = document.getElementById('mfa-section-2');
@@ -13503,14 +13685,11 @@ async function mfaRunStep(step) {
       document.getElementById('mfa-progress-pct').textContent = '✓';
       document.getElementById('mfa-progress-fill').style.width = '100%';
       document.getElementById('mfa-progress-fill').style.background = 'var(--success)';
+      _mfaSkipTgPath = data.tg_path || '';
       var container = document.getElementById('mfa-progress-actions');
       if (container) {
         container.style.display = 'block';
-        var outDir = document.getElementById('mfa-align-output').value;
-        var wDir = document.getElementById('mfa-align-wav-dir').value;
-        var tDir = document.getElementById('mfa-align-txt-dir').value;
-        var tgPath = (data.tg_path || '').replace(/'/g, "\\'");
-        container.innerHTML = '<button class="btn btn-primary" style="font-size:12px;padding:6px 14px;" onclick="mfaOpenViewerWithContext(\'' + outDir.replace(/'/g, "\\'") + '\', \'' + wDir.replace(/'/g, "\\'") + '\', \'' + tDir.replace(/'/g, "\\'") + '\', \'' + tgPath + '\')">在 TextGrid 查看器中查看对齐结果</button>';
+        container.innerHTML = '<button class="btn btn-primary" style="font-size:12px;padding:6px 14px;" onclick="mfaOpenSkippedTg()">在 TextGrid 查看器中查看对齐结果</button>';
       }
       return;
     }
@@ -13932,7 +14111,7 @@ function batchMfaShowResults(job) {
   var files = job.files || [];
   var html = '<div style="font-size:11px;">';
   html += '<div style="display:flex;padding:6px 8px;background:var(--bg2);border-bottom:2px solid var(--border);font-weight:600;">';
-  html += '<span style="width:30px;">#</span><span style="flex:1;">文件名</span><span style="width:80px;">状态</span><span style="width:180px;">异常原因</span></div>';
+  html += '<span style="width:30px;">#</span><span style="flex:1;">文件名</span><span style="width:80px;">状态</span><span style="width:140px;">异常原因</span><span style="width:50px;">查看</span></div>';
   for (var i = 0; i < files.length; i++) {
     var f = files[i];
     var bg = '';
@@ -13945,11 +14124,16 @@ function batchMfaShowResults(job) {
     else if (f.status === 'deleted') { statusColor = '#888'; statusText = '🗑 已删除'; }
     else { statusText = '... ' + f.status; }
     var reasons = (f.anomaly_reasons || []).join(', ') || (f.error || '');
+    var canView = (f.status === 'completed' || f.status === 'anomalous') && (f.post_textgrid_path || f.textgrid_path);
+    var viewBtn = canView
+      ? '<span style="color:var(--accent);cursor:pointer;text-decoration:underline;" onclick="event.stopPropagation();batchMfaViewFile(' + JSON.stringify(f).replace(/"/g, '&quot;') + ')">查看</span>'
+      : '<span style="color:#555;">-</span>';
     html += '<div style="display:flex;padding:5px 8px;border-bottom:1px solid var(--border);align-items:center;' + bg + '">';
     html += '<span style="width:30px;font-size:10px;color:var(--text2);">' + (i+1) + '</span>';
     html += '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(f.audio_name) + '">' + escapeHtml(f.audio_name) + '</span>';
     html += '<span style="width:80px;color:' + statusColor + ';">' + statusText + '</span>';
-    html += '<span style="width:180px;font-size:10px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(reasons) + '">' + escapeHtml(reasons) + '</span>';
+    html += '<span style="width:140px;font-size:10px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(reasons) + '">' + escapeHtml(reasons) + '</span>';
+    html += '<span style="width:50px;">' + viewBtn + '</span>';
     html += '</div>';
   }
   html += '</div>';
@@ -13957,6 +14141,51 @@ function batchMfaShowResults(job) {
   var hasAnomalous = (summary.anomalous || 0) > 0;
   document.getElementById('btn-batch-delete-anom').style.display = hasAnomalous ? '' : 'none';
   document.getElementById('btn-batch-dryrun').style.display = hasAnomalous ? '' : 'none';
+}
+
+async function batchMfaViewFile(f) {
+  // Open a batch MFA file result in the MFA viewer using trimmed audio if available
+  var tgPath = f.post_textgrid_path || f.textgrid_path || '';
+  var audioPath = f.trimmed_audio_path || f.audio_path || '';
+
+  if (!tgPath || !audioPath) {
+    toast('缺少 TextGrid 或音频路径', 'error');
+    return;
+  }
+
+  // Scroll to viewer section
+  var viewerSection = document.getElementById('mfa-viewer-section');
+  if (viewerSection) viewerSection.scrollIntoView({behavior: 'smooth'});
+  var viewerMain = document.getElementById('mfa-viewer-main');
+  if (viewerMain) viewerMain.style.display = 'block';
+
+  // Set audio path (prefer trimmed audio)
+  _mfaViewerWavPath = audioPath;
+  _mfaViewerAudioDuration = 0;
+  _mfaViewerAudioLoaded = false;
+  _mfaViewerSetupAudioLazy(audioPath);
+
+  var name = audioPath.replace(/\\/g, '/').split('/').pop();
+  document.getElementById('mfa-viewer-wav-name').textContent = name;
+  document.getElementById('mfa-viewer-wav-name').style.color = '';
+
+  // Load the TextGrid
+  try {
+    var epoch = ++_mfaViewerEpoch;
+    _mfaViewerTgPath = tgPath;
+    document.getElementById('mfa-viewer-empty').style.display = 'none';
+
+    var tgResp = await fetch(API + '/api/mfa/parse-textgrid?path=' + encodeURIComponent(tgPath), {cache: 'no-store'});
+    if (epoch !== _mfaViewerEpoch) return;
+    if (!tgResp.ok) { toast('TextGrid 解析失败', 'error'); return; }
+    _mfaViewerTgData = await tgResp.json();
+
+    var stem = tgPath.split('/').pop().replace(/\.(textgrid|TextGrid)$/i, '');
+    mfaViewerLoadMatchingText(stem);
+    mfaViewerRender(epoch);
+  } catch(e) { toast('加载失败: ' + e.message, 'error'); }
+
+  toast('已切换到查看器: ' + name, 'info');
 }
 
 async function batchMfaDeleteAnomalous() {
@@ -14468,6 +14697,12 @@ async function mfaViewLogFiles(outputDir) {
 // ============================================================
 // Auto-open TextGrid viewer after align completes
 // ============================================================
+function mfaOpenSkippedTg() {
+  var outDir = document.getElementById('mfa-align-output').value;
+  var wDir = document.getElementById('mfa-align-wav-dir').value;
+  var tDir = document.getElementById('mfa-align-txt-dir').value;
+  mfaOpenViewerWithContext(outDir, wDir, tDir, _mfaSkipTgPath);
+}
 function mfaAutoOpenViewer(outputDir, wavDir, txtDir, tgPath) {
   if (!outputDir) return;
   if (txtDir) _mfaViewerTxtDir = txtDir;
@@ -14481,13 +14716,13 @@ function mfaAutoOpenViewer(outputDir, wavDir, txtDir, tgPath) {
     return;
   }
 
-  // Load TextGrid directory; if tgPath provided, load it directly
+  // Load TextGrid directory; audio from step 1 output (trimmed), not original
   mfaViewerLoadDir(outputDir, function() {
-    if (tgPath && _mfaAudioSelected) {
-      mfaViewerSetAudio(_mfaAudioSelected);
+    if (tgPath) {
+      _mfaViewerAutoSetAudio();
       mfaViewerSelectTg(tgPath, '');
-    } else if (_mfaAudioSelected) {
-      mfaViewerSetAudio(_mfaAudioSelected);
+    } else {
+      _mfaViewerAutoSetAudio();
     }
   });
   toast('对齐完成，TextGrid 文件已加载到查看器', 'success');
@@ -14499,6 +14734,7 @@ function mfaAutoOpenViewer(outputDir, wavDir, txtDir, tgPath) {
 var _mfaViewerDir = '';
 var _mfaViewerTgPath = '';
 var _mfaViewerWavPath = '';
+var _mfaSkipTgPath = '';
 var _mfaViewerTgData = null;
 var _mfaViewerAudio = null;
 var _mfaViewerAudioCtx = null;
@@ -14574,6 +14810,15 @@ async function _mfaViewerRenderAudioPopup(dir) {
     popup.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><span style="font-size:14px;font-weight:600;">选择音频文件</span><button onclick="document.getElementById(\'mfa-viewer-audio-popup\').remove()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:18px;">&times;</button></div>' +
       '<div style="padding:20px;text-align:center;color:var(--danger);">加载失败: ' + escapeHtml(e.message) + '</div>';
   }
+}
+
+function _mfaViewerAutoSetAudio() {
+  if (!_mfaAudioSelected) return;
+  // Use trimmed WAV from step 1 output dir, not the original audio
+  var audioName = _mfaAudioSelected.replace(/\\/g, '/').split('/').pop();
+  var wavDir = _mfaViewerWavDirHint || 'data/mfa/wav';
+  var trimmedPath = wavDir.replace(/\/$/, '') + '/' + audioName;
+  mfaViewerSetAudio(trimmedPath);
 }
 
 function mfaViewerSetAudio(audioPath) {

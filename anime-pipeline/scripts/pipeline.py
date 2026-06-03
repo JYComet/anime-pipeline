@@ -137,17 +137,17 @@ class Pipeline:
                 job.clip_dir = jd.get("clip_dir", "")
                 job.clip_paths = []
                 job.status = st
+                job.progress = jd.get("progress", 0)
+                job.current_step = jd.get("current_step", "")
                 # Running/pending jobs were interrupted by server restart
                 if st in ("running", "pending"):
                     job.status = "interrupted"
-                    job.current_step = "interrupted (服务器重启中断)"
+                    job.current_step = "服务器重启中断，可继续执行或丢弃"
                     job.steps.append(StepResult(
                         step="interrupted",
                         status=StepStatus.FAILED,
                         message="服务器重启导致任务中断，可选择继续执行或丢弃",
                     ))
-                job.progress = jd.get("progress", 0)
-                job.current_step = jd.get("current_step", "")
                 for s in jd.get("steps", []):
                     job.steps.append(StepResult(
                         step=s["step"],

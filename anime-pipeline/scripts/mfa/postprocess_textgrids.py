@@ -64,6 +64,8 @@ import wave
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
+
 try:
     from pykakasi import kakasi
 except ModuleNotFoundError as exc:
@@ -1001,6 +1003,141 @@ def detect_remaining_phone_filter_issues(
     return issues
 
 
+# ── Energy-based silence merging ──────────────────────────────────────
+# Adapted from merge_sil_by_energy.py in MFA_post_process.
+# Merges short "sil" phone intervals into the preceding phone when their
+# energy is high enough, fixing MFA over-split silence boundaries.
+
+
+def _time_to_frame_range(xmin: float, xmax: float, fps: float, frame_count: int) -> tuple[int, int]:
+    start = int(math.floor(xmin * fps))
+    end = int(math.ceil(xmax * fps))
+    start = max(0, min(start, frame_count))
+    end = max(0, min(end, frame_count))
+    if end <= start:
+        end = min(frame_count, start + 1)
+    return start, end
+
+
+def _nonzero_mean(segment: np.ndarray) -> float:
+    if segment.size == 0:
+        return 0.0
+    nonzero = segment[segment > 0]
+    if nonzero.size == 0:
+        return 0.0
+    return float(nonzero.mean())
+
+
+def energy_merge_sil(
+    textgrid: TextGrid,
+    energy_path: Path | None,
+    fps: float = 50.0,
+    max_sil_duration: float = 0.2,
+    threshold: float = 0.5,
+) -> tuple[TextGrid, list[dict], list[str]]:
+    """Merge short sil phone intervals using energy thresholds.
+
+    Returns (updated_textgrid, merge_records, warnings).
+    """
+    warnings: list[str] = []
+    merges: list[dict] = []
+
+    if energy_path is None or not energy_path.is_file():
+        return textgrid, merges, ["energy_merge skipped: no energy file"]
+
+    phones_tier = tier_by_name(textgrid, "phones")
+    words_tier = tier_by_name(textgrid, "words")
+    if phones_tier is None:
+        return textgrid, merges, ["energy_merge skipped: no phones tier"]
+
+    energy = np.load(energy_path)
+    energy = np.asarray(energy, dtype=np.float32).reshape(-1)
+    frame_count = len(energy)
+
+    phone_intervals = phones_tier.intervals
+
+    # Collect merge operations (scan forward)
+    merge_ops: list[dict] = []  # {sil_index, prev_index}
+    skipped = 0
+
+    for idx in range(1, len(phone_intervals)):
+        sil_interval = phone_intervals[idx]
+        if sil_interval.text.strip() != "sil":
+            continue
+
+        duration = sil_interval.xmax - sil_interval.xmin
+        if duration >= max_sil_duration:
+            continue
+
+        prev = phone_intervals[idx - 1]
+
+        sil_start, sil_end = _time_to_frame_range(
+            sil_interval.xmin, sil_interval.xmax, fps, frame_count
+        )
+        prev_start, prev_end = _time_to_frame_range(
+            prev.xmin, prev.xmax, fps, frame_count
+        )
+
+        sil_mean = _nonzero_mean(energy[sil_start:sil_end])
+        prev_mean = _nonzero_mean(energy[prev_start:prev_end])
+
+        if not (sil_mean > prev_mean * threshold):
+            skipped += 1
+            continue
+
+        merge_ops.append({
+            "sil_index": idx,
+            "prev_index": idx - 1,
+            "sil_text": sil_interval.text,
+            "sil_xmin": sil_interval.xmin,
+            "sil_xmax": sil_interval.xmax,
+            "sil_mean": round(sil_mean, 6),
+            "prev_mean": round(prev_mean, 6),
+        })
+
+    if not merge_ops:
+        return textgrid, merges, warnings
+
+    # Apply merges in reverse index order to preserve earlier indices
+    new_phones = [Interval(p.xmin, p.xmax, p.text) for p in phone_intervals]
+    new_words = [Interval(w.xmin, w.xmax, w.text) for w in words_tier.intervals] if words_tier else []
+
+    for op in sorted(merge_ops, key=lambda o: o["sil_index"], reverse=True):
+        sil_idx = op["sil_index"]
+        prev_idx = op["prev_index"]
+        if sil_idx >= len(new_phones) or prev_idx < 0:
+            warnings.append(f"energy_merge index out of range: sil={sil_idx}, prev={prev_idx}")
+            continue
+
+        # Extend previous phone to cover the sil
+        new_phones[prev_idx].xmax = new_phones[sil_idx].xmax
+        del new_phones[sil_idx]
+
+        # Try to find and merge matching <eps> word
+        if words_tier and new_words:
+            sil_xmin = op["sil_xmin"]
+            sil_xmax = op["sil_xmax"]
+            for wi, word in enumerate(new_words):
+                if word.text == "<eps>" and abs(word.xmin - sil_xmin) < 1e-4 and abs(word.xmax - sil_xmax) < 1e-4:
+                    if wi > 0:
+                        new_words[wi - 1].xmax = new_words[wi].xmax
+                        del new_words[wi]
+                    break
+
+        merges.append(op)
+
+    updated_tiers: list[Tier] = []
+    for tier in textgrid.tiers:
+        if tier is phones_tier:
+            updated_tiers.append(Tier(tier.name, tier.xmin, tier.xmax, new_phones))
+        elif words_tier is not None and tier is words_tier:
+            updated_tiers.append(Tier(tier.name, tier.xmin, tier.xmax, new_words))
+        else:
+            updated_tiers.append(tier)
+
+    return TextGrid(textgrid.xmin, textgrid.xmax, updated_tiers), merges, warnings
+
+
 def process_one(
     textgrid_path: Path,
     txt_dir: Path,
@@ -1011,6 +1148,7 @@ def process_one(
     kakasi_converter,
     args,
     language: str = "jp",
+    energy_dir: Path | None = None,
 ) -> dict:
     stem = textgrid_path.stem
     report = {"stem": stem, "status": "ok", "warnings": []}
@@ -1075,16 +1213,34 @@ def process_one(
     )
 
     wav_path = wav_paths.get(stem)
-    if args.wav_dir is not None:
-        for suffix in [".wav"]:
-            candidate = args.wav_dir / f"{stem}{suffix}"
-            if candidate.exists():
-                wav_path = candidate
-                break
+    if wav_path is None:
+        # Fuzzy: strip _separated_* suffix
+        m = re.match(r'^(.+?)_separated_[^_]+$', stem)
+        if m:
+            wav_path = wav_paths.get(m.group(1))
+    if wav_path is None:
+        # Fuzzy: strip _segNNN suffix
+        m = re.match(r'^(.+?)_seg\d+$', stem)
+        if m:
+            wav_path = wav_paths.get(m.group(1))
     if wav_path is not None and not wav_path.is_absolute():
         wav_path = Path.cwd() / wav_path
     if wav_path is not None and not wav_path.exists():
         wav_path = None
+
+    # ── Energy-based sil merging (from MFA_post_process) ──
+    if args.merge_sil_by_energy and energy_dir is not None:
+        energy_path = energy_dir / f"{stem}.npy"
+        new_textgrid, energy_merges, merge_warnings = energy_merge_sil(
+            new_textgrid,
+            energy_path if energy_path.is_file() else None,
+            fps=args.merge_fps,
+            max_sil_duration=args.merge_max_sil_duration,
+            threshold=args.merge_energy_threshold,
+        )
+        report["energy_merges"] = energy_merges
+        report["energy_merge_count"] = len(energy_merges)
+        report["warnings"].extend(merge_warnings)
 
     if args.fix_short_multi_unit:
         new_textgrid, fixes, fix_warnings = fix_short_multi_unit_before_silence(
@@ -1193,6 +1349,21 @@ def main() -> int:
         default="zh",
         help="Language for pronunciation tier: zh (pinyin) or jp (romaji). Default: jp",
     )
+    parser.add_argument(
+        "--energy-dir",
+        type=Path,
+        default=None,
+        help="Directory containing energy .npy files for energy-based sil merging.",
+    )
+    parser.add_argument(
+        "--merge-sil-by-energy",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable energy-based merging of short sil intervals (from MFA_post_process).",
+    )
+    parser.add_argument("--merge-max-sil-duration", type=float, default=0.2)
+    parser.add_argument("--merge-energy-threshold", type=float, default=0.5)
+    parser.add_argument("--merge-fps", type=float, default=50.0)
     args = parser.parse_args()
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -1205,9 +1376,9 @@ def main() -> int:
         for txt_file in args.txt_dir.glob("*.txt"):
             raw_texts[txt_file.stem] = txt_file.read_text(encoding="utf-8").strip()
     if args.wav_dir and args.wav_dir.exists():
-        for wav_file in args.wav_dir.glob("*.wav"):
+        for wav_file in args.wav_dir.rglob("*.wav"):
             wav_paths[wav_file.stem] = wav_file
-        for wav_file in args.wav_dir.glob("*.mp3"):
+        for wav_file in args.wav_dir.rglob("*.mp3"):
             wav_paths[wav_file.stem] = wav_file
     print(f"TXT texts: {len(raw_texts)}, WAV paths: {len(wav_paths)}")
     kakasi_converter = kakasi()
@@ -1237,6 +1408,7 @@ def main() -> int:
                 kakasi_converter=kakasi_converter,
                 args=args,
                 language=args.language,
+                energy_dir=args.energy_dir,
             )
         except Exception as exc:
             report = {

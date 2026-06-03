@@ -24,6 +24,9 @@ venv/
 # Claude
 .claude/
 
+# MFA post-process (not tracked)
+MFA_post_process/
+
 # IDE
 .vscode/
 .idea/

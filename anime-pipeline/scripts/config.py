@@ -137,6 +137,7 @@ MFA_VALIDATE_DIR = os.path.join(MFA_DIR, "validate")
 MFA_SCRIPTS_DIR = os.path.join(PROJECT_ROOT, "scripts", "mfa")
 MFA_MODELS_DIR = os.path.join(MFA_DIR, "models")
 MFA_TEMP_DIR = os.path.join(MFA_DIR, "temp")
+MFA_ENERGY_DIR = os.path.join(MFA_DIR, "energy")
 MFA_DICT_PATH = os.path.join(MFA_MODELS_DIR, "pretrained_models", "dictionary", "japanese_mfa.dict")
 MFA_DICT_PATH_ZH = os.path.join(MFA_MODELS_DIR, "pretrained_models", "dictionary", "fullpinyin_enword.dict")
 
@@ -163,7 +164,7 @@ _USER_PATH_KEYS = {
     'SPLIT_DIR',
     'MFA_RAW_WAV_DIR', 'MFA_WAV_DIR', 'MFA_TXT_DIR',
     'MFA_ALIGNED_DIR', 'MFA_JSONL_DIR', 'MFA_POST_DIR', 'MFA_FILTERED_DIR',
-    'MFA_VALIDATE_DIR', 'MFA_MODELS_DIR', 'MFA_TEMP_DIR', 'MFA_DICT_PATH', 'MFA_DICT_PATH_ZH',
+    'MFA_VALIDATE_DIR', 'MFA_MODELS_DIR', 'MFA_TEMP_DIR', 'MFA_ENERGY_DIR', 'MFA_DICT_PATH', 'MFA_DICT_PATH_ZH',
 }
 
 # Non-path config keys stored in settings.json (model/language selections etc.)
@@ -173,6 +174,7 @@ _CONFIG_KEYS = {
     'ASR_COMPARE_MODEL_A': 'qwen3-asr',
     'ASR_COMPARE_MODEL_B': 'firered-asr2',
     'ASR_DEFAULT_HOTWORDS': '',
+    'ASR_COMPARE_MATCH_THRESHOLD': '90',  # flag when match rate < this %
     'FIRERED_ASR2_MODELS_DIR': os.path.join(DATA_DIR, "models", "firered_asr2"),
     'FIRERED_ASR2S_PATH': os.path.join(COMICUT_ROOT, "FireRedASR2S"),
     'DASHSCOPE_API_KEY': '',
@@ -258,7 +260,7 @@ def _reset_to_default_paths():
         'ASR_COMPARE_DISCARD_DIR': os.path.join(DATA_DIR, "asr_compare", "discarded"),
         'ASR_COMPARE_SEGMENTS_DIR': os.path.join(DATA_DIR, "asr_compare", "segments"),
         'ASR_COMPARE_KEPT_DIR': os.path.join(DATA_DIR, "asr_compare", "kept"),
-        'ASR_COMPARE_DEFAULT_PATH': '/mnt/nas/Persons/jiangyichen/Enhanced/529',
+        'ASR_COMPARE_DEFAULT_PATH': '/mnt/nas/Persons/jiangyichen/Enhanced',
         'TXT_COMPARE_DIR': os.path.join(DATA_DIR, "txt_compare"),
         'TXT_COMPARE_OUTPUT_DIR': os.path.join(DATA_DIR, "txt_compare_output"),
         'TXT_COMPARE_DISCARD_DIR': os.path.join(DATA_DIR, "txt_compare", "discarded"),
@@ -275,6 +277,7 @@ def _reset_to_default_paths():
         'MFA_VALIDATE_DIR': os.path.join(DATA_DIR, "mfa", "validate"),
         'MFA_MODELS_DIR': os.path.join(DATA_DIR, "mfa", "models"),
         'MFA_TEMP_DIR': os.path.join(DATA_DIR, "mfa", "temp"),
+        'MFA_ENERGY_DIR': os.path.join(DATA_DIR, "mfa", "energy"),
         'MFA_DICT_PATH': os.path.join(DATA_DIR, "mfa", "models", "pretrained_models", "dictionary", "japanese_mfa.dict"),
         'MFA_DICT_PATH_ZH': os.path.join(DATA_DIR, "mfa", "models", "pretrained_models", "dictionary", "fullpinyin_enword.dict"),
     }
@@ -387,7 +390,7 @@ HF_CACHE_DIR = _HF_CACHE
 MS_CACHE_DIR = _MS_CACHE
 
 # Ensure all data directories exist
-for d in [DOWNLOAD_DIR, SUBTITLE_DIR, CLIPS_DIR, TEMP_DIR, APPROVED_DIR, CLEANED_DIR, CLEANED_UNREVIEWED_DIR, DENOISED_APPROVED_DIR, STITCHED_DIR, PIPELINE_VIDEO_DIR, ASR_DIR, ASR_AUDIO_DIR, ASR_SUBTITLE_DIR, ASR_COMPARE_DIR, ASR_COMPARE_SUBTITLE_DIR, ASR_COMPARE_AUDIO_DIR, ASR_COMPARE_OUTPUT_DIR, ASR_COMPARE_DISCARD_DIR, ASR_COMPARE_SEGMENTS_DIR, ASR_COMPARE_KEPT_DIR, TXT_COMPARE_DIR, TXT_COMPARE_OUTPUT_DIR, TXT_COMPARE_DISCARD_DIR, EMOTION_DIR, EMOTION_DENOISE_DIR, SPLIT_DIR, MFA_DIR, MFA_RAW_WAV_DIR, MFA_WAV_DIR, MFA_TXT_DIR, MFA_ALIGNED_DIR, MFA_JSONL_DIR, MFA_POST_DIR, MFA_FILTERED_DIR, MFA_VALIDATE_DIR, MFA_MODELS_DIR, MFA_TEMP_DIR]:
+for d in [DOWNLOAD_DIR, SUBTITLE_DIR, CLIPS_DIR, TEMP_DIR, APPROVED_DIR, CLEANED_DIR, CLEANED_UNREVIEWED_DIR, DENOISED_APPROVED_DIR, STITCHED_DIR, PIPELINE_VIDEO_DIR, ASR_DIR, ASR_AUDIO_DIR, ASR_SUBTITLE_DIR, ASR_COMPARE_DIR, ASR_COMPARE_SUBTITLE_DIR, ASR_COMPARE_AUDIO_DIR, ASR_COMPARE_OUTPUT_DIR, ASR_COMPARE_DISCARD_DIR, ASR_COMPARE_SEGMENTS_DIR, ASR_COMPARE_KEPT_DIR, TXT_COMPARE_DIR, TXT_COMPARE_OUTPUT_DIR, TXT_COMPARE_DISCARD_DIR, EMOTION_DIR, EMOTION_DENOISE_DIR, SPLIT_DIR, MFA_DIR, MFA_RAW_WAV_DIR, MFA_WAV_DIR, MFA_TXT_DIR, MFA_ALIGNED_DIR, MFA_JSONL_DIR, MFA_POST_DIR, MFA_FILTERED_DIR, MFA_VALIDATE_DIR, MFA_MODELS_DIR, MFA_TEMP_DIR, MFA_ENERGY_DIR]:
     os.makedirs(d, exist_ok=True)
 
 

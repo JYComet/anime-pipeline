@@ -165,6 +165,7 @@ class BatchMfaFileItem:
     tokenized_path: str = ""
     textgrid_path: str = ""
     post_textgrid_path: str = ""
+    trimmed_audio_path: str = ""
     anomaly_reasons: list = field(default_factory=list)
     is_anomalous: bool = False
     error: str = ""
@@ -178,6 +179,7 @@ class BatchMfaFileItem:
             "tokenized_path": self.tokenized_path,
             "textgrid_path": self.textgrid_path,
             "post_textgrid_path": self.post_textgrid_path,
+            "trimmed_audio_path": self.trimmed_audio_path,
             "anomaly_reasons": self.anomaly_reasons,
             "is_anomalous": self.is_anomalous,
             "error": self.error,
@@ -251,6 +253,7 @@ def _load_batch_mfa_jobs():
                     tokenized_path=f.get("tokenized_path", ""),
                     textgrid_path=f.get("textgrid_path", ""),
                     post_textgrid_path=f.get("post_textgrid_path", ""),
+                    trimmed_audio_path=f.get("trimmed_audio_path", ""),
                     anomaly_reasons=f.get("anomaly_reasons", []),
                     is_anomalous=f.get("is_anomalous", False),
                     error=f.get("error", ""),
@@ -556,6 +559,15 @@ def startup_services():
             print(f"[startup] ASR preload failed (will load on first use): {e}")
 
     threading.Thread(target=_preload_asr, daemon=True).start()
+
+    # Pre-import model list definitions synchronously so /api/asr/models and
+    # /api/asr-compare/models endpoints return instantly (avoids lazy-importing
+    # torch/numpy on the first request, which takes several seconds).
+    try:
+        from asr_pipeline import ASR_MODELS, COMPARE_MODELS  # noqa: F401
+        print(f"[startup] ASR model registry loaded ({len(ASR_MODELS)} models)")
+    except Exception as e:
+        print(f"[startup] ASR model registry preload failed: {e}")
 
     # Restore download jobs from aria2c state, with fallback to jobs.json
     def restore_jobs():
@@ -1286,6 +1298,42 @@ def resume_pipeline_job(job_id: str):
         threading.Thread(target=_resubmit_split, args=(job_id,), daemon=True).start()
         return {"status": "ok", "message": "任务已恢复，正在重新分割"}
     return {"status": "ok", "message": "任务已标记为待恢复，需手动重新提交"}
+
+
+@app.post("/api/jobs/{job_id}/retry")
+def retry_pipeline_job(job_id: str):
+    """Force-retry a stuck/failed/interrupted pipeline job.
+
+    Kills any running subprocess, resets the job state, and re-launches.
+    Already-completed steps are preserved and skipped.
+    """
+    job = pipeline.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    status = job.status
+    if status not in ("interrupted", "failed", "pending", "running"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Job is '{status}', can only retry interrupted/failed/pending/running jobs",
+        )
+    # Kill any hung subprocess and reset cancel flag
+    job.kill_process()
+    job.cancel_event.clear()
+    job.status = "pending"
+    job.current_step = ""
+    # Remove any "interrupted" step marker so it doesn't block completion check
+    job.steps = [s for s in job.steps if s.step != "interrupted"]
+    pipeline._save_jobs()
+
+    # Re-submit based on what the job has
+    if job.magnet:
+        threading.Thread(target=_resubmit_pipeline, args=(job_id,), daemon=True).start()
+        return {"status": "ok", "message": "任务正在重试，已完成的步骤将跳过"}
+    elif job.mkv_path and os.path.exists(job.mkv_path):
+        threading.Thread(target=_resubmit_split, args=(job_id,), daemon=True).start()
+        return {"status": "ok", "message": "任务正在重试，已完成的步骤将跳过"}
+    else:
+        raise HTTPException(status_code=400, detail="Job has no magnet or valid mkv_path to retry")
 
 
 def _resubmit_pipeline(job_id: str):
@@ -4937,6 +4985,13 @@ def _load_txt_compare_jobs():
             if status in ("running", "loading", "pending"):
                 job["status"] = "interrupted"
                 job["current_step"] = "服务器重启中断"
+            # Recompute counters from saved results (self-heal after crashes)
+            results = job.get("results", {})
+            job["completed"] = len(results)
+            job["flagged_count"] = sum(
+                1 for r in results.values()
+                if r.get("flagged") or r.get("error")
+            )
             _txt_compare_jobs[job_id] = job
             restored += 1
     if restored:
@@ -5121,40 +5176,42 @@ def detect_txt_compare_pairs(payload: dict = Body(...)):
             "text_count": len(text_files),
         }
 
-    # For each audio, find matching text files by base name
+    # For each audio, find matching text files by prefix match:
+    # A text file matches if its name (without ext) starts with the audio
+    # base name followed by "_". e.g.:
+    #   audio: "seg001.wav"  → prefix: "seg001_"
+    #   text:  "seg001_qwen3-asr.txt" → matches, suffix = "qwen3-asr"
     pairs = []
     unpaired_audio = []
-    matched_text_paths = set()
+    model_suffixes = set()
 
     for af in audio_files:
+        audio_prefix = af["name_no_ext"] + "_"
         matching_texts = []
+
         for tf in text_files:
-            # Check if text file name starts with audio base name
-            # e.g., audio: "seg000.wav", text: "seg000_qwen3-asr.txt"
-            tf_base = _strip_model_suffix(tf["name_no_ext"])
-            if tf_base == af["name_no_ext"]:
+            if tf["name_no_ext"].startswith(audio_prefix):
                 matching_texts.append(tf)
+                # Extract model suffix from text filename
+                suffix = tf["name_no_ext"][len(audio_prefix):]
+                if suffix:
+                    model_suffixes.add(suffix)
+
+        matching_texts.sort(key=lambda x: x["name"])
 
         if len(matching_texts) >= 2:
-            # Sort by name for consistent A/B ordering
-            matching_texts.sort(key=lambda x: x["name"])
-            # Take first two (or all pairs if more than 2)
             for j in range(0, len(matching_texts) - 1, 2):
                 pairs.append({
                     "audio": af,
                     "file_a": matching_texts[j],
                     "file_b": matching_texts[j + 1],
                 })
-                matched_text_paths.add(matching_texts[j]["path"])
-                matched_text_paths.add(matching_texts[j + 1]["path"])
         elif len(matching_texts) == 1:
-            # Single match — still record it but as unpaired
             unpaired_audio.append({
                 "audio": af,
                 "file_a": matching_texts[0],
                 "file_b": None,
             })
-            matched_text_paths.add(matching_texts[0]["path"])
         else:
             unpaired_audio.append({
                 "audio": af,
@@ -5162,14 +5219,6 @@ def detect_txt_compare_pairs(payload: dict = Body(...)):
                 "file_b": None,
             })
 
-    # Detect model abbreviations from text file suffixes
-    model_suffixes = set()
-    for tf in text_files:
-        base = _strip_model_suffix(tf["name_no_ext"])
-        if base != tf["name_no_ext"]:
-            suffix = tf["name_no_ext"][len(base):].lstrip("_")
-            if suffix:
-                model_suffixes.add(suffix)
     model_abbrs = sorted(model_suffixes)[:4]
 
     return {
@@ -5182,6 +5231,8 @@ def detect_txt_compare_pairs(payload: dict = Body(...)):
         "audio_count": len(audio_files),
         "text_count": len(text_files),
         "model_abbrs": model_abbrs,
+        "sample_audio_names": [af["name"] for af in audio_files[:3]],
+        "sample_text_names": [tf["name"] for tf in text_files[:6]],
     }
 
 
@@ -5216,7 +5267,8 @@ def run_txt_compare(payload: dict = Body(...)):
     source_dir = os.path.basename(real_folder) or os.path.basename(os.path.dirname(real_folder))
 
     # List all text files in txt/ for matching
-    text_files_map: dict[str, list] = {}  # name_no_ext -> list of text file dicts
+    # Collect all text files in txt/
+    all_text_files = []
     text_exts = {".txt", ".srt", ".ass", ".ssa", ".vtt"}
     if os.path.isdir(txt_dir):
         try:
@@ -5224,16 +5276,19 @@ def run_txt_compare(payload: dict = Body(...)):
                 if entry.is_file():
                     ext = os.path.splitext(entry.name)[1].lower()
                     if ext in text_exts:
-                        name_no_ext = os.path.splitext(entry.name)[0]
-                        base = _strip_model_suffix(name_no_ext)
-                        text_files_map.setdefault(base, []).append({
+                        all_text_files.append({
                             "name": entry.name,
                             "path": entry.path.replace("\\", "/"),
                             "ext": ext,
-                            "name_no_ext": name_no_ext,
+                            "name_no_ext": os.path.splitext(entry.name)[0],
                         })
         except PermissionError:
             pass
+
+    # Detect model abbreviations by prefix matching
+    model_suffixes = set()
+    model_a_abbr = "A"
+    model_b_abbr = "B"
 
     # Build audio-file list from selected_files
     validated_items = []
@@ -5242,9 +5297,17 @@ def run_txt_compare(payload: dict = Body(...)):
         if not os.path.isfile(audio_path):
             continue
         audio_name_no_ext = os.path.splitext(fname)[0]
+        audio_prefix = audio_name_no_ext + "_"
 
-        # Find matching text pairs
-        matching_texts = text_files_map.get(audio_name_no_ext, [])
+        # Find matching text pairs by prefix
+        matching_texts = []
+        for tf in all_text_files:
+            if tf["name_no_ext"].startswith(audio_prefix):
+                matching_texts.append(tf)
+                suffix = tf["name_no_ext"][len(audio_prefix):]
+                if suffix:
+                    model_suffixes.add(suffix)
+
         matching_texts.sort(key=lambda x: x["name"])
 
         if len(matching_texts) >= 2:
@@ -5270,21 +5333,7 @@ def run_txt_compare(payload: dict = Body(...)):
     if not validated_items:
         raise HTTPException(status_code=404, detail="No valid audio files found")
 
-    # Detect model abbreviations from text file suffixes
-    model_abbrs = []
-    all_txt_files = []
-    for v in validated_items:
-        if v["txt_a"]:
-            all_txt_files.append(v["txt_a"])
-        if v["txt_b"]:
-            all_txt_files.append(v["txt_b"])
-    model_suffixes = set()
-    for tf in all_txt_files:
-        base = _strip_model_suffix(tf["name_no_ext"])
-        if base != tf["name_no_ext"]:
-            suffix = tf["name_no_ext"][len(base):].lstrip("_")
-            if suffix:
-                model_suffixes.add(suffix)
+    # Use model suffixes already detected during prefix matching
     model_abbrs = sorted(model_suffixes)[:2]
     model_a_abbr = model_abbrs[0] if len(model_abbrs) > 0 else "A"
     model_b_abbr = model_abbrs[1] if len(model_abbrs) > 1 else "B"
@@ -5388,7 +5437,8 @@ def run_txt_compare(payload: dict = Body(...)):
                     "error_b": None if item["txt_b"] else "文本文件不存在",
                     "diff_percent": diff_percent,
                     "match_rate": match_rate,
-                    "flagged": diff_percent > 10.0,
+                    "flagged": (100.0 - diff_percent) < float(
+                        getattr(config, 'ASR_COMPARE_MATCH_THRESHOLD', '90')),
                     "diff_chunks": diff_chunks,
                     "user_action": None,
                 }
@@ -5708,7 +5758,11 @@ def _sync_user_action_to_jobs(audio_path: str):
 
 
 def _load_asr_compare_jobs():
-    """Restore ASR compare jobs from disk. Mark running/loading jobs as interrupted."""
+    """Restore ASR compare jobs from disk. Mark running/loading jobs as interrupted.
+
+    Recomputes completed/flagged_count from results to self-heal after crashes,
+    and syncs per-file status so the frontend shows correct completion state.
+    """
     if not os.path.exists(_ASR_COMPARE_JOBS_FILE):
         return
     try:
@@ -5719,6 +5773,23 @@ def _load_asr_compare_jobs():
             if status in ("running", "loading", "pending"):
                 jd["status"] = "interrupted"
                 jd["current_step"] = "服务器重启中断"
+            # Recompute counters from saved results (self-heal after crashes)
+            results = jd.get("results", {})
+            jd["completed"] = len(results)
+            jd["flagged_count"] = sum(
+                1 for r in results.values()
+                if r.get("flagged") or r.get("error")
+            )
+            # Sync per-file status: any file in results is completed (or error)
+            completed_paths = set(results.keys())
+            for f in jd.get("files", []):
+                if f.get("path") in completed_paths:
+                    r = results[f["path"]]
+                    if r.get("error"):
+                        f["status"] = "error"
+                    else:
+                        f["status"] = "completed"
+                        f["progress"] = 100
             _asr_compare_jobs[job_id] = jd
         print(f"[startup] Restored {len(_asr_compare_jobs)} ASR compare jobs from disk")
     except Exception as e:
@@ -5938,7 +6009,7 @@ def run_asr_compare_all(
 
     def _run():
         from asr_pipeline import compare_asr_pipeline, _get_asr_model, _CancelPipeline
-        from asr_pipeline import ASR_MODELS, COMPARE_MODELS
+        from asr_pipeline import ASR_MODELS, COMPARE_MODELS, segment_and_compare_pipeline_multi
 
         def _cancel_check():
             with _asr_compare_lock:
@@ -5956,8 +6027,20 @@ def run_asr_compare_all(
         # Preload both ASR models before starting processing.
         # This is critical because FunASR / ModelScope downloads can behave
         # unpredictably in threads. We run with daemon=False to mitigate this.
+        # Skip API-based models — they have no local model to load.
         try:
             for _mk in (model_a, model_b):
+                if _cancel_check():
+                    with _asr_compare_lock:
+                        j = _asr_compare_jobs.get(job_id)
+                        if j:
+                            j["status"] = "cancelled"
+                            j["current_step"] = "已中止"
+                            _save_asr_compare_jobs()
+                    return
+                _mi = ASR_MODELS.get(_mk, {})
+                if _mi.get("framework") == "api":
+                    continue
                 with _asr_compare_lock:
                     job = _asr_compare_jobs.get(job_id)
                     if job:
@@ -6177,8 +6260,20 @@ def asr_compare_resume_job(job_id: str):
             _save_asr_compare_jobs()
 
         # Preload both ASR models before processing
+        # Skip API-based models — they have no local model to load.
         try:
             for _mk in (model_a, model_b):
+                if _cancel_check():
+                    with _asr_compare_lock:
+                        j = _asr_compare_jobs.get(job_id)
+                        if j:
+                            j["status"] = "cancelled"
+                            j["current_step"] = "已中止"
+                            _save_asr_compare_jobs()
+                    return
+                _mi = ASR_MODELS.get(_mk, {})
+                if _mi.get("framework") == "api":
+                    continue
                 with _asr_compare_lock:
                     j = _asr_compare_jobs.get(job_id)
                     if j:
@@ -6314,6 +6409,212 @@ def asr_compare_resume_job(job_id: str):
 
     threading.Thread(target=_run_resume, daemon=False).start()
     return {"status": "resuming"}
+
+
+@app.post("/api/asr-compare/job/{job_id}/retry")
+def asr_compare_retry_job(job_id: str):
+    """Force-retry a stuck ASR compare job. Works on loading/running/interrupted/failed.
+
+    Sets the cancel flag to stop any hung thread, then immediately resets the job
+    and relaunches processing, preserving already-completed results.
+    """
+    with _asr_compare_lock:
+        job = _asr_compare_jobs.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        status = job.get("status", "")
+        if status not in ("loading", "running", "interrupted", "failed"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Job is '{status}', can only retry loading/running/interrupted/failed jobs",
+            )
+        # Signal any hung thread to stop
+        job["_cancelled"] = True
+        # Extract job config before reset
+        files = list(job.get("files", []))
+        model_a = job.get("_model_a", "qwen3-asr")
+        model_b = job.get("_model_b", "qwen3-asr")
+        language = job.get("_language", "ja")
+        device = job.get("_device", "cuda")
+        hotwords = job.get("_hotwords", "")
+        completed_paths = set(job.get("results", {}).keys())
+        is_segmented = job.get("is_segmented", False)
+        _filter_english = job.get("_filter_english", True)
+        # Reset job state for retry
+        job["_cancelled"] = False
+        job["status"] = "loading"
+        job["current_step"] = "正在重试..."
+        job["error"] = None
+        _save_asr_compare_jobs()
+
+    def _run_retry():
+        from asr_pipeline import compare_asr_pipeline, segment_and_compare_pipeline
+        from asr_pipeline import _get_asr_model, _CancelPipeline, ASR_MODELS
+
+        def _cancel_check():
+            with _asr_compare_lock:
+                j = _asr_compare_jobs.get(job_id)
+                return bool(j and j.get("_cancelled"))
+
+        # Preload models (skip API-based ones)
+        try:
+            for _mk in (model_a, model_b):
+                if _cancel_check():
+                    with _asr_compare_lock:
+                        j = _asr_compare_jobs.get(job_id)
+                        if j:
+                            j["status"] = "cancelled"
+                            j["current_step"] = "已中止"
+                            _save_asr_compare_jobs()
+                    return
+                _mi = ASR_MODELS.get(_mk, {})
+                if _mi.get("framework") == "api":
+                    continue
+                with _asr_compare_lock:
+                    j = _asr_compare_jobs.get(job_id)
+                    if j:
+                        j["current_step"] = f"正在加载模型: {_mk}"
+                        _save_asr_compare_jobs()
+                _get_asr_model(_mk, device=device, use_compile=False)
+        except Exception as e:
+            with _asr_compare_lock:
+                j = _asr_compare_jobs.get(job_id)
+                if j:
+                    j["status"] = "failed"
+                    j["error"] = f"模型加载失败: {e}"
+                    j["current_step"] = f"模型加载失败，可再次重试"
+                    _save_asr_compare_jobs()
+            return
+
+        with _asr_compare_lock:
+            j = _asr_compare_jobs.get(job_id)
+            if not j:
+                return
+            j["status"] = "running"
+            j["current_step"] = "模型加载完成，开始处理..."
+            _save_asr_compare_jobs()
+
+        total = len(files)
+        already_done = len(completed_paths)
+
+        # Reset per-file status for non-completed files
+        for _f in files:
+            if _f["path"] not in completed_paths:
+                _f["status"] = "pending"
+                _f["progress"] = 0
+                _f["current_step"] = ""
+
+        for idx, f in enumerate(files):
+            audio_path = f["path"]
+            if audio_path in completed_paths:
+                continue
+
+            audio_name = f["name"]
+
+            with _asr_compare_lock:
+                j = _asr_compare_jobs.get(job_id)
+                if not j or j.get("_cancelled") or j.get("status") == "cancelled":
+                    if j:
+                        j["status"] = "cancelled"
+                        j["current_step"] = "已中止"
+                        _save_asr_compare_jobs()
+                    return
+                j["current_file"] = audio_name
+                f["status"] = "running"
+                f["progress"] = 0
+                f["current_step"] = "开始处理..."
+
+            def on_progress(step, pct):
+                with _asr_compare_lock:
+                    jj = _asr_compare_jobs.get(job_id)
+                    if jj and jj.get("status") != "cancelled":
+                        done = jj.get("completed", 0)
+                        jj["current_step"] = f"[{done + 1}/{total}] {audio_name} — {step}"
+                    f["progress"] = int(pct)
+                    f["current_step"] = step
+
+            try:
+                if is_segmented:
+                    seg_min = j.get("_segment_min_s", 9.0)
+                    seg_max = j.get("_segment_max_s", 16.0)
+
+                    def _on_segment(seg_idx, total_segs, partial):
+                        with _asr_compare_lock:
+                            jj = _asr_compare_jobs.get(job_id)
+                            if jj:
+                                jj["results"][audio_path] = partial
+                                _save_asr_compare_jobs()
+
+                    result = segment_and_compare_pipeline(
+                        audio_path, language=language, device=device,
+                        model_a=model_a, model_b=model_b, hotwords=hotwords,
+                        segment_min_s=seg_min, segment_max_s=seg_max,
+                        progress_callback=on_progress, source_dir=f["source_dir"],
+                        cancel_check=_cancel_check,
+                        filter_english=_filter_english,
+                        on_segment=_on_segment,
+                    )
+                else:
+                    result = compare_asr_pipeline(
+                        audio_path, language=language, device=device,
+                        progress_callback=on_progress, source_dir=f["source_dir"],
+                        model_a=model_a, model_b=model_b, hotwords=hotwords,
+                        cancel_check=_cancel_check,
+                        filter_english=_filter_english,
+                    )
+                result["source_dir"] = f["source_dir"]
+
+                with _asr_compare_lock:
+                    jj = _asr_compare_jobs.get(job_id)
+                    if jj:
+                        jj["completed"] = jj.get("completed", 0) + 1
+                        jj["progress"] = int((jj["completed"] / total) * 100)
+                        jj["results"][audio_path] = result
+                        if result.get("flagged"):
+                            jj["flagged_count"] = jj.get("flagged_count", 0) + 1
+                f["status"] = "completed"
+                f["progress"] = 100
+                _save_asr_compare_jobs()
+
+            except _CancelPipeline:
+                with _asr_compare_lock:
+                    jj = _asr_compare_jobs.get(job_id)
+                    if jj:
+                        jj["status"] = "cancelled"
+                        jj["current_step"] = "已中止"
+                        _save_asr_compare_jobs()
+                return
+            except Exception as e:
+                with _asr_compare_lock:
+                    jj = _asr_compare_jobs.get(job_id)
+                    if jj:
+                        jj["completed"] = jj.get("completed", 0) + 1
+                        jj["progress"] = int((jj["completed"] / total) * 100)
+                        jj["results"][audio_path] = {
+                            "audio_path": audio_path,
+                            "audio_name": audio_name,
+                            "source_dir": f["source_dir"],
+                            "error": str(e),
+                            "flagged": True,
+                        }
+                        jj["flagged_count"] = jj.get("flagged_count", 0) + 1
+                f["status"] = "error"
+                f["progress"] = 0
+                f["error"] = str(e)
+                _save_asr_compare_jobs()
+
+        with _asr_compare_lock:
+            jj = _asr_compare_jobs.get(job_id)
+            if jj and jj.get("status") != "cancelled":
+                jj["status"] = "completed"
+                jj["progress"] = 100
+                jj["current_step"] = f"处理完成 — {total} 个文件, {jj['flagged_count']} 个异常"
+                _save_asr_compare_jobs()
+                for path, result in jj["results"].items():
+                    _asr_compare_results[path] = result
+
+    threading.Thread(target=_run_retry, daemon=False).start()
+    return {"status": "retrying"}
 
 
 @app.get("/api/asr-compare/results")
@@ -6532,7 +6833,7 @@ def run_asr_compare_segmented(
 
     def _run():
         from asr_pipeline import segment_and_compare_pipeline, _get_asr_model, _CancelPipeline
-        from asr_pipeline import ASR_MODELS
+        from asr_pipeline import segment_and_compare_pipeline_multi, ASR_MODELS
 
         def _cancel_check():
             with _asr_compare_lock:
@@ -6550,8 +6851,20 @@ def run_asr_compare_segmented(
         # Preload both ASR models before starting processing.
         # This is critical because FunASR / ModelScope downloads can behave
         # unpredictably in threads. We run with daemon=False to mitigate this.
+        # Skip API-based models — they have no local model to load.
         try:
             for _mk in (model_a, model_b):
+                if _cancel_check():
+                    with _asr_compare_lock:
+                        j = _asr_compare_jobs.get(job_id)
+                        if j:
+                            j["status"] = "cancelled"
+                            j["current_step"] = "已中止"
+                            _save_asr_compare_jobs()
+                    return
+                _mi = ASR_MODELS.get(_mk, {})
+                if _mi.get("framework") == "api":
+                    continue
                 with _asr_compare_lock:
                     job = _asr_compare_jobs.get(job_id)
                     if job:
@@ -6578,6 +6891,106 @@ def run_asr_compare_segmented(
 
         files = all_files
         total = len(files)
+
+        _both_api = (
+            ASR_MODELS.get(model_a, {}).get("framework") == "api"
+            and ASR_MODELS.get(model_b, {}).get("framework") == "api"
+        )
+
+        if _both_api:
+            file_infos = [{"path": f["path"], "source_dir": f.get("source_dir", ""),
+                           "name": f["name"]} for f in files]
+            _done_segs = 0
+            _total_segs_global = 0
+
+            def _on_progress(step, pct):
+                with _asr_compare_lock:
+                    j = _asr_compare_jobs.get(job_id)
+                    if j:
+                        j["current_step"] = step
+                        j["progress"] = int(pct)
+                        _save_asr_compare_jobs()
+
+            def _on_file_done(file_idx, result):
+                """Called when one file's all segments complete."""
+                with _asr_compare_lock:
+                    j = _asr_compare_jobs.get(job_id)
+                    if j and file_idx < len(files):
+                        _f = files[file_idx]
+                        j["results"][_f["path"]] = {**result, "source_dir": _f.get("source_dir", "")}
+                        _f["status"] = "completed"
+                        _f["progress"] = 100
+                        j["completed"] = j.get("completed", 0) + 1
+                        if result.get("segments"):
+                            j["flagged_count"] += sum(1 for s in result["segments"] if s.get("flagged"))
+                        j["progress"] = 10 + int((j["completed"] / total) * 88)
+                        j["current_step"] = f"{j['completed']}/{total} 文件完成 — {_f['name']}"
+                        _save_asr_compare_jobs()
+
+            def _on_segment(file_name, seg_idx, total_segs, partial):
+                nonlocal _done_segs, _total_segs_global
+                _done_segs += 1
+                _total_segs_global = max(_total_segs_global, total_segs)
+                with _asr_compare_lock:
+                    j = _asr_compare_jobs.get(job_id)
+                    if j:
+                        for _f in files:
+                            if _f["name"] == file_name or _f["path"].endswith(file_name):
+                                _f["progress"] = int((seg_idx / max(total_segs, 1)) * 100)
+                                _f["current_step"] = f"{seg_idx}/{total_segs} 已完成"
+                                break
+                        j["progress"] = 10 + int((_done_segs / max(_total_segs_global, 1)) * 88)
+                        j["current_step"] = f"API转写: {_done_segs}/{_total_segs_global} 分段"
+                        _save_asr_compare_jobs()
+
+            try:
+                results = segment_and_compare_pipeline_multi(
+                    file_infos, language=language, device=device,
+                    model_a=model_a, model_b=model_b, hotwords=hotwords,
+                    segment_min_s=segment_min_s, segment_max_s=segment_max_s,
+                    progress_callback=_on_progress, cancel_check=_cancel_check,
+                    filter_english=_filter_english, on_segment=_on_segment,
+                    on_file_done=lambda fi, result: _on_file_done(fi, result),
+                )
+            except _CancelPipeline:
+                with _asr_compare_lock:
+                    j = _asr_compare_jobs.get(job_id)
+                    if j:
+                        j["status"] = "cancelled"
+                        j["current_step"] = "已中止"
+                        _save_asr_compare_jobs()
+                return
+            except Exception as e:
+                with _asr_compare_lock:
+                    j = _asr_compare_jobs.get(job_id)
+                    if j:
+                        j["status"] = "failed"
+                        j["error"] = str(e)
+                        j["current_step"] = f"错误: {e}"
+                        _save_asr_compare_jobs()
+                return
+
+            with _asr_compare_lock:
+                j = _asr_compare_jobs.get(job_id)
+                if not j:
+                    return
+                for result in results:
+                    for _f in files:
+                        if _f["path"] == result.get("audio_path", ""):
+                            j["results"][_f["path"]] = {**result, "source_dir": _f.get("source_dir", "")}
+                            _f["status"] = "completed"
+                            _f["progress"] = 100
+                            if result.get("segments"):
+                                j["flagged_count"] += sum(1 for s in result["segments"] if s.get("flagged"))
+                            break
+                    else:
+                        j["results"][result.get("audio_path", "")] = result
+                    j["completed"] = j.get("completed", 0) + 1
+                j["progress"] = 100
+                j["status"] = "completed"
+                j["current_step"] = "处理完成"
+                _save_asr_compare_jobs()
+            return
 
         for idx, f in enumerate(files):
             with _asr_compare_lock:
@@ -7441,6 +7854,10 @@ def _run_pipeline_video(job_id: str):
         "cut":      threading.BoundedSemaphore(3),
     }
 
+    # File-level GPU lock: only one file may be in the GPU phase at a time.
+    # Non-GPU steps (duration_split, convert) still run in parallel across files.
+    _file_gpu_lock = threading.Lock()
+
     file_state = {}
 
     def _temp_path(f, step_key, ext=".wav", state=None):
@@ -8044,10 +8461,16 @@ def _run_pipeline_video(job_id: str):
                     seg_count = len(segments)
                     seg_states = [{"wav": p, "seg_suffix": f"_seg{i:03d}"} for i, p in enumerate(segments)]
 
+                    _need_file_gpu = any(s in _GPU_STEPS for s in post_steps)
+                    if _need_file_gpu:
+                        _file_gpu_lock.acquire()
                     for step_key in post_steps:
                         if job.cancelled:
                             f.status = "error"; f.error = "任务已取消"
-                            _update_pipeline_job_progress(job); return
+                            _update_pipeline_job_progress(job)
+                            if _need_file_gpu:
+                                _file_gpu_lock.release()
+                            return
 
                         if step_key == "convert":
                             continue
@@ -8122,8 +8545,13 @@ def _run_pipeline_video(job_id: str):
                             f.status = "error"
                             f.error = f"步骤 {step_key} 失败"
                             _update_pipeline_job_progress(job)
+                            if _need_file_gpu:
+                                _file_gpu_lock.release()
                             return
 
+                    if _need_file_gpu:
+                        _file_gpu_lock.release()
+                        _need_file_gpu = False
                     f.progress = 100
                     _update_pipeline_job_progress(job)
                     if "cut" in enabled_steps:
@@ -8141,10 +8569,16 @@ def _run_pipeline_video(job_id: str):
                     if not _step_convert(f, job, state):
                         return
 
+                _need_file_gpu = any(s in _GPU_STEPS for s in pre_steps + post_steps)
+                if _need_file_gpu:
+                    _file_gpu_lock.acquire()
                 for step_key in pre_steps:
                     if job.cancelled:
                         f.status = "error"; f.error = "任务已取消"
-                        _update_pipeline_job_progress(job); return
+                        _update_pipeline_job_progress(job)
+                        if _need_file_gpu:
+                            _file_gpu_lock.release()
+                        return
                     handler = STEP_HANDLERS.get(step_key)
                     if not handler:
                         continue
@@ -8223,7 +8657,10 @@ def _run_pipeline_video(job_id: str):
                     for step_key in post_steps:
                         if job.cancelled:
                             f.status = "error"; f.error = "任务已取消"
-                            _update_pipeline_job_progress(job); return
+                            _update_pipeline_job_progress(job)
+                            if _need_file_gpu:
+                                _file_gpu_lock.release()
+                            return
                         handler = STEP_HANDLERS.get(step_key)
                         if not handler:
                             continue
@@ -8246,6 +8683,8 @@ def _run_pipeline_video(job_id: str):
                         if final_wav and os.path.exists(final_wav):
                             f.output_clips.append(final_wav)
 
+            if _need_file_gpu:
+                _file_gpu_lock.release()
             f.status = "completed"
             _publish_completed_file(f, state)
             _log.info("[%s] 处理完成 (%.1fs) | 输出: %d 个文件",
@@ -8986,19 +9425,19 @@ def mfa_align(
     if not os.path.isdir(acoustic_path):
         acoustic_path = os.path.join(models_root, "pretrained_models", "acoustic", acoustic_model)
 
-    # Normalize TXT filenames: strip _qwen3/_firered suffixes so stems match WAV
+    # Normalize TXT filenames: strip _qwen3-api/_qwen3/_firered suffixes so stems match WAV
     import re as _mfa_re
     corpus_dir = txt_dir
     if os.path.isdir(txt_dir):
         needs_fix = False
         for _fn in os.listdir(txt_dir):
-            if _fn.lower().endswith(".txt") and _mfa_re.search(r'_(qwen3|firered|sensevoice)', _fn.lower()):
+            if _fn.lower().endswith(".txt") and _mfa_re.search(r'_(qwen3-api|qwen3|firered|sensevoice)', _fn.lower()):
                 needs_fix = True; break
         if needs_fix:
             norm_dir = _tmp.mkdtemp(prefix="mfa_corpus_")
             for _fn in os.listdir(txt_dir):
                 if _fn.lower().endswith(".txt"):
-                    _new = _mfa_re.sub(r'_(qwen3|firered|sensevoice)', '', _fn, flags=_mfa_re.IGNORECASE)
+                    _new = _mfa_re.sub(r'_(qwen3-api|qwen3|firered|sensevoice)', '', _fn, flags=_mfa_re.IGNORECASE)
                     _shutil.copy2(os.path.join(txt_dir, _fn), os.path.join(norm_dir, _new))
             corpus_dir = norm_dir
 
@@ -9048,14 +9487,16 @@ def mfa_postprocess(
     output_dir: str = Query(..., description="Post-processed TextGrid output directory"),
     filtered_dir: str = Query(..., description="Filtered (bad) TextGrid output directory"),
     wav_dir: str = Query("", description="WAV directory for energy-based fix"),
+    energy_dir: str = Query("", description="Energy .npy directory for energy-based sil merging"),
     overwrite: bool = Query(True),
-    fix_short_multi_unit: bool = Query(True),
+    merge_sil_by_energy: bool = Query(True, description="Enable energy-based sil merging (MFA_post_process)"),
+    fix_short_multi_unit: bool = Query(False, description="Enable legacy tsu+te heuristic fix"),
     filter_suspicious_alignment: bool = Query(True),
     copy_errors: bool = Query(False),
     language: str = Query("zh", description="Language: zh (Chinese pinyin) or jp (Japanese romaji)"),
 ):
     """Step 4: Post-process MFA TextGrid output (add tiers, fix alignment, filter).
-    Raw texts are read directly from TXT files in txt_dir — no JSONL needed."""
+    Energy-based sil merging (from MFA_post_process) is enabled by default."""
     job_id = uuid.uuid4().hex[:12]
     python_exe = _get_mfa_config("MFA_PYTHON", "python")
     script = os.path.join(MFA_SCRIPTS_DIR, "postprocess_textgrids.py")
@@ -9069,8 +9510,14 @@ def mfa_postprocess(
     ]
     if wav_dir:
         cmd.extend(["--wav-dir", wav_dir])
+    if energy_dir:
+        cmd.extend(["--energy-dir", energy_dir])
     if overwrite:
         cmd.append("--overwrite")
+    if merge_sil_by_energy:
+        cmd.append("--merge-sil-by-energy")
+    else:
+        cmd.append("--no-merge-sil-by-energy")
     if fix_short_multi_unit:
         cmd.append("--fix-short-multi-unit")
     else:
@@ -9127,31 +9574,37 @@ def mfa_run_all(payload: dict = Body(...)):
         steps = [
             {
                 "name": "trim",
-                "label": "步骤 1/4: 裁剪静音",
+                "label": "步骤 1/5: 裁剪静音",
                 "script": os.path.join(MFA_SCRIPTS_DIR, "trim_silence_batch.py"),
                 "build_cmd": lambda: _build_trim_cmd(python_exe, payload),
             },
             {
+                "name": "energy",
+                "label": "步骤 2/5: 提取能量特征",
+                "script": os.path.join(MFA_SCRIPTS_DIR, "extract_energy_from_wavs.py"),
+                "build_cmd": lambda: _build_energy_cmd(python_exe, payload),
+            },
+            {
                 "name": "generate",
-                "label": "步骤 2/4: 生成TXT",
+                "label": "步骤 3/5: 生成TXT",
                 "script": os.path.join(MFA_SCRIPTS_DIR, "generate_wav_txt.py"),
                 "build_cmd": lambda: _build_generate_cmd(python_exe, payload),
             },
             {
                 "name": "align",
-                "label": "步骤 3/4: MFA对齐",
+                "label": "步骤 4/5: MFA对齐",
                 "build_cmd": lambda: _build_align_cmd(payload),
                 "env": {"MFA_ROOT_DIR": model_root},
             },
             {
                 "name": "postprocess",
-                "label": "步骤 4/4: 后处理",
+                "label": "步骤 5/5: 后处理",
                 "script": os.path.join(MFA_SCRIPTS_DIR, "postprocess_textgrids.py"),
                 "build_cmd": lambda: _build_postprocess_cmd(python_exe, payload),
             },
         ]
 
-        total_steps = 3 if skip_step2 else 4
+        total_steps = 4 if skip_step2 else 5
         step_idx = 0
 
         for i, step_info in enumerate(steps):
@@ -9310,20 +9763,20 @@ def _build_align_cmd(payload):
     if not os.path.isdir(acoustic_path):
         acoustic_path = os.path.join(model_root, "pretrained_models", "acoustic", acoustic)
 
-    # Normalize TXT filenames: strip _qwen3/_firered suffixes
+    # Normalize TXT filenames: strip _qwen3-api/_qwen3/_firered suffixes
     import re as _mfa_re2, shutil as _shutil2, tempfile as _tmp2
     txt_dir = payload.get("align_txt_dir", "")
     corpus_dir = txt_dir
     if os.path.isdir(txt_dir):
         needs_fix = False
         for _fn in os.listdir(txt_dir):
-            if _fn.lower().endswith(".txt") and _mfa_re2.search(r'_(qwen3|firered|sensevoice)', _fn.lower()):
+            if _fn.lower().endswith(".txt") and _mfa_re2.search(r'_(qwen3-api|qwen3|firered|sensevoice)', _fn.lower()):
                 needs_fix = True; break
         if needs_fix:
             norm_dir = _tmp2.mkdtemp(prefix="mfa_alld_")
             for _fn in os.listdir(txt_dir):
                 if _fn.lower().endswith(".txt"):
-                    _new = _mfa_re2.sub(r'_(qwen3|firered|sensevoice)', '', _fn, flags=_mfa_re2.IGNORECASE)
+                    _new = _mfa_re2.sub(r'_(qwen3-api|qwen3|firered|sensevoice)', '', _fn, flags=_mfa_re2.IGNORECASE)
                     _shutil2.copy2(os.path.join(txt_dir, _fn), os.path.join(norm_dir, _new))
             corpus_dir = norm_dir
 
@@ -9362,9 +9815,16 @@ def _build_postprocess_cmd(python_exe, payload):
     wav_dir = payload.get("post_wav_dir", "")
     if wav_dir:
         cmd.extend(["--wav-dir", wav_dir])
+    energy_dir = payload.get("post_energy_dir", "")
+    if energy_dir:
+        cmd.extend(["--energy-dir", energy_dir])
     if payload.get("post_overwrite", True):
         cmd.append("--overwrite")
-    if payload.get("post_fix_short_multi_unit", True):
+    if payload.get("post_merge_sil_by_energy", True):
+        cmd.append("--merge-sil-by-energy")
+    else:
+        cmd.append("--no-merge-sil-by-energy")
+    if payload.get("post_fix_short_multi_unit", False):
         cmd.append("--fix-short-multi-unit")
     else:
         cmd.append("--no-fix-short-multi-unit")
@@ -9375,6 +9835,18 @@ def _build_postprocess_cmd(python_exe, payload):
     if payload.get("post_copy_errors", False):
         cmd.append("--copy-errors")
     cmd.extend(["--language", payload.get("language", "zh")])
+    return cmd
+
+
+def _build_energy_cmd(python_exe, payload):
+    script = os.path.join(MFA_SCRIPTS_DIR, "extract_energy_from_wavs.py")
+    wav_dir = payload.get("energy_wav_dir", payload.get("trim_output_dir", ""))
+    output_dir = payload.get("energy_output_dir", payload.get("post_energy_dir", ""))
+    cmd = [python_exe, script, "--force"]
+    if wav_dir:
+        cmd.extend(["--wav_dir", wav_dir])
+    if output_dir:
+        cmd.extend(["--output_dir", output_dir])
     return cmd
 
 
@@ -9689,9 +10161,9 @@ def mfa_find_txt(audio_path: str = Query(..., description="Path to audio file"))
 
     Directory structure:
       segments/<name>/<name>_seg001.wav
-      segments/<name>/txt/<name>_seg001_qwen3.txt
+      segments/<name>/txt/<name>_seg001_qwen3-api.txt
     Looks in <audio_dir>/txt/ for files starting with the audio stem,
-    preferring *_qwen3.txt over *_firered.txt.
+    preferring *_qwen3-api.txt over *_qwen3.txt / *_firered.txt.
     """
     if not os.path.isfile(audio_path):
         return {"txt_path": "", "found": False, "hint": "Audio file not found"}
@@ -9699,7 +10171,7 @@ def mfa_find_txt(audio_path: str = Query(..., description="Path to audio file"))
     audio_dir = os.path.dirname(audio_path)
     stem = os.path.splitext(os.path.basename(audio_path))[0]
 
-    # Priority: {audio_dir}/txt/{stem}_qwen3.txt > {stem}_firered.txt > {stem}_*.txt
+    # Priority: {audio_dir}/txt/{stem}_qwen3-api.txt > {stem}_qwen3.txt > {stem}_firered.txt > {stem}_*.txt
     txt_dir = os.path.join(audio_dir, "txt")
     if os.path.isdir(txt_dir):
         matching = []
@@ -9709,12 +10181,13 @@ def mfa_find_txt(audio_path: str = Query(..., description="Path to audio file"))
                     matching.append(name)
         except OSError:
             pass
-        # Sort: qwen3 first, then firered, then others
+        # Sort: qwen3-api first, then qwen3, then firered, then others
         def _rank(n):
             low = n.lower()
-            if "_qwen3" in low: return 0
-            if "_firered" in low: return 1
-            return 2
+            if "_qwen3-api" in low: return 0
+            if "_qwen3" in low: return 1
+            if "_firered" in low: return 2
+            return 3
         matching.sort(key=_rank)
         if matching:
             best = matching[0]
@@ -9732,9 +10205,10 @@ def mfa_find_txt(audio_path: str = Query(..., description="Path to audio file"))
     # Shared ranking helper
     def _rank_mfa(n):
         low = n.lower()
-        if "_qwen3" in low: return 0
-        if "_firered" in low: return 1
-        return 2
+        if "_qwen3-api" in low: return 0
+        if "_qwen3" in low: return 1
+        if "_firered" in low: return 2
+        return 3
 
     # Fallback 1: look in <audio_dir>/<stem>/txt/ (audio and folder are siblings)
     fb_dir = os.path.join(audio_dir, stem, "txt")
@@ -10369,6 +10843,8 @@ def _run_batch_mfa_job(job_id: str):
     batch_post_dir = os.path.join(base_out, "post")
     batch_filtered_dir = os.path.join(base_out, "filtered")
     batch_wav_dir = os.path.join(base_out, "wav")
+    batch_trimmed_wav_dir = os.path.join(base_out, "trimmed_wav")
+    batch_energy_dir = os.path.join(base_out, "energy")
 
     jsonl_path = params.get("jsonl_path", "")
     txt_dir = params.get("txt_dir", "")
@@ -10431,10 +10907,90 @@ def _run_batch_mfa_job(job_id: str):
                             except Exception:
                                 pass
                             break
-    _up(progress=20)
+    _up(progress=15)
+
+    # Step: Trim silence on all audio files (before tokenize / align)
+    _up(current_step="步骤: 裁剪静音", progress=15)
+    if _ck():
+        _up(status="cancelled", current_step="已取消")
+        return
+
+    os.makedirs(batch_trimmed_wav_dir, exist_ok=True)
+    trim_script = os.path.join(MFA_SCRIPTS_DIR, "trim_silence_batch.py")
+
+    # Collect all audio files that have matched text for trimming
+    trim_input_wavs = []
+    for f in job.files:
+        if f.matched_text_content and os.path.isfile(f.audio_path):
+            trim_input_wavs.append(f.audio_path)
+
+    if trim_input_wavs:
+        # Write input WAVs to a temp dir for batch trim (trim_silence_batch needs input dir)
+        import shutil as _tshutil
+        trim_input_dir = os.path.join(base_out, "trim_input")
+        os.makedirs(trim_input_dir, exist_ok=True)
+        for wav_path in trim_input_wavs:
+            stem = Path(wav_path).stem
+            dst = os.path.join(trim_input_dir, f"{stem}.wav")
+            if not os.path.exists(dst):
+                _tshutil.copy2(wav_path, dst)
+
+        trim_cmd = [
+            python_exe, trim_script,
+            "--input-dir", trim_input_dir,
+            "--output-dir", batch_trimmed_wav_dir,
+            "--max-silence-sec", "1.0",
+            "--sil-vol-threshold", "0.001",
+            "--sil-len-threshold", "0.08",
+            "--normalize-edges",
+            "--target-edge-silence-sec", "0.5",
+            "--edge-silence-threshold", "0.001",
+            "--edge-frame-length", "1024",
+            "--workers", str(_get_mfa_config("MFA_DEFAULT_NUM_JOBS", "8")),
+        ]
+        try:
+            result = subprocess.run(trim_cmd, capture_output=True, text=True,
+                                    timeout=600, cwd=PROJECT_ROOT)
+            if result.returncode != 0:
+                _up(status="failed", current_step=f"静音裁剪失败: {result.stderr[:200]}")
+                return
+        except Exception as e:
+            _up(status="failed", current_step=f"静音裁剪异常: {e}")
+            return
+
+        # Map trimmed WAV paths back to file items
+        for f in job.files:
+            stem = Path(f.audio_path).stem
+            trimmed_path = os.path.join(batch_trimmed_wav_dir, f"{stem}.wav")
+            if os.path.isfile(trimmed_path):
+                f.trimmed_audio_path = trimmed_path
+            else:
+                f.trimmed_audio_path = f.audio_path  # fallback to original
+
+    _up(progress=30)
+
+    # Step 1.5: Extract energy from trimmed WAVs (for MFA_post_process sil merging)
+    _up(current_step="提取能量特征", progress=30)
+    energy_script = os.path.join(MFA_SCRIPTS_DIR, "extract_energy_from_wavs.py")
+    if os.path.isfile(energy_script) and os.path.isdir(batch_trimmed_wav_dir):
+        os.makedirs(batch_energy_dir, exist_ok=True)
+        energy_cmd = [
+            python_exe, energy_script,
+            "--wav_dir", batch_trimmed_wav_dir,
+            "--output_dir", batch_energy_dir,
+            "--force",
+        ]
+        try:
+            result = subprocess.run(energy_cmd, capture_output=True, text=True,
+                                    timeout=300, cwd=PROJECT_ROOT)
+            if result.returncode != 0:
+                if hasattr(job, 'warnings'):
+                    job.warnings.append(f"能量提取失败: {result.stderr[:200]}")
+        except Exception:
+            pass  # energy extraction is non-critical; postprocess will skip if missing
 
     # Step 2: Tokenize
-    _up(current_step="步骤 2/4: 生成分词 TXT", progress=20)
+    _up(current_step="步骤 2/4: 生成分词 TXT", progress=35)
     os.makedirs(batch_txt_dir, exist_ok=True)
     tokenized_count = 0
     for idx, f in enumerate(job.files):
@@ -10446,7 +11002,7 @@ def _run_batch_mfa_job(job_id: str):
             f.error = "无匹配文本"
             continue
         f.status = "tokenizing"
-        _up(current_file=f.audio_name, progress=round(20 + (idx / total) * 15))
+        _up(current_file=f.audio_name, progress=round(30 + (idx / total) * 15))
         tp, err = _batch_generate_txt(f.matched_text_content, Path(f.audio_path).stem,
                                       batch_txt_dir, language, dict_path)
         if tp:
@@ -10454,7 +11010,7 @@ def _run_batch_mfa_job(job_id: str):
             tokenized_count += 1
         else:
             f.error = f"分词失败: {err}"
-    _up(progress=35)
+    _up(progress=45)
 
     if tokenized_count == 0:
         _up(status="failed", current_step="无文件可对齐", progress=100,
@@ -10462,8 +11018,8 @@ def _run_batch_mfa_job(job_id: str):
                             "aligned": 0, "anomalous": 0, "normal": 0})
         return
 
-    # Step 3: MFA Align (batch)
-    _up(current_step="步骤 3/4: MFA 对齐", progress=35)
+    # Step 3: MFA Align (batch) — uses trimmed audio from step 1
+    _up(current_step="步骤 3/4: MFA 对齐", progress=45)
     if _ck():
         _up(status="cancelled", current_step="已取消")
         return
@@ -10477,10 +11033,12 @@ def _run_batch_mfa_job(job_id: str):
     for f in job.files:
         if f.tokenized_path and os.path.isfile(f.tokenized_path):
             stem = Path(f.audio_path).stem
+            # Use trimmed audio if available, otherwise fall back to original
+            src_wav = f.trimmed_audio_path or f.audio_path
             try:
                 wav_dst = os.path.join(batch_wav_dir, f"{stem}.wav")
                 if not os.path.exists(wav_dst):
-                    _shutil.copy2(f.audio_path, wav_dst)
+                    _shutil.copy2(src_wav, wav_dst)
                 txt_dst = os.path.join(align_work_dir, f"{stem}.txt")
                 _shutil.copy2(f.tokenized_path, txt_dst)
                 align_file_count += 1
@@ -10528,7 +11086,7 @@ def _run_batch_mfa_job(job_id: str):
                 cur = int(m.group(1))
                 tot = int(m.group(2))
                 if tot > 0:
-                    _up(progress=round(35 + (cur / tot) * 40))
+                    _up(progress=round(45 + (cur / tot) * 35))
             if _ck():
                 process.kill()
                 _up(status="cancelled", current_step="已取消")
@@ -10552,14 +11110,14 @@ def _run_batch_mfa_job(job_id: str):
                 aligned_count += 1
             else:
                 f.error = "MFA 未生成对齐结果"
-    _up(progress=75)
+    _up(progress=80)
 
     if aligned_count == 0:
         _up(status="failed", current_step="MFA 未生成任何对齐结果", progress=100)
         return
 
     # Step 4: Postprocess / Anomaly Detection
-    _up(current_step="步骤 4/4: 异常检测", progress=75)
+    _up(current_step="步骤 4/4: 异常检测", progress=80)
     for _d in [batch_post_dir, batch_filtered_dir]:
         os.makedirs(_d, exist_ok=True)
 
@@ -10579,8 +11137,10 @@ def _run_batch_mfa_job(job_id: str):
         "--output-dir", batch_post_dir,
         "--filtered-dir", batch_filtered_dir,
         "--text-key", text_key, "--wav-key", wav_key,
+        "--wav-dir", batch_trimmed_wav_dir,
+        "--energy-dir", batch_energy_dir,
         "--overwrite",
-        "--fix-short-multi-unit",
+        "--merge-sil-by-energy",
         "--filter-suspicious-alignment",
         "--language", language,
     ]
@@ -10599,7 +11159,7 @@ def _run_batch_mfa_job(job_id: str):
                 cur = int(m.group(1))
                 tot = int(m.group(2))
                 if tot > 0:
-                    _up(progress=round(75 + (cur / tot) * 20))
+                    _up(progress=round(80 + (cur / tot) * 20))
             if _ck():
                 process.kill()
                 _up(status="cancelled", current_step="已取消")
