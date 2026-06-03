@@ -3034,8 +3034,7 @@ def segment_and_compare_pipeline_multi(
     _file_seg_done = [0] * total_files   # how many have completed
     _api_futures_lock = threading.Lock()
     _api_futures: dict = {}  # future → (file_idx, seg_index)
-    _api_workers = min(len(segment_files), 10)
-    _api_pool = concurrent.futures.ThreadPoolExecutor(max_workers=_api_workers)
+    _api_pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
 
     def _vad_one_file(file_idx: int, finfo: dict) -> list:
         """VAD → chunk → save segment WAVs. Returns list of segment task dicts."""
@@ -3146,8 +3145,84 @@ def segment_and_compare_pipeline_multi(
             "diff_chunks": diff_chunks, "user_action": None,
         }
 
+    def _collect_completed(timeout: float = 0.0):
+        """Collect any completed API futures. Called during VAD (timeout=0) and
+        in the final drain loop (timeout=1.0)."""
+        nonlocal _api_futures
+        with _api_futures_lock:
+            if not _api_futures:
+                return
+            _snapshot = list(_api_futures.keys())
+        if not _snapshot:
+            return
+
+        _done, _ = concurrent.futures.wait(
+            _snapshot, timeout=timeout,
+            return_when=concurrent.futures.FIRST_COMPLETED,
+        )
+        if not _done:
+            return
+
+        _total_segs = _total_segs_global[0]
+        for _f in _done:
+            with _api_futures_lock:
+                _fi = _api_futures.pop(_f, None)
+            if _fi is None:
+                continue
+            try:
+                _seg_result = _f.result()
+                _file_results[_fi]["segments"].append(_seg_result)
+            except Exception as _e:
+                _logger.warning("Segment API failed (file %d): %s", _fi, _e)
+            _api_done_count[0] += 1
+            _file_seg_done[_fi] += 1
+
+            if on_file_done and _file_seg_total[_fi] > 0 and _file_seg_done[_fi] >= _file_seg_total[_fi]:
+                _fr = _file_results[_fi]
+                _fr["segment_count"] = len(_fr["segments"])
+                _fr["segments"].sort(key=lambda r: r["seg_index"])
+                try:
+                    on_file_done(_fi, {
+                        "audio_path": _fr["audio_path"],
+                        "audio_name": _fr["audio_name"],
+                        "source_dir": _fr["source_dir"],
+                        "duration_sec": _fr.get("duration_sec", 0),
+                        "segment_count": _fr["segment_count"],
+                        "model_a": _fr["model_a"],
+                        "model_b": _fr["model_b"],
+                        "segments_dir": _fr.get("segments_dir", ""),
+                        "segments": list(_fr["segments"]),
+                    })
+                except Exception:
+                    pass
+
+            if on_segment:
+                try:
+                    _fr = _file_results[_fi]
+                    on_segment(_fr["audio_name"], len(_fr["segments"]), _total_segs, {
+                        "audio_path": _fr["audio_path"],
+                        "audio_name": _fr["audio_name"],
+                        "source_dir": _fr["source_dir"],
+                        "duration_sec": _fr.get("duration_sec", 0),
+                        "segment_count": len(_fr["segments"]),
+                        "model_a": _fr["model_a"],
+                        "model_b": _fr["model_b"],
+                        "segments_dir": _fr.get("segments_dir", ""),
+                        "segments": list(_fr["segments"]),
+                    })
+                except Exception:
+                    pass
+
+        if progress_callback and _total_segs > 0:
+            _pct = 20 + int((_api_done_count[0] / _total_segs) * 78)
+            progress_callback(
+                f"API转写: {_api_done_count[0]}/{_total_segs} 段",
+                min(_pct, 98),
+            )
+
     try:
-        # VAD each file serially, submit segments to API pool immediately
+        # VAD each file serially, submit segments to API pool immediately.
+        # Collect completed results as we go — API runs in parallel with VAD.
         for _fi in range(total_files):
             if cancel_check and cancel_check():
                 raise _CancelPipeline("Cancelled")
@@ -3160,11 +3235,13 @@ def segment_and_compare_pipeline_multi(
             _total_segs_global[0] += len(_segs)
             _file_seg_total[_fi] = len(_segs)
 
-            # Submit this file's segments to API pool (non-blocking)
             for _seg in _segs:
                 _f = _api_pool.submit(_process_one_task, _fi, _seg)
                 with _api_futures_lock:
                     _api_futures[_f] = _fi
+
+            # Collect any already-completed results (non-blocking)
+            _collect_completed(timeout=0.0)
 
             if progress_callback:
                 _pct = 10 + int(((_fi + 1) / max(total_files, 1)) * 10)
@@ -3173,87 +3250,14 @@ def segment_and_compare_pipeline_multi(
                     _pct,
                 )
 
-        # All VAD done, wait for remaining API futures
-        _total_segs = _total_segs_global[0]
+        # All VAD done, drain remaining futures
         while True:
             with _api_futures_lock:
                 if not _api_futures:
                     break
-                _snapshot = list(_api_futures.keys())
-            if not _snapshot:
-                break
-
-            _done, _ = concurrent.futures.wait(
-                _snapshot, timeout=1.0,
-                return_when=concurrent.futures.FIRST_COMPLETED,
-            )
-            for _f in _done:
-                with _api_futures_lock:
-                    _fi = _api_futures.pop(_f, None)
-                if _fi is None:
-                    continue
-                try:
-                    _seg_result = _f.result()
-                    _file_results[_fi]["segments"].append(_seg_result)
-                except Exception as _e:
-                    _logger.warning("Segment API failed (file %d): %s", _fi, _e)
-                _api_done_count[0] += 1
-                _file_seg_done[_fi] += 1
-                # Check if this file's all segments are done
-                if on_file_done and _file_seg_total[_fi] > 0 and _file_seg_done[_fi] >= _file_seg_total[_fi]:
-                    _fr = _file_results[_fi]
-                    _fr["segment_count"] = len(_fr["segments"])
-                    _fr["segments"].sort(key=lambda r: r["seg_index"])
-                    _done_result = {
-                        "audio_path": _fr["audio_path"],
-                        "audio_name": _fr["audio_name"],
-                        "source_dir": _fr["source_dir"],
-                        "duration_sec": _fr.get("duration_sec", 0),
-                        "segment_count": _fr["segment_count"],
-                        "model_a": _fr["model_a"],
-                        "model_b": _fr["model_b"],
-                        "segments_dir": _fr.get("segments_dir", ""),
-                        "segments": list(_fr["segments"]),
-                    }
-                    try:
-                        on_file_done(_fi, _done_result)
-                    except Exception:
-                        pass
-
+            _collect_completed(timeout=1.0)
             if cancel_check and cancel_check():
                 raise _CancelPipeline("Cancelled")
-
-            if progress_callback and _total_segs > 0:
-                _pct = 20 + int((_api_done_count[0] / _total_segs) * 78)
-                progress_callback(
-                    f"API转写: {_api_done_count[0]}/{_total_segs} 段",
-                    min(_pct, 98),
-                )
-
-            if on_segment:
-                for _f in _done:
-                    try:
-                        _fi2 = _api_futures.get(_f) if _f in _api_futures else None
-                        if _fi2 is None:
-                            _fi2, _ = _f.result() if hasattr(_f, 'result') else (0, None)
-                    except Exception:
-                        continue
-                    try:
-                        _fr = _file_results[_fi2] if isinstance(_fi2, int) and _fi2 < len(_file_results) else _file_results[0]
-                    except Exception:
-                        continue
-                    _partial = {
-                        "audio_path": _fr["audio_path"], "audio_name": _fr["audio_name"],
-                        "source_dir": _fr["source_dir"], "duration_sec": _fr.get("duration_sec", 0),
-                        "segment_count": len(_fr["segments"]),
-                        "model_a": _fr["model_a"], "model_b": _fr["model_b"],
-                        "segments_dir": _fr.get("segments_dir", ""),
-                        "segments": list(_fr["segments"]),
-                    }
-                    try:
-                        on_segment(_fr["audio_name"], len(_fr["segments"]), _total_segs, _partial)
-                    except Exception:
-                        pass
     finally:
         _api_pool.shutdown(wait=False)
 

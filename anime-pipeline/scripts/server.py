@@ -6368,6 +6368,7 @@ def asr_compare_resume_job(job_id: str):
                         jj["results"][audio_path] = result
                         if result.get("flagged"):
                             jj["flagged_count"] = jj.get("flagged_count", 0) + 1
+                        _save_asr_compare_jobs()
                 f["status"] = "completed"
                 f["progress"] = 100
 
@@ -6396,6 +6397,7 @@ def asr_compare_resume_job(job_id: str):
                 f["status"] = "error"
                 f["progress"] = 0
                 f["error"] = str(e)
+                _save_asr_compare_jobs()
 
         with _asr_compare_lock:
             jj = _asr_compare_jobs.get(job_id)
