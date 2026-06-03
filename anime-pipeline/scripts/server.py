@@ -5321,6 +5321,7 @@ def asr_compare_resume_job(job_id: str):
                         segment_min_s=seg_min, segment_max_s=seg_max,
                         progress_callback=on_progress, source_dir=f["source_dir"],
                         cancel_check=_cancel_check,
+                        filter_english=_filter_english,
                     )
                 else:
                     result = compare_asr_pipeline(

@@ -1945,6 +1945,7 @@ def segment_and_compare_pipeline(
     progress_callback=None,
     source_dir: str = "",
     cancel_check=None,  # callable → bool; if True, abort processing
+    filter_english: bool = True,
 ) -> dict:
     """Split audio into 10-15s segments via VAD, run two ASR models on each, compare.
 
@@ -2181,7 +2182,10 @@ def segment_and_compare_pipeline(
         norm_a = _normalize_text(text_a)
         norm_b = _normalize_text(text_b)
 
-        if not norm_a and not norm_b:
+        # English filter: if enabled and either side has English → 0% match
+        if filter_english and (_has_english(norm_a) or _has_english(norm_b)):
+            diff_percent = 100.0
+        elif not norm_a and not norm_b:
             diff_percent = 0.0
         elif not norm_a or not norm_b:
             diff_percent = 100.0
