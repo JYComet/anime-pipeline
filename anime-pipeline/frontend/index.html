@@ -1186,7 +1186,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
           </div>
 
           <!-- Language selection -->
-          <div style="margin-bottom:16px;">
+          <div style="margin-bottom:12px;">
             <label style="display:block;font-size:13px;color:var(--text2);margin-bottom:6px;">语言</label>
             <select id="asr-lang-select" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:14px;">
               <option value="zh" selected>中文</option>
@@ -1194,6 +1194,14 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
               <option value="ja">日本語</option>
               <option value="en">English</option>
               <option value="ko">한국어</option>
+            </select>
+          </div>
+
+          <!-- VAD model -->
+          <div style="margin-bottom:16px;">
+            <label style="display:block;font-size:13px;color:var(--text2);margin-bottom:6px;">VAD 模型（语音活动检测）</label>
+            <select id="asr-vad-select" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text);font-size:14px;">
+              <option value="">加载中...</option>
             </select>
           </div>
 
@@ -1310,12 +1318,19 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
         <!-- File info bar -->
         <div id="cmp-folder-file-info" style="display:none;margin-top:6px;padding:6px 10px;border-radius:6px;background:var(--bg2);border:1px solid var(--border);font-size:12px;color:var(--text2);"></div>
         <!-- Selection bar -->
-        <div id="cmp-folder-select-bar" style="display:none;margin-top:6px;align-items:center;gap:8px;">
+        <div id="cmp-folder-select-bar" style="display:none;margin-top:6px;align-items:center;gap:8px;flex-wrap:wrap;">
           <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:12px;">
             <input type="checkbox" id="cmp-folder-select-all-cb" onchange="cmpFolderToggleSelectAll()" style="cursor:pointer;">
             全选
           </label>
           <span id="cmp-folder-selected-count" style="font-size:11px;color:var(--text2);"></span>
+          <span style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text2);margin-left:8px;">
+            取消
+            <input type="number" id="cmp-deselect-from" min="1" placeholder="起" style="width:44px;padding:2px 4px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);">
+            <span>~</span>
+            <input type="number" id="cmp-deselect-to" min="1" placeholder="止" style="width:44px;padding:2px 4px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);">
+            <button class="btn btn-secondary" onclick="cmpFolderDeselectRange()" style="font-size:10px;padding:2px 8px;">取消勾选</button>
+          </span>
         </div>
         <!-- File list -->
         <div id="cmp-folder-file-list" class="file-list" style="display:none;max-height:250px;overflow-y:auto;margin-top:4px;border:1px solid var(--border);border-radius:8px;"></div>
@@ -1364,6 +1379,11 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
               <select id="cmp-device-select" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px;">
                 <option value="cuda">GPU (CUDA)</option>
                 <option value="cpu">CPU</option>
+              </select>
+            </div>
+            <div style="flex:1;min-width:140px;" id="cmp-vad-row">
+              <label style="display:block;font-size:13px;color:var(--text2);margin-bottom:4px;">VAD 模型</label>
+              <select id="cmp-vad-select" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;">
               </select>
             </div>
             <div style="flex:1;min-width:200px;">
@@ -2875,7 +2895,7 @@ function switchTab(name) {
   if (name === 'denoise-review') { loadDreviewBaseDirs(); loadEmotionCounts('dreview-emotion-bar', '/api/denoise-review/emotion-counts'); }
   if (name === 'extract') { loadExtractFiles(); loadExtractedSubs(); }
   if (name === 'asr') { loadAsrVideos(); loadAsrModels(); loadAsrResults(); restoreAsrInterruptedJobs(); loadHotwordConfigs(); loadFolderBrowser(_asrFolderPath || ''); }
-  if (name === 'asr-compare') { if (!_cmpLoaded) { loadCmpFolderBrowser(_cmpFolderPath); loadAsrCompareModels(); _cmpLoaded = true; } if (!_cmpRestored) { restoreAsrCompareInterruptedJobs(); _cmpRestored = true; } loadHotwordConfigs(); }
+  if (name === 'asr-compare') { if (!_cmpLoaded) { loadCmpFolderBrowser(_cmpFolderPath); loadAsrCompareModels(); loadVadModels(); _cmpLoaded = true; } if (!_cmpRestored) { restoreAsrCompareInterruptedJobs(); _cmpRestored = true; } loadHotwordConfigs(); }
   if (name === 'txt-compare') { if (!_txtLoaded) { loadTxtFolderBrowser(_txtFolderPath); _txtLoaded = true; } if (!_txtRestored) { restoreTxtCompareInterruptedJobs(); _txtRestored = true; } }
   if (name === 'stitch') loadStitchVideos();
   if (name === 'split') {
@@ -6712,6 +6732,8 @@ async function loadAsrModels() {
     }
     if (!html) html = '<option value="">无可用模型</option>';
     selEl.innerHTML = html;
+    // Load VAD model options for ASR panel
+    loadVadModels();
     // Apply saved ASR defaults
     if (_savedAsrConfig && _savedAsrConfig.ASR_DEFAULT_MODEL) {
       selEl.value = _savedAsrConfig.ASR_DEFAULT_MODEL;
@@ -6840,11 +6862,14 @@ function processNextAsrInQueue() {
   // Highlight current item
   loadAsrVideos();
 
+  var vadEl = document.getElementById('asr-vad-select');
+  var vadModel = vadEl ? vadEl.value : 'silero-vad';
   var url = API + '/api/asr/run?path=' + encodeURIComponent(item.path) +
     '&model=' + encodeURIComponent(model) +
     '&language=' + encodeURIComponent(lang) +
     '&device=' + encodeURIComponent(device) +
-    '&hotwords=' + encodeURIComponent(hotwords);
+    '&hotwords=' + encodeURIComponent(hotwords) +
+    '&vad_model=' + encodeURIComponent(vadModel);
 
   fetch(url, { method: 'POST' }).then(function(resp) { return resp.json(); }).then(function(data) {
     if (data.status !== 'started') {
@@ -6938,11 +6963,14 @@ async function runAsrExtraction() {
   var outputDir = document.getElementById('asr-video-output').value.trim();
 
   try {
+    var vadEl2 = document.getElementById('asr-vad-select');
+    var vadModel2 = vadEl2 ? vadEl2.value : 'silero-vad';
     var url = API + '/api/asr/run?path=' + encodeURIComponent(_asrActiveVideo) +
       '&model=' + encodeURIComponent(model) +
       '&language=' + encodeURIComponent(lang) +
       '&device=' + encodeURIComponent(device) +
-      '&hotwords=' + encodeURIComponent(hotwords);
+      '&hotwords=' + encodeURIComponent(hotwords) +
+      '&vad_model=' + encodeURIComponent(vadModel2);
   if (outputDir) url += '&output_dir=' + encodeURIComponent(outputDir);
     var resp = await fetch(url, { method: 'POST' });
     var data = await resp.json();
@@ -7786,6 +7814,24 @@ function cmpFolderToggleSelectAll() {
   _cmpRenderFolderFileList();
 }
 
+function cmpFolderDeselectRange() {
+  var fromEl = document.getElementById('cmp-deselect-from');
+  var toEl = document.getElementById('cmp-deselect-to');
+  var from = parseInt(fromEl.value);
+  var to = parseInt(toEl.value);
+  if (isNaN(from) || isNaN(to) || from < 1 || to < 1) {
+    toast('请输入有效的起始和结束编号（从 1 开始）', 'error'); return;
+  }
+  if (from > to) { var t = from; from = to; to = t; }
+  if (to > _cmpFolderFiles.length) to = _cmpFolderFiles.length;
+  for (var i = from - 1; i < to; i++) {
+    delete _cmpFolderSelected[_cmpFolderFiles[i].name];
+  }
+  _cmpRenderFolderFileList();
+  fromEl.value = ''; toEl.value = '';
+  toast('已取消勾选 #' + from + ' ~ #' + to + ' 共 ' + (to - from + 1) + ' 个', 'info');
+}
+
 function cmpFolderToggleItem(cb) {
   var name = cb.getAttribute('data-name');
   if (cb.checked) { _cmpFolderSelected[name] = true; }
@@ -7896,6 +7942,9 @@ function switchCmpMode(mode) {
   document.getElementById('cmp-mode-file-btn').className = isSeg ? 'btn btn-secondary' : 'btn btn-primary';
   document.getElementById('cmp-mode-seg-btn').className = isSeg ? 'btn btn-primary' : 'btn btn-secondary';
   document.getElementById('cmp-seg-hint').style.display = isSeg ? '' : 'none';
+  // Show VAD selector only for segmented mode
+  var vadRow = document.getElementById('cmp-vad-row');
+  if (vadRow) vadRow.style.display = isSeg ? '' : 'none';
   // Update summary labels for segmented mode
   document.getElementById('cmp-good-label').textContent = isSeg ? '匹配率≥阈值' : '匹配率≥阈值';
   document.getElementById('cmp-low-label').textContent = isSeg ? '匹配率<阈值' : '匹配率<阈值';
@@ -7904,6 +7953,29 @@ function switchCmpMode(mode) {
     renderCmpSummary();
     renderCmpResults();
   }
+}
+
+var _vadModels = [];
+async function loadVadModels() {
+  try {
+    var resp = await fetch(API + '/api/asr/vad-models');
+    if (!resp.ok) return;
+    var data = await resp.json();
+    _vadModels = data.models || [];
+    var defaultKey = data.default || 'silero-vad';
+    var opts = '';
+    for (var i = 0; i < _vadModels.length; i++) {
+      var m = _vadModels[i];
+      var sel = m.key === defaultKey ? ' selected' : '';
+      opts += '<option value="' + safeAttr(m.key) + '"' + sel + '>' + escapeHtml(m.name) + '</option>';
+    }
+    // Populate compare panel VAD selector
+    var selCmp = document.getElementById('cmp-vad-select');
+    if (selCmp) selCmp.innerHTML = opts;
+    // Populate ASR panel VAD selector
+    var selAsr = document.getElementById('asr-vad-select');
+    if (selAsr) selAsr.innerHTML = opts;
+  } catch(e) { console.error('loadVadModels:', e); }
 }
 
 function runAsrCompareAll() {
@@ -7944,6 +8016,12 @@ function runAsrCompareAll() {
     '&device=' + encodeURIComponent(device) +
     '&hotwords=' + encodeURIComponent(hotwords) +
     '&filter_english=' + (filterEnglish ? '1' : '0');
+  // VAD model for segmented mode
+  if (isSeg) {
+    var vadSel = document.getElementById('cmp-vad-select');
+    var vadModel = vadSel ? vadSel.value : 'silero-vad';
+    url += '&vad_model=' + encodeURIComponent(vadModel);
+  }
 
   fetch(url, {
     method: 'POST',

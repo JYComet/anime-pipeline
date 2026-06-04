@@ -1026,9 +1026,6 @@ _api_session = None
 _api_session_lock = threading.Lock()
 _api_request_semaphore = threading.Semaphore(10)
 
-# Global upload cooldown: when DashScope returns SystemError, pause all uploads
-_api_upload_degraded_until = 0.0  # timestamp, all uploads sleep until this time
-_api_upload_degraded_lock = threading.Lock()
 
 
 def _get_api_session():
@@ -1056,16 +1053,20 @@ def _api_request_with_retry(method: str, url: str, **kwargs) -> "requests.Respon
     """Make an HTTP request with retry + backoff for SSL/connection errors."""
     import requests
     import time
-    _api_request_semaphore.acquire()
+    _acquired = _api_request_semaphore.acquire(timeout=120)
+    if not _acquired:
+        raise RuntimeError(f"API request timed out waiting for concurrency slot ({method} {url})")
     try:
         session = _get_api_session()
         _last_err = None
+        _timeout = kwargs.pop("timeout", 90)
         for _attempt in range(3):
             try:
-                resp = session.request(method, url, timeout=kwargs.pop("timeout", 300), **kwargs)
+                resp = session.request(method, url, timeout=_timeout, **kwargs)
                 return resp
             except (requests.exceptions.SSLError,
-                    requests.exceptions.ConnectionError) as e:
+                    requests.exceptions.ConnectionError,
+                    requests.exceptions.ReadTimeout) as e:
                 _last_err = e
                 time.sleep(1.0 * (_attempt + 1))
         raise _last_err  # type: ignore[misc]
@@ -1101,73 +1102,32 @@ def _api_async_transcribe(audio_path: str, api_model: str, language: str,
     if not os.path.exists(audio_path):
         raise RuntimeError(f"音频文件不存在: {audio_path}")
 
-    # Global cooldown: if upload service is degraded, wait before attempting
-    _now = time.time()
-    if _now - _api_upload_degraded_until < 0:
-        _wait = _api_upload_degraded_until - _now
-        time.sleep(min(_wait, 120))
-
-    # Step 1: Upload file (multi-wave retry for transient server errors)
+    # Step 1: Upload file (retry up to 3 times)
     from dashscope import Files
 
-    def _try_upload():
-        upload_res = Files.upload(file_path=audio_path, purpose="inference")
-        _out = upload_res.output if hasattr(upload_res, 'output') else upload_res
-        _up = _out.get("uploaded_files", []) if isinstance(_out, dict) else []
-        _fail = _out.get("failed_uploads", []) if isinstance(_out, dict) else []
-        if _up:
-            return _up[0]["file_id"]
-        if _fail and _fail[0].get("code") == "SystemError":
-            return None  # transient error, caller should retry
-        # Hard error
-        _f0 = _fail[0] if _fail else {"code": "UNKNOWN", "message": str(_out)[:200]}
-        raise RuntimeError(f"上传失败: {_f0.get('code', '?')} — {_f0.get('message', '?')}")
-
     _file_id = None
-    _api_request_semaphore.acquire()
-    try:
-        # Wave 1: quick retries (2s / 4s / 6s)
-        for _attempt in range(3):
-            _result = _try_upload()
-            if _result:
-                _file_id = _result
+    _last_err = None
+    for _attempt in range(3):
+        _acquired = _api_request_semaphore.acquire(timeout=120)
+        if not _acquired:
+            raise RuntimeError("Upload timed out waiting for concurrency slot")
+        try:
+            upload_res = Files.upload(file_path=audio_path, purpose="inference")
+            _out = upload_res.output if hasattr(upload_res, 'output') else upload_res
+            _up = _out.get("uploaded_files", []) if isinstance(_out, dict) else []
+            _fail = _out.get("failed_uploads", []) if isinstance(_out, dict) else []
+            if _up:
+                _file_id = _up[0]["file_id"]
                 break
-            with _api_upload_degraded_lock:
-                global _api_upload_degraded_until
-                _api_upload_degraded_until = max(_api_upload_degraded_until, time.time() + 10)
+            _f0 = _fail[0] if _fail else {"code": "UNKNOWN", "message": str(_out)[:200]}
+            _last_err = f"{_f0.get('code', '?')} — {_f0.get('message', '?')}"
+        finally:
+            _api_request_semaphore.release()
+        if _attempt < 2:
             time.sleep(2.0 * (_attempt + 1))
 
-        # Wave 2+: retry every 5 minutes until recovery (max ~1 hour)
-        _slow_attempt = 0
-        while not _file_id and _slow_attempt < 12:
-            _slow_attempt += 1
-            with _api_upload_degraded_lock:
-                _api_upload_degraded_until = max(_api_upload_degraded_until, time.time() + 310)
-            _api_request_semaphore.release()  # release during long wait
-            time.sleep(300)  # 5 minutes
-            _api_request_semaphore.acquire()  # re-acquire before retry
-            for _quick in range(2):
-                _result = _try_upload()
-                if _result:
-                    _file_id = _result
-                    break
-                time.sleep(3.0)
-
-        # Upload recovered — clear cooldown
-        if _file_id:
-            with _api_upload_degraded_lock:
-                _api_upload_degraded_until = 0.0
-    except RuntimeError:
-        raise
-    except Exception as e:
-        raise RuntimeError(f"文件上传失败: {e}") from e
-    finally:
-        _api_request_semaphore.release()
-
     if not _file_id:
-        raise RuntimeError(
-            "上传失败: 百炼文件服务持续异常(SystemError)，已每5分钟重试持续约1小时仍未恢复"
-        )
+        raise RuntimeError(f"上传失败(重试3次): {_last_err}")
 
     # Step 2: Get signed OSS URL
     try:
@@ -3179,28 +3139,39 @@ def segment_and_compare_pipeline_multi(
     def _process_one_task(file_idx: int, seg: dict) -> dict:
         """Transcribe one segment with both models, compare, save TXT."""
         text_a = ""; text_b = ""; error_a = None; error_b = None
+        _seg_name = seg.get("name", "?")
 
         def _transcribe_a():
             nonlocal text_a, error_a
             try:
                 if device != "cpu" and torch.cuda.is_available():
                     torch.cuda.set_device(_cuda_idx)
+                _logger.info("API seg %s model_a (%s) start", _seg_name, model_a)
                 text_a = _transcribe_segment(seg["wav_path"], model_a, language, device, hotwords)
+                _logger.info("API seg %s model_a (%s) done → %s", _seg_name, model_a,
+                             (text_a or "")[:80])
             except Exception as e:
                 error_a = str(e)
+                _logger.warning("API seg %s model_a (%s) FAILED: %s", _seg_name, model_a, e)
 
         def _transcribe_b():
             nonlocal text_b, error_b
             try:
                 if device != "cpu" and torch.cuda.is_available():
                     torch.cuda.set_device(_cuda_idx)
+                _logger.info("API seg %s model_b (%s) start", _seg_name, model_b)
                 text_b = _transcribe_segment(seg["wav_path"], model_b, language, device, hotwords)
+                _logger.info("API seg %s model_b (%s) done → %s", _seg_name, model_b,
+                             (text_b or "")[:80])
             except Exception as e:
                 error_b = str(e)
+                _logger.warning("API seg %s model_b (%s) FAILED: %s", _seg_name, model_b, e)
 
+        _logger.info("API seg %s submitting both models", _seg_name)
         t_a = threading.Thread(target=_transcribe_a, daemon=True)
         t_b = threading.Thread(target=_transcribe_b, daemon=True)
         t_a.start(); t_b.start(); t_a.join(); t_b.join()
+        _logger.info("API seg %s both models complete", _seg_name)
 
         txt_dir = os.path.join(seg["seg_out_dir"], "txt")
         os.makedirs(txt_dir, exist_ok=True)
