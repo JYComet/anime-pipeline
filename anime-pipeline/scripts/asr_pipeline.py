@@ -2015,8 +2015,8 @@ def compare_srt_sentences(srt_path1: str, srt_path2: str) -> dict:
         weighted_diff_sum += diff * weight
         total_weight += weight
 
-        # Compute character diff on normalized text (ignores punctuation, unifies numbers/pronouns)
-        diff_chunks = _compute_diff_chunks(t_a, t_b)
+        # Compute character diff on original text for display
+        diff_chunks = _compute_diff_chunks(seg_a["text"], seg_b["text"])
 
         sentence_results.append({
             "idx_a": seg_a["index"],
@@ -2186,7 +2186,7 @@ def compare_text_files(file_path_a: str, file_path_b: str, filter_english: bool 
         weighted_diff_sum += diff * weight
         total_weight += weight
 
-        diff_chunks = _compute_diff_chunks(nta, ntb)
+        diff_chunks = _compute_diff_chunks(ta, tb)
         sentence_results.append({
             "idx_a": i + 1 if i < len(sents_a) and ta else None,
             "idx_b": i + 1 if i < len(sents_b) and tb else None,
@@ -2847,7 +2847,7 @@ def segment_and_compare_pipeline(
             diff_percent = round((dist / max_len) * 100, 1)
 
         match_rate = round(100.0 - diff_percent, 1)
-        diff_chunks = _compute_diff_chunks(norm_a, norm_b) if (norm_a or norm_b) else []
+        diff_chunks = _compute_diff_chunks(text_a, text_b) if (text_a or text_b) else []
 
         return {
             "seg_index": seg["index"],
@@ -3131,7 +3131,7 @@ def segment_and_compare_pipeline_multi(
             dist = _levenshtein(norm_a, norm_b)
             diff_percent = round((dist / max(len(norm_a), len(norm_b))) * 100, 1)
         match_rate = round(100.0 - diff_percent, 1)
-        diff_chunks = _compute_diff_chunks(norm_a, norm_b) if (norm_a or norm_b) else []
+        diff_chunks = _compute_diff_chunks(text_a, text_b) if (text_a or text_b) else []
 
         return {
             "seg_index": seg["index"], "seg_name": seg["name"],

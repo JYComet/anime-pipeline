@@ -546,19 +546,7 @@ def startup_services():
     _load_mfa_jobs()
     _load_batch_mfa_jobs()
 
-    # Preload ASR models in background so first request is fast
-    def _preload_asr():
-        import time
-        time.sleep(2)  # let server finish startup first
-        try:
-            from asr_pipeline import _get_asr_model
-            print("[startup] Preloading Qwen3-ASR model...")
-            _get_asr_model("qwen3-asr", device="cuda")
-            print("[startup] Qwen3-ASR model loaded to GPU")
-        except Exception as e:
-            print(f"[startup] ASR preload failed (will load on first use): {e}")
-
-    threading.Thread(target=_preload_asr, daemon=True).start()
+    # Qwen3-ASR preload disabled — loaded on-demand by pipeline/ASR features instead
 
     # Pre-import model list definitions synchronously so /api/asr/models and
     # /api/asr-compare/models endpoints return instantly (avoids lazy-importing
