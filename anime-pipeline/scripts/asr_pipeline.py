@@ -76,103 +76,14 @@ def _convert_to_pcm_wav(input_path: str, output_path: str) -> None:
     )
 
 
-# --- Available ASR models ---
-ASR_MODELS = {
-    "qwen3-asr": {
-        "name": "Qwen3-ASR-1.7B",
-        "model_id": "Qwen/Qwen3-ASR-1.7B",
-        "description": "Qwen3 多语言模型，中/英/日/韩/粤语",
-        "languages": ["auto", "zh", "en", "ja", "ko", "yue"],
-        "abbr": "qwen3",
-    },
-    "cohere-transcribe": {
-        "name": "Cohere Transcribe",
-        "model_id": "CohereLabs/cohere-transcribe-03-2026",
-        "description": "Cohere Transcribe 多语言模型，14 种语言",
-        "languages": ["auto", "zh", "en", "ja", "ko", "de", "fr", "es", "pt", "ar", "ru", "hi", "tr", "vi", "nl", "id"],
-        "abbr": "cohere",
-        "framework": "transformers",
-    },
-    "whisper-base": {
-        "name": "Whisper Base",
-        "model_id": "openai/whisper-base",
-        "description": "OpenAI Whisper Base，99 种语言，需 16kHz 单声道",
-        "languages": ["auto", "zh", "en", "ja", "ko", "de", "fr", "es", "pt", "ar", "ru", "hi", "tr", "vi", "nl", "id", "it"],
-        "abbr": "whisper",
-        "framework": "whisper",
-    },
-    "firered-asr2": {
-        "name": "FireRedASR2-AED",
-        "model_id": "",
-        "description": "FireRedASR2 AED 模型，中/英文，自带 VAD+LID+标点",
-        "languages": ["auto", "zh", "en"],
-        "abbr": "firered",
-        "framework": "firered",
-    },
-    "sensevoice-small": {
-        "name": "SenseVoiceSmall",
-        "model_id": "iic/SenseVoiceSmall",
-        "description": "阿里 SenseVoiceSmall，中/英/日/韩/粤语，含情感/事件标签",
-        "languages": ["auto", "zh", "en", "ja", "ko", "yue"],
-        "abbr": "svs",
-        "framework": "funasr",
-    },
-    "paraformer-large": {
-        "name": "Paraformer-Large",
-        "model_id": "iic/speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
-        "description": "阿里 Paraformer-Large，中文普通话专用，自带 VAD+标点",
-        "languages": ["zh"],
-        "abbr": "pf",
-        "framework": "funasr",
-    },
-    "qwen3-asr-api": {
-        "name": "Qwen3-ASR-Flash (API)",
-        "model_id": "",
-        "description": "阿里云百炼 Qwen3-ASR-Flash，同步接口，base64 直传",
-        "languages": ["zh"],
-        "abbr": "qwen3-api",
-        "framework": "api",
-        "api_model": "qwen3-asr-flash",
-        "api_mode": "sync",
-    },
-    "fun-asr-api": {
-        "name": "Fun-ASR (API)",
-        "model_id": "",
-        "description": "阿里云百炼 Fun-ASR，异步文件转写，自动上传",
-        "languages": ["zh"],
-        "abbr": "funasr-api",
-        "framework": "api",
-        "api_model": "fun-asr",
-        "api_mode": "async",
-    },
-    "paraformer-v2-api": {
-        "name": "Paraformer-v2 (API)",
-        "model_id": "",
-        "description": "阿里云百炼 Paraformer-v2，异步文件转写，自动上传",
-        "languages": ["zh"],
-        "abbr": "pfv2-api",
-        "framework": "api",
-        "api_model": "paraformer-v2",
-        "api_mode": "async",
-    },
-    "paraformer-8k-api": {
-        "name": "Paraformer-8k-v2 (API)",
-        "model_id": "",
-        "description": "阿里云百炼 Paraformer-8k-v2 8kHz电话场景，异步文件转写，自动上传",
-        "languages": ["zh"],
-        "abbr": "pf8k-api",
-        "framework": "api",
-        "api_model": "paraformer-8k-v2",
-        "api_mode": "async",
-    },
-}
-
-# Models used for ASR comparison
-COMPARE_MODELS = ["qwen3-asr", "cohere-transcribe", "whisper-base", "firered-asr2", "sensevoice-small", "paraformer-large", "qwen3-asr-api", "fun-asr-api", "paraformer-v2-api", "paraformer-8k-api"]
+# Re-export from config (defined there so /api/asr/models loads without importing torch)
+from config import ASR_MODELS, COMPARE_MODELS, VAD_MODELS, DEFAULT_VAD_MODEL  # noqa: E402, F401
 
 # --- Model singletons ---
 _asr_models: dict[tuple, object] = {}  # keyed by (model_key, device, use_fp16, use_flash_attn)
 _vad_model = None
+_vad_model_key = None  # track which VAD model is loaded
+_silero_vad_model = None
 _model_lock = threading.Lock()
 _compile_works = None  # None=untested, True=works, False=unavailable
 
@@ -217,17 +128,152 @@ _QWEN3_LANG_MAP = {
 _TAG_RE = re.compile(r"<\|\s*([^|>]+)\s*\|>")
 
 
-def _get_vad_model(device="cuda"):
-    """Load (or reuse) the VAD model. Thread-safe lazy singleton."""
-    if device != "cpu" and not torch.cuda.is_available():
-        raise RuntimeError("CUDA GPU is required for VAD model. CPU fallback is disabled.")
-    global _vad_model
+def _get_silero_vad():
+    """Load (or reuse) the Silero VAD ONNX model. Thread-safe lazy singleton."""
+    global _silero_vad_model
+    if _silero_vad_model is not None:
+        return _silero_vad_model
     with _model_lock:
-        if _vad_model is not None:
-            return _vad_model
-        from funasr import AutoModel
-        _vad_model = AutoModel(model="fsmn-vad", device=device, model_dir=MS_CACHE_DIR)
+        if _silero_vad_model is not None:
+            return _silero_vad_model
+        from silero_vad import load_silero_vad
+        _silero_vad_model = load_silero_vad()
+        return _silero_vad_model
+
+
+def _get_vad_model(model_key="silero-vad", device="cuda"):
+    """Load (or reuse) the VAD model. Thread-safe lazy singleton.
+
+    Supported model keys (from VAD_MODELS in config.py):
+      - silero-vad: Silero VAD ONNX model, CPU, ultra-fast (<100ms for 24min audio)
+      - fsmn-vad:   FunASR FSMN-VAD, GPU DFSMN model
+      - none:       No VAD, returns empty list (caller should use fallback)
+    """
+    global _vad_model, _vad_model_key
+
+    if model_key not in VAD_MODELS:
+        raise ValueError(f"Unknown VAD model: {model_key}. Available: {list(VAD_MODELS.keys())}")
+
+    # Fast path: already loaded the correct model
+    if _vad_model_key == model_key and _vad_model is not None:
         return _vad_model
+
+    with _model_lock:
+        # Double-check after acquiring lock
+        if _vad_model_key == model_key and _vad_model is not None:
+            return _vad_model
+
+        framework = VAD_MODELS[model_key]["framework"]
+
+        if framework == "silero":
+            _vad_model = _get_silero_vad()
+        elif framework == "funasr":
+            if device != "cpu" and not torch.cuda.is_available():
+                raise RuntimeError("CUDA GPU is required for FSMN-VAD. Use silero-vad for CPU.")
+            from funasr import AutoModel
+            _vad_model = AutoModel(model="fsmn-vad", device=device, model_dir=MS_CACHE_DIR)
+        elif framework == "none":
+            _vad_model = None  # sentinel
+        else:
+            raise ValueError(f"Unsupported VAD framework: {framework}")
+
+        _vad_model_key = model_key
+        return _vad_model
+
+
+def run_vad(audio_path: str, vad_model="silero-vad", device="cuda") -> list:
+    """Run VAD and return speech segments as [(start_ms, end_ms), ...] in chronological order.
+
+    Args:
+        audio_path: Path to 16kHz mono WAV file.
+        vad_model:  VAD model key from VAD_MODELS config ("silero-vad", "fsmn-vad", "none").
+        device:     Device for GPU-based VAD models (ignored by silero-vad).
+    """
+    model_key = vad_model
+    framework = VAD_MODELS.get(model_key, {}).get("framework", "silero")
+
+    if framework == "none":
+        return []
+
+    if framework == "silero":
+        return _run_vad_silero(audio_path)
+    elif framework == "funasr":
+        return _run_vad_fsmn(audio_path, device)
+    else:
+        raise ValueError(f"Unsupported VAD framework: {framework}")
+
+
+def _run_vad_silero(audio_path: str) -> list:
+    """Run Silero VAD and return speech segments as [(start_ms, end_ms), ...].
+
+    Silero VAD processes 16kHz audio on CPU via ONNX. For a 24-minute anime
+    episode, it completes in ~50-200ms (vs 3-8s for FSMN-VAD on GPU).
+
+    Default parameters tuned for clean studio speech (anime dubbing):
+      - threshold=0.5:        speech probability threshold
+      - min_speech_duration_ms=250:  minimum speech segment
+      - min_silence_duration_ms=100: minimum silence gap
+      - speech_pad_ms=30:     padding around speech boundaries
+    """
+    import torch
+    model = _get_silero_vad()
+    from silero_vad import get_speech_timestamps
+
+    audio_np, sr = sf.read(audio_path, dtype="float32")
+    if audio_np.ndim > 1:
+        audio_np = audio_np.mean(axis=1)
+
+    # Resample to 16kHz if needed via ffmpeg (pipeline normally produces 16kHz)
+    work_path = audio_path
+    temp_wav = None
+    try:
+        if sr != 16000:
+            import uuid
+            os.makedirs(TEMP_DIR, exist_ok=True)
+            temp_wav = os.path.join(TEMP_DIR, f"vad_{uuid.uuid4().hex[:8]}.wav")
+            _convert_to_pcm_wav(audio_path, temp_wav)
+            audio_np, sr = sf.read(temp_wav, dtype="float32")
+            if audio_np.ndim > 1:
+                audio_np = audio_np.mean(axis=1)
+            work_path = temp_wav
+
+        wav = torch.from_numpy(audio_np)
+        segments = get_speech_timestamps(
+            wav, model,
+            threshold=0.5,
+            sampling_rate=16000,
+            min_speech_duration_ms=250,
+            min_silence_duration_ms=100,
+            speech_pad_ms=30,
+            return_seconds=False,
+        )
+
+        return [(int(s["start"] * 1000 / 16000), int(s["end"] * 1000 / 16000)) for s in segments]
+    finally:
+        if temp_wav and os.path.exists(temp_wav):
+            try:
+                os.remove(temp_wav)
+            except OSError:
+                pass
+
+
+def _run_vad_fsmn(audio_path: str, device="cuda") -> list:
+    """Run FSMN-VAD via FunASR and return speech segments as [(start_ms, end_ms), ...]."""
+    vad = _get_vad_model(model_key="fsmn-vad", device=device)
+    results = vad.generate(input=audio_path)
+    if not results or not isinstance(results, list):
+        return []
+
+    segments = []
+    for item in results:
+        if isinstance(item, dict):
+            vals = item.get("value", [])
+            for seg in vals:
+                if isinstance(seg, (list, tuple)) and len(seg) == 2:
+                    segments.append((int(seg[0]), int(seg[1])))
+
+    segments.sort(key=lambda s: s[0])
+    return segments
 
 
 def _get_asr_model(model_key="qwen3-asr", device="cuda", use_fp16=True, use_flash_attn=True, use_compile=True):
@@ -480,25 +526,6 @@ def _clean_tags(text: str) -> str:
     return _TAG_RE.sub("", text).strip()
 
 
-def run_vad(audio_path: str, device="cuda") -> list:
-    """Run VAD and return speech segments as [(start_ms, end_ms), ...] in chronological order."""
-    vad = _get_vad_model(device=device)
-    results = vad.generate(input=audio_path)
-    if not results or not isinstance(results, list):
-        return []
-
-    segments = []
-    for item in results:
-        if isinstance(item, dict):
-            vals = item.get("value", [])
-            for seg in vals:
-                if isinstance(seg, (list, tuple)) and len(seg) == 2:
-                    segments.append((int(seg[0]), int(seg[1])))
-
-    segments.sort(key=lambda s: s[0])
-    return segments
-
-
 def _pad_and_batch(segments_with_times, audio, sr, max_batch_size=16, max_length_ratio=3.0):
     """Group VAD segments by similar length and pad to batch.
 
@@ -663,6 +690,7 @@ def vad_asr_pipeline(
     device: str = "cuda",
     progress_callback=None,
     hotwords: str = "",
+    vad_model: str = "silero-vad",
 ) -> list:
     """Run VAD → split audio → ASR on each speech segment → return [{text, start_ms, end_ms}].
 
@@ -672,6 +700,7 @@ def vad_asr_pipeline(
     Args:
         hotwords: Optional context string with proper nouns / domain terms to improve
                   recognition accuracy. Passed as system prompt to Qwen3-ASR.
+        vad_model: VAD model key from VAD_MODELS config ("silero-vad", "fsmn-vad", "none").
     """
     # Step 1: Start ASR model preloading in background (opt 7: parallel loading)
     asr_future = _preload_asr_model_async(model_key, device)
@@ -680,7 +709,7 @@ def vad_asr_pipeline(
     if progress_callback:
         progress_callback("vad", 10)
 
-    vad_segments = run_vad(audio_path, device=device)
+    vad_segments = run_vad(audio_path, vad_model=vad_model, device=device)
     if not vad_segments:
         return []
 
@@ -997,6 +1026,10 @@ _api_session = None
 _api_session_lock = threading.Lock()
 _api_request_semaphore = threading.Semaphore(10)
 
+# Global upload cooldown: when DashScope returns SystemError, pause all uploads
+_api_upload_degraded_until = 0.0  # timestamp, all uploads sleep until this time
+_api_upload_degraded_lock = threading.Lock()
+
 
 def _get_api_session():
     """Lazy-init a requests.Session with retry and connection pooling."""
@@ -1065,40 +1098,88 @@ def _api_async_transcribe(audio_path: str, api_model: str, language: str,
     dashscope.api_key = api_key
     dashscope.base_http_api_url = f"{base_url}/api/v1"
 
-    # Step 1: Upload file (semaphore-limited + retry — SSL pool exhaustion)
+    if not os.path.exists(audio_path):
+        raise RuntimeError(f"音频文件不存在: {audio_path}")
+
+    # Global cooldown: if upload service is degraded, wait before attempting
+    _now = time.time()
+    if _now - _api_upload_degraded_until < 0:
+        _wait = _api_upload_degraded_until - _now
+        time.sleep(min(_wait, 120))
+
+    # Step 1: Upload file (multi-wave retry for transient server errors)
     from dashscope import Files
-    _upload_ok = False
-    _upload_err = None
+
+    def _try_upload():
+        upload_res = Files.upload(file_path=audio_path, purpose="inference")
+        _out = upload_res.output if hasattr(upload_res, 'output') else upload_res
+        _up = _out.get("uploaded_files", []) if isinstance(_out, dict) else []
+        _fail = _out.get("failed_uploads", []) if isinstance(_out, dict) else []
+        if _up:
+            return _up[0]["file_id"]
+        if _fail and _fail[0].get("code") == "SystemError":
+            return None  # transient error, caller should retry
+        # Hard error
+        _f0 = _fail[0] if _fail else {"code": "UNKNOWN", "message": str(_out)[:200]}
+        raise RuntimeError(f"上传失败: {_f0.get('code', '?')} — {_f0.get('message', '?')}")
+
+    _file_id = None
     _api_request_semaphore.acquire()
     try:
+        # Wave 1: quick retries (2s / 4s / 6s)
         for _attempt in range(3):
-            try:
-                upload_res = Files.upload(file_path=audio_path, purpose="inference")
-                file_id = upload_res.output["uploaded_files"][0]["file_id"]
-                _upload_ok = True
+            _result = _try_upload()
+            if _result:
+                _file_id = _result
                 break
-            except Exception as e:
-                _upload_err = e
-                time.sleep(1.0 * (_attempt + 1))
+            with _api_upload_degraded_lock:
+                global _api_upload_degraded_until
+                _api_upload_degraded_until = max(_api_upload_degraded_until, time.time() + 10)
+            time.sleep(2.0 * (_attempt + 1))
+
+        # Wave 2+: retry every 5 minutes until recovery (max ~1 hour)
+        _slow_attempt = 0
+        while not _file_id and _slow_attempt < 12:
+            _slow_attempt += 1
+            with _api_upload_degraded_lock:
+                _api_upload_degraded_until = max(_api_upload_degraded_until, time.time() + 310)
+            _api_request_semaphore.release()  # release during long wait
+            time.sleep(300)  # 5 minutes
+            _api_request_semaphore.acquire()  # re-acquire before retry
+            for _quick in range(2):
+                _result = _try_upload()
+                if _result:
+                    _file_id = _result
+                    break
+                time.sleep(3.0)
+
+        # Upload recovered — clear cooldown
+        if _file_id:
+            with _api_upload_degraded_lock:
+                _api_upload_degraded_until = 0.0
+    except RuntimeError:
+        raise
+    except Exception as e:
+        raise RuntimeError(f"文件上传失败: {e}") from e
     finally:
         _api_request_semaphore.release()
-    if not _upload_ok:
-        raise RuntimeError(f"文件上传失败(重试3次): {_upload_err}") from _upload_err
+
+    if not _file_id:
+        raise RuntimeError(
+            "上传失败: 百炼文件服务持续异常(SystemError)，已每5分钟重试持续约1小时仍未恢复"
+        )
 
     # Step 2: Get signed OSS URL
-    _url_ok = False
-    _url_err = None
-    for _attempt in range(3):
-        try:
-            info = Files.get(file_id)
-            oss_url = info.output["url"]
-            _url_ok = True
-            break
-        except Exception as e:
-            _url_err = e
-            time.sleep(1.0 * (_attempt + 1))
-    if not _url_ok:
-        raise RuntimeError(f"获取文件URL失败(重试3次): {_url_err}") from _url_err
+    try:
+        info = Files.get(file_id)
+        _out = info.output if hasattr(info, 'output') else info
+        oss_url = _out.get("url", "") if isinstance(_out, dict) else ""
+        if not oss_url:
+            raise RuntimeError(f"获取文件URL失败: 响应中无 url 字段 — {_out}")
+    except RuntimeError:
+        raise
+    except Exception as e:
+        raise RuntimeError(f"获取文件URL失败: {e}") from e
 
     # Step 3: Submit async transcription task
     url = f"{base_url}/api/v1/services/audio/asr/transcription"
@@ -1277,6 +1358,7 @@ def run_asr_pipeline(
     device: str = "cuda",
     progress_callback=None,
     hotwords: str = "",
+    vad_model: str = "silero-vad",
 ) -> dict:
     """Full ASR pipeline: extract audio → VAD → ASR per segment → generate SRT.
 
@@ -1284,6 +1366,7 @@ def run_asr_pipeline(
 
     Args:
         hotwords: Optional context string with proper nouns for Qwen3-ASR.
+        vad_model: VAD model key from VAD_MODELS config ("silero-vad", "fsmn-vad", "none").
     """
     if not os.path.exists(video_path):
         raise FileNotFoundError(f"Video not found: {video_path}")
@@ -1325,6 +1408,7 @@ def run_asr_pipeline(
             device=device,
             progress_callback=progress_callback,
             hotwords=hotwords,
+            vad_model=vad_model,
         )
     t2 = time.time()
 
@@ -1375,6 +1459,7 @@ def run_asr_on_audio(
     device: str = "cuda",
     progress_callback=None,
     hotwords: str = "",
+    vad_model: str = "silero-vad",
 ) -> dict:
     """Run ASR directly on an audio file (no extraction step).
 
@@ -1383,6 +1468,7 @@ def run_asr_on_audio(
 
     Args:
         hotwords: Optional context string with proper nouns for Qwen3-ASR.
+        vad_model: VAD model key from VAD_MODELS config ("silero-vad", "fsmn-vad", "none").
 
     Returns dict with keys: audio_name, srt_path, segments_count, model_name, duration_sec.
     """
@@ -1424,6 +1510,7 @@ def run_asr_on_audio(
                 device=device,
                 progress_callback=progress_callback,
                 hotwords=hotwords,
+                vad_model=vad_model,
             )
         t1 = time.time()
 
@@ -2604,6 +2691,7 @@ def segment_and_compare_pipeline(
     cancel_check=None,  # callable → bool; if True, abort processing
     filter_english: bool = True,
     on_segment=None,  # callable(seg_index, total, partial_result) called after each segment
+    vad_model: str = "silero-vad",
 ) -> dict:
     """Split audio into 10-15s segments via VAD, run two ASR models on each, compare.
 
@@ -2616,6 +2704,9 @@ def segment_and_compare_pipeline(
 
     Returns dict with keys: audio_path, audio_name, source_dir, duration_sec,
     segment_count, segments (list of per-segment dicts), model_a, model_b.
+
+    Args:
+        vad_model: VAD model key from VAD_MODELS config ("silero-vad", "fsmn-vad", "none").
     """
     if not os.path.exists(audio_path):
         raise FileNotFoundError(f"Audio not found: {audio_path}")
@@ -2701,7 +2792,7 @@ def segment_and_compare_pipeline(
         progress_callback("vad", 5)
 
     # Step 1: VAD
-    vad_segments = run_vad(audio_path, device=device)
+    vad_segments = run_vad(audio_path, vad_model=vad_model, device=device)
     if not vad_segments:
         # Fallback: treat whole audio as one segment (only if short enough)
         if duration <= segment_max_s * 2:
@@ -2986,6 +3077,7 @@ def segment_and_compare_pipeline_multi(
     filter_english: bool = True,
     on_segment=None,           # callable(file_name, seg_idx, total_segs, partial)
     on_file_done=None,         # callable(file_idx, result_dict) when all segments of one file finish
+    vad_model: str = "silero-vad",
 ) -> list:
     """Process multiple audio files with VAD + API segment comparison in parallel.
 
@@ -3048,7 +3140,7 @@ def segment_and_compare_pipeline_multi(
         os.makedirs(seg_out_dir, exist_ok=True)
         _file_results[file_idx]["segments_dir"] = seg_out_dir
 
-        vad_segs = run_vad(audio_path, device=device)
+        vad_segs = run_vad(audio_path, vad_model=vad_model, device=device)
         if not vad_segs:
             if duration <= segment_max_s * 2:
                 vad_segs = [(0, duration_ms)]

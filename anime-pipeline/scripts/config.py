@@ -389,6 +389,128 @@ ASR_MODELS_DIR = os.path.join(_MODELS_DIR, "asr")
 HF_CACHE_DIR = _HF_CACHE
 MS_CACHE_DIR = _MS_CACHE
 
+# --- ASR model registry (lightweight dict, no heavy imports) ---
+# Defined here in config.py so /api/asr/models loads instantly without
+# importing torch/numpy/funasr from asr_pipeline.
+ASR_MODELS = {
+    "qwen3-asr": {
+        "name": "Qwen3-ASR-1.7B",
+        "model_id": "Qwen/Qwen3-ASR-1.7B",
+        "description": "Qwen3 多语言模型，中/英/日/韩/粤语",
+        "languages": ["auto", "zh", "en", "ja", "ko", "yue"],
+        "abbr": "qwen3",
+    },
+    "cohere-transcribe": {
+        "name": "Cohere Transcribe",
+        "model_id": "CohereLabs/cohere-transcribe-03-2026",
+        "description": "Cohere Transcribe 多语言模型，14 种语言",
+        "languages": ["auto", "zh", "en", "ja", "ko", "de", "fr", "es", "pt", "ar", "ru", "hi", "tr", "vi", "nl", "id"],
+        "abbr": "cohere",
+        "framework": "transformers",
+    },
+    "whisper-base": {
+        "name": "Whisper Base",
+        "model_id": "openai/whisper-base",
+        "description": "OpenAI Whisper Base，99 种语言，需 16kHz 单声道",
+        "languages": ["auto", "zh", "en", "ja", "ko", "de", "fr", "es", "pt", "ar", "ru", "hi", "tr", "vi", "nl", "id", "it"],
+        "abbr": "whisper",
+        "framework": "whisper",
+    },
+    "firered-asr2": {
+        "name": "FireRedASR2-AED",
+        "model_id": "",
+        "description": "FireRedASR2 AED 模型，中/英文，自带 VAD+LID+标点",
+        "languages": ["auto", "zh", "en"],
+        "abbr": "firered",
+        "framework": "firered",
+    },
+    "sensevoice-small": {
+        "name": "SenseVoiceSmall",
+        "model_id": "iic/SenseVoiceSmall",
+        "description": "阿里 SenseVoiceSmall，中/英/日/韩/粤语，含情感/事件标签",
+        "languages": ["auto", "zh", "en", "ja", "ko", "yue"],
+        "abbr": "svs",
+        "framework": "funasr",
+    },
+    "paraformer-large": {
+        "name": "Paraformer-Large",
+        "model_id": "iic/speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+        "description": "阿里 Paraformer-Large，中文普通话专用，自带 VAD+标点",
+        "languages": ["zh"],
+        "abbr": "pf",
+        "framework": "funasr",
+    },
+    "qwen3-asr-api": {
+        "name": "Qwen3-ASR-Flash (API)",
+        "model_id": "",
+        "description": "阿里云百炼 Qwen3-ASR-Flash，同步接口，base64 直传",
+        "languages": ["zh"],
+        "abbr": "qwen3-api",
+        "framework": "api",
+        "api_model": "qwen3-asr-flash",
+        "api_mode": "sync",
+    },
+    "fun-asr-api": {
+        "name": "Fun-ASR (API)",
+        "model_id": "",
+        "description": "阿里云百炼 Fun-ASR，异步文件转写，自动上传",
+        "languages": ["zh"],
+        "abbr": "funasr-api",
+        "framework": "api",
+        "api_model": "fun-asr",
+        "api_mode": "async",
+    },
+    "paraformer-v2-api": {
+        "name": "Paraformer-v2 (API)",
+        "model_id": "",
+        "description": "阿里云百炼 Paraformer-v2，异步文件转写，自动上传",
+        "languages": ["zh"],
+        "abbr": "pfv2-api",
+        "framework": "api",
+        "api_model": "paraformer-v2",
+        "api_mode": "async",
+    },
+    "paraformer-8k-api": {
+        "name": "Paraformer-8k-v2 (API)",
+        "model_id": "",
+        "description": "阿里云百炼 Paraformer-8k-v2 8kHz电话场景，异步文件转写，自动上传",
+        "languages": ["zh"],
+        "abbr": "pf8k-api",
+        "framework": "api",
+        "api_model": "paraformer-8k-v2",
+        "api_mode": "async",
+    },
+}
+
+COMPARE_MODELS = [
+    "qwen3-asr", "cohere-transcribe", "whisper-base", "firered-asr2",
+    "sensevoice-small", "paraformer-large",
+    "qwen3-asr-api", "fun-asr-api", "paraformer-v2-api", "paraformer-8k-api",
+]
+
+# --- VAD model registry ---
+VAD_MODELS = {
+    "silero-vad": {
+        "name": "Silero VAD",
+        "description": "Silero VAD，轻量 ONNX 模型，CPU 极速推理，支持静音切除与静音分割",
+        "abbr": "silero",
+        "framework": "silero",
+    },
+    "fsmn-vad": {
+        "name": "FSMN-VAD",
+        "description": "阿里 FSMN-VAD，DFSMN 声学模型，GPU 加速，需 FunASR",
+        "abbr": "fsmn",
+        "framework": "funasr",
+    },
+    "none": {
+        "name": "无 VAD（等距切分）",
+        "description": "不使用 VAD，按固定时长等距切分音频",
+        "abbr": "none",
+        "framework": "none",
+    },
+}
+DEFAULT_VAD_MODEL = "silero-vad"
+
 # Ensure all data directories exist
 for d in [DOWNLOAD_DIR, SUBTITLE_DIR, CLIPS_DIR, TEMP_DIR, APPROVED_DIR, CLEANED_DIR, CLEANED_UNREVIEWED_DIR, DENOISED_APPROVED_DIR, STITCHED_DIR, PIPELINE_VIDEO_DIR, ASR_DIR, ASR_AUDIO_DIR, ASR_SUBTITLE_DIR, ASR_COMPARE_DIR, ASR_COMPARE_SUBTITLE_DIR, ASR_COMPARE_AUDIO_DIR, ASR_COMPARE_OUTPUT_DIR, ASR_COMPARE_DISCARD_DIR, ASR_COMPARE_SEGMENTS_DIR, ASR_COMPARE_KEPT_DIR, TXT_COMPARE_DIR, TXT_COMPARE_OUTPUT_DIR, TXT_COMPARE_DISCARD_DIR, EMOTION_DIR, EMOTION_DENOISE_DIR, SPLIT_DIR, MFA_DIR, MFA_RAW_WAV_DIR, MFA_WAV_DIR, MFA_TXT_DIR, MFA_ALIGNED_DIR, MFA_JSONL_DIR, MFA_POST_DIR, MFA_FILTERED_DIR, MFA_VALIDATE_DIR, MFA_MODELS_DIR, MFA_TEMP_DIR, MFA_ENERGY_DIR]:
     os.makedirs(d, exist_ok=True)

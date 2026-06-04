@@ -548,14 +548,6 @@ def startup_services():
 
     # Qwen3-ASR preload disabled — loaded on-demand by pipeline/ASR features instead
 
-    # Pre-import model list definitions synchronously so /api/asr/models and
-    # /api/asr-compare/models endpoints return instantly (avoids lazy-importing
-    # torch/numpy on the first request, which takes several seconds).
-    try:
-        from asr_pipeline import ASR_MODELS, COMPARE_MODELS  # noqa: F401
-        print(f"[startup] ASR model registry loaded ({len(ASR_MODELS)} models)")
-    except Exception as e:
-        print(f"[startup] ASR model registry preload failed: {e}")
 
     # Restore download jobs from aria2c state, with fallback to jobs.json
     def restore_jobs():
@@ -4180,7 +4172,7 @@ def list_asr_videos():
 @app.get("/api/asr/models")
 def list_asr_models():
     """List available ASR models and their configurations."""
-    from asr_pipeline import ASR_MODELS
+    from config import ASR_MODELS
     models = []
     for key, info in ASR_MODELS.items():
         models.append({
@@ -4193,6 +4185,21 @@ def list_asr_models():
     return {"models": models}
 
 
+@app.get("/api/asr/vad-models")
+def list_vad_models():
+    """List available VAD models and their configurations."""
+    from config import VAD_MODELS, DEFAULT_VAD_MODEL
+    models = []
+    for key, info in VAD_MODELS.items():
+        models.append({
+            "key": key,
+            "name": info["name"],
+            "description": info["description"],
+            "framework": info.get("framework", ""),
+        })
+    return {"models": models, "default": DEFAULT_VAD_MODEL}
+
+
 @app.post("/api/asr/run")
 def run_asr_extraction(
     path: str = Query(..., description="Full path to video file"),
@@ -4200,6 +4207,7 @@ def run_asr_extraction(
     language: str = Query("zh", description="Language code or 'auto'"),
     device: str = Query("cuda", description="Device: cuda or cpu"),
     hotwords: str = Query("", description="Context/ proper nouns for recognition"),
+    vad_model: str = Query("silero-vad", description="VAD model: silero-vad, fsmn-vad, none"),
 ):
     """Start an ASR extraction job on a video file.
 
@@ -4219,6 +4227,7 @@ def run_asr_extraction(
             "model": model,
             "language": language,
             "hotwords": hotwords,
+            "vad_model": vad_model,
             "status": "pending",
             "progress": 0,
             "current_step": "",
@@ -4257,6 +4266,7 @@ def run_asr_extraction(
             result = run_asr_pipeline(
                 path, model_key=model, language=language, device=device,
                 progress_callback=on_progress, hotwords=hotwords,
+                vad_model=vad_model,
             )
 
             with _asr_lock:
@@ -5890,7 +5900,7 @@ def browse_asr_compare_directory(path: str = Query("")):
 @app.get("/api/asr-compare/models")
 def list_asr_compare_models():
     """Return the two comparison models with their language support."""
-    from asr_pipeline import ASR_MODELS, COMPARE_MODELS
+    from config import ASR_MODELS, COMPARE_MODELS
     models = []
     for key in COMPARE_MODELS:
         info = ASR_MODELS.get(key)
@@ -6762,6 +6772,7 @@ def run_asr_compare_segmented(
     filter_english: str = Query("1", description="1=force 0% match if English detected"),
     segment_min_s: float = Query(9.0),
     segment_max_s: float = Query(16.0),
+    vad_model: str = Query("silero-vad", description="VAD model: silero-vad, fsmn-vad, none"),
     payload: dict = Body(default={}),
 ):
     """VAD-split each audio into 10-15s segments, run two models on each, compare."""
@@ -6818,6 +6829,7 @@ def run_asr_compare_segmented(
             "_segment_min_s": segment_min_s,
             "_segment_max_s": segment_max_s,
             "_filter_english": _filter_english,
+            "_vad_model": vad_model,
         }
         _save_asr_compare_jobs()
 
@@ -6941,6 +6953,7 @@ def run_asr_compare_segmented(
                     progress_callback=_on_progress, cancel_check=_cancel_check,
                     filter_english=_filter_english, on_segment=_on_segment,
                     on_file_done=lambda fi, result: _on_file_done(fi, result),
+                    vad_model=vad_model,
                 )
             except _CancelPipeline:
                 with _asr_compare_lock:
@@ -7021,6 +7034,7 @@ def run_asr_compare_segmented(
                     source_dir=f["source_dir"],
                     cancel_check=_cancel_check,
                     filter_english=_filter_english,
+                    vad_model=vad_model,
                 )
 
                 with _asr_compare_lock:
@@ -7833,10 +7847,10 @@ def _run_pipeline_video(job_id: str):
     # cross-file pipelining: as File A advances from music_separate → enhance,
     # File B takes over the music_separate slot, keeping all models busy.
     _sem = {
-        "gpu":      threading.BoundedSemaphore(4),  # global GPU cap: 2 MS + 1 EN + 1 ASR
+        "gpu":      threading.BoundedSemaphore(6),  # global GPU cap: 4 MS + 1 EN + 1 ASR
         "ffmpeg":   threading.BoundedSemaphore(8),  # global ffmpeg cap
         "convert":  threading.BoundedSemaphore(6),
-        "music_separate": threading.BoundedSemaphore(2),  # 2x Demucs instances (~3 GB model + working mem)
+        "music_separate": threading.BoundedSemaphore(4),  # 4x Demucs (FP32 + TF32)
         "enhance":  threading.BoundedSemaphore(1),  # singleton ClearVoice SE
         "super_resolve": threading.BoundedSemaphore(1),  # singleton ClearVoice SR
         "asr":      threading.BoundedSemaphore(1),  # singleton Qwen3-ASR (3.4 GB)
@@ -7850,8 +7864,8 @@ def _run_pipeline_video(job_id: str):
     _file_gpu_lock = threading.Lock()
 
     # File-level lock for music_separate: only one file's BGM separation runs
-    # at a time. Within that file, up to 2 segments process in parallel using
-    # both Demucs instances (controlled by _sem["music_separate"]).
+    # at a time. Within that file, up to 4 segments process in parallel using
+    # all Demucs instances (controlled by _sem["music_separate"]).
     _file_ms_lock = threading.Lock()
 
     file_state = {}
@@ -8523,8 +8537,8 @@ def _run_pipeline_video(job_id: str):
 
                         # Acquire file-level lock for music_separate so only one
                         # file's BGM separation runs at a time. Within the
-                        # file, up to 2 segments process in parallel (limited
-                        # by _sem["music_separate"] = 2).
+                        # file, up to 4 segments process in parallel (limited
+                        # by _sem["music_separate"]).
                         if step_key == "music_separate":
                             _file_ms_lock.acquire()
                             _file_ms_locked = True
@@ -8658,7 +8672,7 @@ def _run_pipeline_video(job_id: str):
 
                     # Serialize music_separate at file level: only one file's BGM
                     # separation at a time. Within the file, segments run in
-                    # parallel (up to 2 via _sem["music_separate"]).
+                    # parallel (up to 4 via _sem["music_separate"]).
                     if "music_separate" in post_steps:
                         _file_ms_lock.acquire()
                         _file_ms_locked_std = True
