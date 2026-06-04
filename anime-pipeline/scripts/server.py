@@ -7846,7 +7846,13 @@ def _run_pipeline_video(job_id: str):
 
     # File-level GPU lock: only one file may be in the GPU phase at a time.
     # Non-GPU steps (duration_split, convert) still run in parallel across files.
+    # NOTE: music_separate has its own file-level lock (_file_ms_lock).
     _file_gpu_lock = threading.Lock()
+
+    # File-level lock for music_separate: only one file's BGM separation runs
+    # at a time. Within that file, up to 2 segments process in parallel using
+    # both Demucs instances (controlled by _sem["music_separate"]).
+    _file_ms_lock = threading.Lock()
 
     file_state = {}
 
@@ -8451,13 +8457,19 @@ def _run_pipeline_video(job_id: str):
                     seg_count = len(segments)
                     seg_states = [{"wav": p, "seg_suffix": f"_seg{i:03d}"} for i, p in enumerate(segments)]
 
-                    _need_file_gpu = any(s in _GPU_STEPS for s in post_steps)
+                    # GPU lock excludes music_separate (which has its own _file_ms_lock)
+                    _non_ms_gpu_steps = _GPU_STEPS - {"music_separate"}
+                    _need_file_gpu = any(s in _non_ms_gpu_steps for s in post_steps)
                     if _need_file_gpu:
                         _file_gpu_lock.acquire()
+                    _has_file_ms = "music_separate" in post_steps
+                    _file_ms_locked = False
                     for step_key in post_steps:
                         if job.cancelled:
                             f.status = "error"; f.error = "任务已取消"
                             _update_pipeline_job_progress(job)
+                            if _has_file_ms and _file_ms_locked:
+                                _file_ms_lock.release()
                             if _need_file_gpu:
                                 _file_gpu_lock.release()
                             return
@@ -8509,6 +8521,14 @@ def _run_pipeline_video(job_id: str):
                                     with seg_lock:
                                         f.output_clips.append(final_wav)
 
+                        # Acquire file-level lock for music_separate so only one
+                        # file's BGM separation runs at a time. Within the
+                        # file, up to 2 segments process in parallel (limited
+                        # by _sem["music_separate"] = 2).
+                        if step_key == "music_separate":
+                            _file_ms_lock.acquire()
+                            _file_ms_locked = True
+
                         step_workers = min(seg_count, 4)
                         with concurrent.futures.ThreadPoolExecutor(
                             max_workers=step_workers
@@ -8535,9 +8555,16 @@ def _run_pipeline_video(job_id: str):
                             f.status = "error"
                             f.error = f"步骤 {step_key} 失败"
                             _update_pipeline_job_progress(job)
+                            if _file_ms_locked:
+                                _file_ms_lock.release()
+                                _file_ms_locked = False
                             if _need_file_gpu:
                                 _file_gpu_lock.release()
                             return
+
+                        if _file_ms_locked:
+                            _file_ms_lock.release()
+                            _file_ms_locked = False
 
                     if _need_file_gpu:
                         _file_gpu_lock.release()
@@ -8559,7 +8586,9 @@ def _run_pipeline_video(job_id: str):
                     if not _step_convert(f, job, state):
                         return
 
-                _need_file_gpu = any(s in _GPU_STEPS for s in pre_steps + post_steps)
+                _non_ms_gpu_steps2 = _GPU_STEPS - {"music_separate"}
+                _need_file_gpu = any(s in _non_ms_gpu_steps2 for s in pre_steps + post_steps)
+                _has_file_ms2 = "music_separate" in (pre_steps + post_steps)
                 if _need_file_gpu:
                     _file_gpu_lock.acquire()
                 for step_key in pre_steps:
@@ -8627,6 +8656,15 @@ def _run_pipeline_video(job_id: str):
                                 with seg_lock:
                                     f.output_clips.append(final_wav)
 
+                    # Serialize music_separate at file level: only one file's BGM
+                    # separation at a time. Within the file, segments run in
+                    # parallel (up to 2 via _sem["music_separate"]).
+                    if "music_separate" in post_steps:
+                        _file_ms_lock.acquire()
+                        _file_ms_locked_std = True
+                    else:
+                        _file_ms_locked_std = False
+
                     # Use fresh executor to avoid deadlock with outer executor
                     with concurrent.futures.ThreadPoolExecutor(
                         max_workers=min(len(segments), 4)
@@ -8642,6 +8680,10 @@ def _run_pipeline_video(job_id: str):
                                 for fut in seg_futures:
                                     fut.cancel()
                                 break
+
+                    if _file_ms_locked_std:
+                        _file_ms_lock.release()
+                        _file_ms_locked_std = False
                 else:
                     # No duration splitting, run remaining steps on full WAV
                     for step_key in post_steps:
@@ -8657,6 +8699,8 @@ def _run_pipeline_video(job_id: str):
                         sem = _sem.get(step_key, threading.BoundedSemaphore(2))
                         is_gpu = step_key in _GPU_STEPS
                         try:
+                            if step_key == "music_separate":
+                                _file_ms_lock.acquire()
                             if is_gpu:
                                 with sem:
                                     with _sem["gpu"]:
@@ -8668,6 +8712,9 @@ def _run_pipeline_video(job_id: str):
                             f.steps.append({"step": step_key, "status": "error",
                                             "message": str(e)[:100]})
                             _update_pipeline_job_progress(job)
+                        finally:
+                            if step_key == "music_separate":
+                                _file_ms_lock.release()
                     if "cut" not in enabled_steps:
                         final_wav = state.get("wav", "")
                         if final_wav and os.path.exists(final_wav):

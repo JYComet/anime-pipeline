@@ -1628,20 +1628,20 @@ def _normalize_chinese_numbers(text: str) -> str:
 
 
 def _normalize_text_mfa(text: str) -> str:
-    """Normalize text for ASR comparison — strip punctuation, unify pronouns and numbers.
+    """Normalize text for ASR comparison — strip punctuation and whitespace, unify pronouns and numbers.
 
     Steps:
-      1. Strip Unicode punctuation (category P) + wave dash / fullwidth tilde
+      1. Strip Unicode punctuation / whitespace + wave dash / fullwidth tilde
       2. Unify third-person pronouns (他/她/它/祂/牠 → 他)
       3. Normalize Chinese numerals and fullwidth digits to Arabic digits
     """
     import unicodedata
 
-    # 1. Strip punctuation
+    # 1. Strip punctuation and whitespace
     cleaned = []
     for ch in text:
         cat = unicodedata.category(ch)
-        if cat.startswith("P") or ch in _MFA_PUNCT_SYMBOLS:
+        if cat.startswith("P") or cat.startswith("Z") or ch in _MFA_PUNCT_SYMBOLS:
             continue
         cleaned.append(ch)
     text = "".join(cleaned)
