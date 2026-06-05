@@ -10,8 +10,8 @@ import torch
 import threading
 import queue
 
-# Model pool (4 instances for ~6 GB VRAM total on 24 GB GPU)
-_POOL_SIZE = 4
+# Model pool (2 instances for ~3 GB VRAM total on 24 GB GPU)
+_POOL_SIZE = 2
 _model_pool = queue.Queue(maxsize=_POOL_SIZE)
 _pool_lock = threading.Lock()
 _pool_loaded = False

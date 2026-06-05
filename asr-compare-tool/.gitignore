@@ -1,0 +1,29 @@
+# Local config override (contains API keys)
+config.local.yaml
+
+# Output
+output/
+audio_input/*.wav
+audio_input/*.mp3
+audio_input/*.m4a
+audio_input/*.flac
+audio_input/*.aac
+audio_input/*.ogg
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs
+*.log
+
+# Models (large files — download separately)
+models/
+
+# FireRed ASR2 source (has its own repo)
+FireRedASR2S/
+
+# Temp
+.temp/
+*.tmp

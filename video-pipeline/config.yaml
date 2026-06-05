@@ -1,0 +1,50 @@
+# ============================================================
+# Video Pipeline — Configuration
+# ============================================================
+# 视频管线配置文件
+# 提取自 Anime Pipeline 原项目，保持设置一致
+# ============================================================
+
+# --- 路径设置 (Paths) ---
+paths:
+  input_dir: "./data/input"       # 输入文件夹，放置待处理的视频/音频文件
+  output_dir: "./data/output"     # 输出文件夹，处理后的人声文件存放处
+  temp_dir: "./data/temp"         # 临时文件夹，存放中间文件
+  log_dir: "./data/logs"          # 日志文件夹
+
+# --- 外部工具 (External Tools) ---
+# 如果 ffmpeg 已在系统 PATH 中，使用 "ffmpeg" 即可
+# 否则填写 ffmpeg 可执行文件的绝对路径
+tools:
+  ffmpeg: "ffmpeg"
+  ffprobe: "ffprobe"
+
+# --- 处理设置 (Processing Settings) ---
+processing:
+  segment_duration: 600           # 时长切分：每段秒数 (默认 600 = 10分钟)
+  keep_ends: false                # 是否保留首尾分段 (false = 去除片头片尾)
+  sample_rate: 32000              # 输出采样率 Hz (默认 32000 = 32kHz)
+  channels: 1                     # 输出声道数 (1 = 单声道, 2 = 立体声)
+
+# --- 模型实例池 (Model Instance Pool) ---
+# Demucs htdemucs_ft 每个实例约占用 1.5 GB 显存
+#   - 2 个实例 ≈ 3 GB VRAM (适合 8GB 显存显卡)
+#   - 4 个实例 ≈ 6 GB VRAM (适合 12GB+ 显存显卡)
+model_pool:
+  demucs_instances: 2             # 可选值: 2 或 4
+
+# --- 并行控制 (Concurrency) ---
+# 各步骤的最大并行数
+concurrency:
+  ffmpeg_max: 8                   # ffmpeg 全局最大并发数 (convert 步骤共用此信号量)
+  split_max: 6                    # 切分步骤最大并发数
+
+# --- 运行设备 (Device) ---
+device: "cuda"                    # cuda = GPU, cpu = CPU (BGM分离必须用GPU)
+
+# --- 日志设置 (Logging) ---
+logging:
+  level: "INFO"                   # DEBUG / INFO / WARNING / ERROR
+  file_log: true                  # 是否写入日志文件
+  file_log_level: "DEBUG"         # 文件日志级别 (建议 DEBUG 以记录详细信息)
+  max_log_files: 10               # 保留最近 N 个日志文件

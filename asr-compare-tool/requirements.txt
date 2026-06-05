@@ -1,0 +1,95 @@
+# =============================================================================
+# ASR Compare Tool — Complete Dependencies
+# =============================================================================
+#
+# ==== System Requirements (install BEFORE pip) =================================
+#
+#   Miniconda / Anaconda     # https://docs.conda.io/en/latest/miniconda.html
+#   Python >= 3.10           # (included in conda env)
+#   CUDA Toolkit 11.8 / 12.x # conda install -c nvidia cuda-toolkit
+#   NVIDIA Driver >= 470     # Required for GPU inference
+#   ffmpeg + ffprobe         # In PATH: choco install ffmpeg / apt install ffmpeg
+#   git                      # Optional: for cloning repo
+#
+# ==== Python Dependencies (GPU REQUIRED) ======================================
+#
+# IMPORTANT: This tool requires CUDA GPU. CPU-only PyTorch will NOT work.
+# The --extra-index-url below is MANDATORY to get CUDA-enabled PyTorch wheels.
+#
+# Manual install (recommended: use deploy.py instead):
+#   pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu118
+#
+# With Tsinghua mirror + CUDA 11.8:
+#   pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple \
+#       --extra-index-url https://download.pytorch.org/whl/cu118
+#
+# CUDA 12.1+:
+#   pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu121
+#
+# ==== pip Mirror Configuration (optional, for faster downloads in China) =======
+#
+# Temporary (one-time):
+#   pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+#
+# Permanent (set globally):
+#   pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+#   pip config set global.extra-index-url https://download.pytorch.org/whl/cu118
+#
+# Other mirrors:
+#   Aliyun:  https://mirrors.aliyun.com/pypi/simple/
+#   USTC:    https://pypi.mirrors.ustc.edu.cn/simple/
+#   Tencent: https://mirrors.cloud.tencent.com/pypi/simple/
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 1. Our tool core
+# ---------------------------------------------------------------------------
+numpy>=1.24.0,<3.0.0        # audio array ops, FireRed VAD/ASR feature extraction
+soundfile>=0.12.0            # audio file I/O (WAV read/write)
+PyYAML>=6.0                  # config.yaml parsing
+tqdm>=4.65.0                 # progress bars
+
+# ---------------------------------------------------------------------------
+# 2. Deep learning runtime (FireRed ASR2 + Silero VAD)
+# ---------------------------------------------------------------------------
+torch>=2.0.0                 # PyTorch core (FireRed models, Silero VAD tensor ops)
+torchaudio>=2.0.0            # PyTorch audio I/O & transforms (FireRed ASR AED model)
+
+# ---------------------------------------------------------------------------
+# 3. Qwen3-ASR API (DashScope / Alibaba Cloud Bailian)
+# ---------------------------------------------------------------------------
+dashscope>=1.20.0            # Alibaba Cloud DashScope SDK (Qwen3-ASR-Flash sync API)
+
+# ---------------------------------------------------------------------------
+# 4. Silero VAD (voice activity detection)
+# ---------------------------------------------------------------------------
+silero-vad>=5.0              # Silero VAD package (get_speech_timestamps, OnnxWrapper)
+onnxruntime>=1.15.0          # ONNX Runtime (Silero VAD ONNX model inference)
+
+# ---------------------------------------------------------------------------
+# 5. FireRed ASR2 local model (bundled source: FireRedASR2S/)
+# ---------------------------------------------------------------------------
+transformers>=4.40.0         # HuggingFace Transformers (BERT tokenizer, LLM backbone)
+cn2an>=0.5.22                # Chinese numerals <-> Arabic conversion (WER evaluation)
+kaldiio>=2.18.0              # Kaldi I/O library (feature file read/write)
+kaldi_native_fbank>=1.15     # Kaldi native FBank feature extraction
+sentencepiece>=0.1.99        # SentencePiece tokenizer (FireRed AED tokenizer)
+textgrid>=1.6                # Praat TextGrid I/O (SRT output in FireRed CLI)
+peft>=0.13.0                 # LoRA / PEFT adapters (FireRed LLM model optional)
+
+# ---------------------------------------------------------------------------
+# 6. TensorRT accelerator (optional — only for firered-trt mode)
+# ---------------------------------------------------------------------------
+# Install with:
+#   pip install tensorrt_cu12_bindings tensorrt_cu12_libs tensorrt \
+#       --extra-index-url https://pypi.nvidia.com --only-binary :all:
+#
+# For CUDA 11.x, replace cu12 with cu11.
+# Runtime deps (required for firered-trt inference):
+#   tensorrt_cu12_bindings    # TensorRT Python bindings
+#   tensorrt_cu12_libs        # TensorRT runtime libraries
+#   tensorrt                  # TensorRT meta-package
+#
+# Export deps (only needed to build the TRT engine once):
+#   onnx                      # PyTorch -> ONNX export
+

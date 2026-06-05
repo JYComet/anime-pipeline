@@ -7847,10 +7847,10 @@ def _run_pipeline_video(job_id: str):
     # cross-file pipelining: as File A advances from music_separate → enhance,
     # File B takes over the music_separate slot, keeping all models busy.
     _sem = {
-        "gpu":      threading.BoundedSemaphore(6),  # global GPU cap: 4 MS + 1 EN + 1 ASR
+        "gpu":      threading.BoundedSemaphore(4),  # global GPU cap: 2 MS + 1 EN + 1 ASR
         "ffmpeg":   threading.BoundedSemaphore(8),  # global ffmpeg cap
         "convert":  threading.BoundedSemaphore(6),
-        "music_separate": threading.BoundedSemaphore(4),  # 4x Demucs instances (FP32)
+        "music_separate": threading.BoundedSemaphore(2),  # 2x Demucs instances (~3 GB model + working mem)
         "enhance":  threading.BoundedSemaphore(1),  # singleton ClearVoice SE
         "super_resolve": threading.BoundedSemaphore(1),  # singleton ClearVoice SR
         "asr":      threading.BoundedSemaphore(1),  # singleton Qwen3-ASR (3.4 GB)

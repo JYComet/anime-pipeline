@@ -1,0 +1,72 @@
+# =============================================================================
+# ASR Compare Tool - Configuration
+# =============================================================================
+# Copy this file and rename to config.local.yaml to override settings locally.
+# config.local.yaml is git-ignored and takes precedence over this file.
+
+# --- API Settings (Qwen3-ASR via DashScope / Alibaba Cloud Bailian) ---
+# Documentation: https://help.aliyun.com/document_detail/2712538.html
+#
+# To get an API Key:
+#   1. Log in to https://bailian.console.aliyun.com/
+#   2. Enable "Voice Recognition" (语音识别) service
+#   3. Go to API Key management → Create Key
+#   4. Copy the key here
+api:
+  # Required: Your DashScope API Key (starts with "sk-")
+  dashscope_api_key: "sk-20c71487b9b2440fa797c1d7e1b42af0"
+
+  # API endpoint. Default is Alibaba Cloud public endpoint.
+  # Change this if using a private deployment or Alibaba Cloud intranet.
+  dashscope_api_base: "https://dashscope.aliyuncs.com"
+
+  # Model name for Qwen3-ASR via API.
+  # Options: qwen3-asr-flash (fast, recommended) / qwen3-asr (full)
+  api_model: "qwen3-asr-flash"
+
+  # Request timeout in seconds. API calls are synchronous.
+  # Increase for very long audio segments (>30s).
+  request_timeout: 120
+
+  # Maximum retries on transient API errors (network timeout, rate limit).
+  # Each retry waits 2s × (attempt + 1) before retrying.
+  max_retries: 3
+
+# --- Paths ---
+paths:
+  # Input: directory containing audio files to process (.wav, .mp3, .m4a, .flac, etc.)
+  audio_input_dir: "./audio_input"
+  # Output: directory where results are saved
+  output_dir: "./output"
+  # FireRed ASR2 source code path (contains fireredasr2s/ package)
+  firered_source_path: "./FireRedASR2S"
+  # FireRed ASR2 pretrained models directory
+  firered_models_dir: "./models/firered_asr2"
+  # (Optional) FireRed TensorRT engine directory. If set and encoder.plan exists,
+  # the TRT-accelerated encoder is used automatically (2-3x encoder speedup).
+  # Run: python export_firered_trt.py first to build the engine.
+  firered_trt_engine_dir: "./models/firered_asr2/FireRedASR2-AED-TRT"
+
+# --- ASR Settings ---
+asr:
+  language: "zh"                  # Language code: zh, en, ja, auto
+  device: "cuda"                  # only CUDA GPU is supported
+  hotwords: ""                    # Optional context words for better recognition
+
+# --- VAD Settings ---
+vad:
+  engine: "silero"                # silero (fast CPU) or none (fixed-interval split)
+  segment_min_s: 9.0              # Minimum segment duration in seconds
+  segment_max_s: 16.0             # Maximum segment duration in seconds
+
+# --- Comparison Settings ---
+compare:
+  match_threshold: 90             # Match rate below this % = flagged for deletion
+  filter_english: true            # Treat English in Chinese output as hallucination
+  delete_below_threshold: true    # Auto-delete audios with match rate below threshold
+  keep_segments: true             # Keep segment-level WAV + TXT files in output
+
+# --- Logging ---
+logging:
+  level: "INFO"                   # DEBUG, INFO, WARNING, ERROR
+  file: "asr_compare.log"         # Log file path (relative to project root)

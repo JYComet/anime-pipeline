@@ -169,14 +169,15 @@ _USER_PATH_KEYS = {
 
 # Non-path config keys stored in settings.json (model/language selections etc.)
 _CONFIG_KEYS = {
-    'ASR_DEFAULT_MODEL': 'qwen3-asr',
+    'ASR_DEFAULT_MODEL': 'firered-asr2',
     'ASR_DEFAULT_LANGUAGE': 'zh',
-    'ASR_COMPARE_MODEL_A': 'qwen3-asr',
-    'ASR_COMPARE_MODEL_B': 'firered-asr2',
+    'ASR_COMPARE_MODEL_A': 'firered-asr2',
+    'ASR_COMPARE_MODEL_B': 'qwen3-asr',
     'ASR_DEFAULT_HOTWORDS': '',
     'ASR_COMPARE_MATCH_THRESHOLD': '90',  # flag when match rate < this %
     'FIRERED_ASR2_MODELS_DIR': os.path.join(DATA_DIR, "models", "firered_asr2"),
     'FIRERED_ASR2S_PATH': os.path.join(COMICUT_ROOT, "FireRedASR2S"),
+    'FIRERED_TRT_ENGINE_DIR': os.path.join(DATA_DIR, "models", "firered_asr2", "FireRedASR2-AED-TRT"),
     'DASHSCOPE_API_KEY': '',
     'DASHSCOPE_API_BASE': 'https://dashscope.aliyuncs.com',
     'MFA_PYTHON': sys.executable,
@@ -424,6 +425,14 @@ ASR_MODELS = {
         "abbr": "firered",
         "framework": "firered",
     },
+    "firered-asr2-trt": {
+        "name": "FireRedASR2-AED (TensorRT)",
+        "model_id": "",
+        "description": "FireRedASR2 AED 模型 + TensorRT 加速编码器，中/英文",
+        "languages": ["auto", "zh", "en"],
+        "abbr": "firered-trt",
+        "framework": "firered-trt",
+    },
     "sensevoice-small": {
         "name": "SenseVoiceSmall",
         "model_id": "iic/SenseVoiceSmall",
@@ -484,6 +493,7 @@ ASR_MODELS = {
 
 COMPARE_MODELS = [
     "qwen3-asr", "cohere-transcribe", "whisper-base", "firered-asr2",
+    "firered-asr2-trt",
     "sensevoice-small", "paraformer-large",
     "qwen3-asr-api", "fun-asr-api", "paraformer-v2-api", "paraformer-8k-api",
 ]

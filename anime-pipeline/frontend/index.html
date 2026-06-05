@@ -1942,6 +1942,13 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px; }
           </label>
           <span id="pv-selected-count" style="font-size:13px;color:var(--text2);"></span>
           <span id="pv-total-files" style="font-size:12px;color:var(--text2);"></span>
+          <span style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text2);margin-left:8px;">
+            取消
+            <input type="number" id="pv-deselect-from" min="1" placeholder="起" style="width:44px;padding:2px 4px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);">
+            <span>~</span>
+            <input type="number" id="pv-deselect-to" min="1" placeholder="止" style="width:44px;padding:2px 4px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);">
+            <button class="btn btn-secondary" onclick="pvDeselectRange()" style="font-size:10px;padding:2px 8px;">取消勾选</button>
+          </span>
         </div>
         <div style="display:flex;gap:6px;">
           <button id="btn-pv-start" class="btn btn-primary" onclick="pvStartPipeline()">开始处理</button>
@@ -12547,6 +12554,24 @@ function pvToggleSelectAll() {
     _pvSelected = {};
   }
   pvRenderFileList();
+}
+
+function pvDeselectRange() {
+  var fromEl = document.getElementById('pv-deselect-from');
+  var toEl = document.getElementById('pv-deselect-to');
+  var from = parseInt(fromEl.value);
+  var to = parseInt(toEl.value);
+  if (isNaN(from) || isNaN(to) || from < 1 || to < 1) {
+    toast('请输入有效的起始和结束编号（从 1 开始）', 'error'); return;
+  }
+  if (from > to) { var t = from; from = to; to = t; }
+  if (to > _pvFiles.length) to = _pvFiles.length;
+  for (var i = from - 1; i < to; i++) {
+    delete _pvSelected[_pvFiles[i].path];
+  }
+  pvRenderFileList();
+  fromEl.value = ''; toEl.value = '';
+  toast('已取消勾选 #' + from + ' ~ #' + to + ' 共 ' + (to - from + 1) + ' 个', 'info');
 }
 
 function pvPreviewFile(event, path) {

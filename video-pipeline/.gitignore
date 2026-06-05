@@ -1,0 +1,33 @@
+# Virtual environment
+venv/
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Data directories (runtime)
+data/input/*
+data/output/*
+data/temp/*
+!data/input/.gitkeep
+!data/output/.gitkeep
+!data/temp/.gitkeep
+
+# Logs
+data/logs/*.log
+!data/logs/.gitkeep
+
+# Torch Hub cache (model files — optionally tracked)
+checkpoints/hub/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
